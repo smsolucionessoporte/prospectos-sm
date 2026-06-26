@@ -12,7 +12,7 @@ router.get('/login', (req, res) => {
     <div class="login-wrap">
       <div class="login-card">
         <div class="login-header">
-          <div class="login-logo">vP</div>
+          <div class="login-logo">SM</div>
           <h1 class="login-title">SM Soluciones</h1>
           <p class="login-sub">Gestión de prospectos SM</p>
         </div>
