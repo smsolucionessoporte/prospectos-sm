@@ -85,7 +85,7 @@ bcrypt.hash('contraseña', 10).then(console.log);
 ## Estructura del proyecto
 
 ```
-vplus-prospectos/
+sm-prospectos/
 ├── src/
 │   ├── index.js              # Entry point Express
 │   ├── db.js                 # Conexión PostgreSQL
