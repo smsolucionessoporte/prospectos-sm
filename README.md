@@ -1,6 +1,6 @@
-# vPlus Prospectos — SM Soluciones
+# SM Prospectos — SM Soluciones
 
-Sistema de gestión de prospectos para el proceso comercial de SM Soluciones / vPlus.
+Sistema de gestión de prospectos para el proceso comercial de SM Soluciones / SM.
 
 ## Flujo de estados
 
@@ -62,10 +62,10 @@ Entrá como admin y creá los usuarios de cada área desde la consola de Railway
 ```sql
 -- Reemplazá el hash con bcrypt de la contraseña
 INSERT INTO usuarios (nombre, email, password_hash, rol)
-VALUES ('María García', 'maria@smsoluciones.com', '<hash>', 'administrativa');
+VALUES ('María García', 'maria@SMsoluciones.com', '<hash>', 'administrativa');
 
 INSERT INTO usuarios (nombre, email, password_hash, rol)
-VALUES ('Carlos Pérez', 'carlos@smsoluciones.com', '<hash>', 'soporte');
+VALUES ('Carlos Pérez', 'carlos@SMsoluciones.com', '<hash>', 'soporte');
 ```
 
 Para generar el hash desde Node:
@@ -85,7 +85,7 @@ bcrypt.hash('contraseña', 10).then(console.log);
 ## Estructura del proyecto
 
 ```
-vplus-prospectos/
+SM-prospectos/
 ├── src/
 │   ├── index.js              # Entry point Express
 │   ├── db.js                 # Conexión PostgreSQL

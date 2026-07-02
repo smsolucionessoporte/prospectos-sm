@@ -199,7 +199,7 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
       <div class="detail-section empty-section">
         <i class="ti ti-clipboard"></i>
         <span>El relevamiento post-demo aún no fue cargado.</span>
-        ${(u.rol === 'soporte' || u.rol === 'admin') ? `<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary btn-sm"><i class="ti ti-plus"></i> Cargar ahora</a>` : ''}
+        ${(u.rol === 'soporte' || u.rol === 'admin') ? `<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary btn-SM"><i class="ti ti-plus"></i> Cargar ahora</a>` : ''}
       </div>
     ` : '');
 

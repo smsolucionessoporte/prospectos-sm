@@ -139,7 +139,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 .btn-ghost     { background: transparent; color: var(--text-2); }
 .btn-ghost:hover { background: var(--gray-bg); color: var(--text); }
 .btn-block     { width: 100%; justify-content: center; }
-.btn-sm        { padding: 5px 10px; font-size: 12px; }
+.btn-SM {
+  padding: 5px 10px;
+  font-size: 12px;
+}
 
 /* ── Forms ────────────────────────────────────────────────────────────────── */
 .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow); }

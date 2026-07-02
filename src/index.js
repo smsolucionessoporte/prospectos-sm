@@ -16,7 +16,7 @@ app.use(express.static('public'));
 
 app.use(session({
   store: new pgSession({ pool, tableName: 'session' }),
-  secret: process.env.SESSION_SECRET || 'vplus-sm-secret-local',
+  secret: process.env.SESSION_SECRET || 'SM-SM-secret-local',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -55,8 +55,8 @@ async function seedAdminIfNeeded() {
     await pool.query(`
       INSERT INTO usuarios (nombre, email, password_hash, rol)
       VALUES ('Administrador', $1, $2, 'admin')
-    `, [process.env.ADMIN_EMAIL || 'admin@smsoluciones.com', hash]);
-    console.log('✓ Usuario admin creado:', process.env.ADMIN_EMAIL || 'admin@smsoluciones.com');
+    `, [process.env.ADMIN_EMAIL || 'admin@SMsoluciones.com', hash]);
+    console.log('✓ Usuario admin creado:', process.env.ADMIN_EMAIL || 'admin@SMsoluciones.com');
     console.log('  Contraseña:', process.env.ADMIN_PASSWORD || 'admin123');
     console.log('  ⚠️  Cambiá la contraseña después del primer login!');
   }
