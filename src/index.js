@@ -8,7 +8,6 @@ const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
 
 const app = express();
-app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 app.use(express.urlencoded({ extended: true }));
@@ -17,7 +16,7 @@ app.use(express.static('public'));
 
 app.use(session({
   store: new pgSession({ pool, tableName: 'session' }),
-  secret: process.env.SESSION_SECRET || 'sm-secret-local',
+  secret: process.env.SESSION_SECRET || 'vplus-sm-secret-local',
   resave: false,
   saveUninitialized: false,
   cookie: {

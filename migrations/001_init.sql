@@ -1,4 +1,4 @@
--- Migración inicial: Sistema de prospectos SM Soluciones
+-- Migración inicial: Sistema de prospectos vPlus / SM Soluciones
 -- Ejecutar una vez al iniciar el proyecto en Railway
 
 -- Tabla de usuarios del sistema (Administrativa y Soporte)

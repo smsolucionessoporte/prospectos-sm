@@ -1,6 +1,6 @@
-# Prospectos — SM Soluciones
+# vPlus Prospectos — SM Soluciones
 
-Sistema de gestión de prospectos para el proceso comercial de SM Soluciones.
+Sistema de gestión de prospectos para el proceso comercial de SM Soluciones / vPlus.
 
 ## Flujo de estados
 
@@ -85,7 +85,7 @@ bcrypt.hash('contraseña', 10).then(console.log);
 ## Estructura del proyecto
 
 ```
-sm-prospectos/
+vplus-prospectos/
 ├── src/
 │   ├── index.js              # Entry point Express
 │   ├── db.js                 # Conexión PostgreSQL

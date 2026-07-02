@@ -12,9 +12,9 @@ router.get('/login', (req, res) => {
     <div class="login-wrap">
       <div class="login-card">
         <div class="login-header">
-          <div class="login-logo">SM</div>
+          <div class="login-logo">vP</div>
           <h1 class="login-title">SM Soluciones</h1>
-          <p class="login-sub">Gestión de prospectos SM</p>
+          <p class="login-sub">Gestión de prospectos vPlus</p>
         </div>
         ${error ? `<div class="alert alert-error"><i class="ti ti-alert-circle"></i> ${error}</div>` : ''}
         <form method="POST" action="/login">

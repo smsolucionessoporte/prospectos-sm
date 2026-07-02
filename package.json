@@ -1,5 +1,5 @@
 {
-  "name": "sm-prospectos",
+  "name": "vplus-prospectos",
   "version": "1.0.0",
   "description": "Sistema de gestión de prospectos para SM Soluciones",
   "main": "src/index.js",
