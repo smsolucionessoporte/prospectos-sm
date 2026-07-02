@@ -46,13 +46,9 @@ router.post('/login', async (req, res) => {
     if (!user || !await bcrypt.compare(password, user.password_hash)) {
       return res.redirect('/login?error=Email+o+contraseña+incorrectos');
     }
-    req.session.usuario = {
-      id: user.id,
-      nombre: user.nombre,
-      email: user.email,
-      rol: user.rol,
-    };
-    res.redirect(next || '/panel');
+req.session.usuario = { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol };
+const destino = (next && next.startsWith('/')) ? next : '/panel';
+req.session.save(() => res.redirect(destino));
   } catch (err) {
     console.error(err);
     res.redirect('/login?error=Error+interno,+intentá+de+nuevo');
