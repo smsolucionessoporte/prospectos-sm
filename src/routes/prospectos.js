@@ -44,14 +44,14 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
               <input type="text" id="nombre_negocio" name="nombre_negocio" required placeholder="Ej: Dietética La Vida">
             </div>
             <div class="field">
-              <label for="contacto">Responsable / contacto <span class="req">*</span></label>
-              <input type="text" id="contacto" name="contacto" required placeholder="Nombre de la persona">
+              <label for="contacto">Responsable / contacto</label>
+              <input type="text" id="contacto" name="contacto" placeholder="Nombre de la persona">
             </div>
           </div>
           <div class="grid2">
             <div class="field">
-              <label for="telefono">Teléfono</label>
-              <input type="text" id="telefono" name="telefono" placeholder="+54 11 ...">
+              <label for="telefono">Teléfono <span class="req">*</span></label>
+              <input type="text" id="telefono" name="telefono" required placeholder="+54 11 ...">
             </div>
             <div class="field">
               <label for="email">Email</label>
@@ -63,11 +63,11 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
         <div class="form-section">
           <div class="section-title-row">
             <i class="ti ti-building-store"></i>
-            <span>Rubro</span>
+            <span>Rubro <span class="req">*</span></span>
           </div>
           <div class="chips-group" id="chips-rubro">
             ${['Dietética','Almacén / minimercado','Carnicería','Fiambrería','Mayorista','Otro'].map(r =>
-              `<label class="chip-label"><input type="radio" name="rubro" value="${r}"><span class="chip">${r}</span></label>`
+              `<label class="chip-label"><input type="radio" name="rubro" value="${r}" required><span class="chip">${r}</span></label>`
             ).join('')}
           </div>
           <div class="field" style="margin-top:10px">
@@ -78,12 +78,18 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
 
         <div class="form-section">
           <div class="section-title-row">
-            <i class="ti ti-note"></i>
-            <span>Notas iniciales</span>
+            <i class="ti ti-player-play"></i>
+            <span>Próxima acción</span>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label for="proxima_accion">¿Qué sigue?</label>
+              <input type="text" id="proxima_accion" name="proxima_accion" placeholder="Ej: Llamar el lunes, enviar info...">
+            </div>
           </div>
           <div class="field">
-            <label for="notas_administrativas">Observaciones o contexto del primer contacto</label>
-            <textarea id="notas_administrativas" name="notas_administrativas" placeholder="Cómo llegó el contacto, qué mencionó, urgencia..."></textarea>
+            <label for="nota_prospecto">Nota</label>
+            <textarea id="nota_prospecto" name="nota_prospecto" placeholder="Contexto del primer contacto, observaciones..."></textarea>
           </div>
         </div>
 
@@ -95,16 +101,23 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
         </div>
       </form>
     </div>
+    <script>
+    document.querySelectorAll('.chip-label input').forEach(input => {
+      function sync() { input.nextElementSibling.classList.toggle('active', input.checked); }
+      input.addEventListener('change', sync);
+      sync();
+    });
+    </script>
   `, req));
 });
 
 router.post('/prospectos', requireAuth, async (req, res) => {
-  const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas } = req.body;
+  const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, proxima_accion, nota_prospecto } = req.body;
   try {
     const result = await pool.query(`
-      INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, creado_por)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id
-    `, [nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, req.session.usuario.id]);
+      INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, proxima_accion, nota_prospecto, creado_por)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id
+    `, [nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, proxima_accion, nota_prospecto, req.session.usuario.id]);
 
     await pool.query(`
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
@@ -170,6 +183,9 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
           <button class="btn btn-danger"><i class="ti ti-x"></i> Marcar como perdido</button>
         </form>
       `);
+      if (u.rol === 'admin') {
+      acciones.push(`<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`);
+    }
     }
 
     // Sección de relevamiento (si existe)
@@ -565,6 +581,244 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).send('Error al cambiar estado');
+  }
+});
+
+// ─── EDITAR PROSPECTO (Admin) ─────────────────────────────────────────────────
+router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).send('No encontrado');
+  const p = rows[0];
+
+  const MODULOS = ['Productos / stock','Ventas / POS','Compras','Cuentas corrientes','Facturación electrónica','Promociones por cantidad','Tienda online','Green Points (fidelización)','Reportes / contabilidad'];
+  const EQUIPOS = ['Balanza con impresora','Impresora de tickets','Lectora de código de barras','Multi-PC / red local','Tablet / móvil','Cajón de dinero'];
+  const ESTADOS_OPTS = ['prospecto','demo_coordinada','demo_realizada','propuesta_enviada','confirmado','perdido'];
+
+  res.send(layout('Editar prospecto', `
+    <div class="page-header">
+      <div>
+        <a href="/prospectos/${p.id}" class="back-link"><i class="ti ti-arrow-left"></i> Volver</a>
+        <h1 class="page-title">Editar: ${esc(p.nombre_negocio)}</h1>
+        <p class="page-sub">Edición completa — Admin</p>
+      </div>
+    </div>
+    <div class="form-card">
+      <form method="POST" action="/prospectos/${p.id}/editar">
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-user"></i><span>Datos del prospecto</span></div>
+          <div class="grid2">
+            <div class="field">
+              <label>Nombre / negocio <span class="req">*</span></label>
+              <input type="text" name="nombre_negocio" value="${esc(p.nombre_negocio)}" required>
+            </div>
+            <div class="field">
+              <label>Contacto</label>
+              <input type="text" name="contacto" value="${esc(p.contacto||'')}">
+            </div>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label>Teléfono <span class="req">*</span></label>
+              <input type="text" name="telefono" value="${esc(p.telefono||'')}" required>
+            </div>
+            <div class="field">
+              <label>Email</label>
+              <input type="email" name="email" value="${esc(p.email||'')}">
+            </div>
+          </div>
+          <div class="field">
+            <label>Notas administrativas</label>
+            <textarea name="notas_administrativas">${esc(p.notas_administrativas||'')}</textarea>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-building-store"></i><span>Rubro</span></div>
+          <div class="chips-group">
+            ${['Dietética','Almacén / minimercado','Carnicería','Fiambrería','Mayorista','Otro'].map(r =>
+              `<label class="chip-label"><input type="radio" name="rubro" value="${r}" ${p.rubro===r?'checked':''}><span class="chip">${r}</span></label>`
+            ).join('')}
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label>Especificar si es otro</label>
+            <input type="text" name="rubro_otro" value="${esc(p.rubro_otro||'')}">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-player-play"></i><span>Próxima acción</span></div>
+          <div class="field">
+            <label>¿Qué sigue?</label>
+            <input type="text" name="proxima_accion" value="${esc(p.proxima_accion||'')}" placeholder="Ej: Llamar el lunes...">
+          </div>
+          <div class="field">
+            <label>Nota</label>
+            <textarea name="nota_prospecto">${esc(p.nota_prospecto||'')}</textarea>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-flag"></i><span>Estado</span></div>
+          <div class="field">
+            <label>Estado actual</label>
+            <select name="estado">
+              ${ESTADOS_OPTS.map(e => `<option value="${e}" ${p.estado===e?'selected':''}>${e}</option>`).join('')}
+            </select>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label>Fecha demo</label>
+              <input type="datetime-local" name="demo_fecha" value="${p.demo_fecha ? new Date(p.demo_fecha).toISOString().slice(0,16) : ''}">
+            </div>
+            <div class="field">
+              <label>Nivel de interés</label>
+              <select name="nivel_interes">
+                <option value="">—</option>
+                <option value="alto" ${p.nivel_interes==='alto'?'selected':''}>🔥 Alto</option>
+                <option value="medio" ${p.nivel_interes==='medio'?'selected':''}>👀 Medio</option>
+                <option value="bajo" ${p.nivel_interes==='bajo'?'selected':''}>❄️ Bajo</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-star"></i><span>Módulos de interés</span></div>
+          <div class="chips-group multi">
+            ${MODULOS.map(m =>
+              `<label class="chip-label"><input type="checkbox" name="modulos" value="${m}" ${(p.modulos||[]).includes(m)?'checked':''}><span class="chip">${m}</span></label>`
+            ).join('')}
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-device-desktop"></i><span>Sistema actual</span></div>
+          <div class="grid2">
+            <div class="field">
+              <label>Sistema que usa hoy</label>
+              <input type="text" name="sistema_actual" value="${esc(p.sistema_actual||'')}">
+            </div>
+            <div class="field">
+              <label>Hace cuánto lo usa</label>
+              <input type="text" name="tiempo_sistema" value="${esc(p.tiempo_sistema||'')}">
+            </div>
+          </div>
+          <div class="field">
+            <label>Problema con el sistema actual</label>
+            <textarea name="problema_sistema">${esc(p.problema_sistema||'')}</textarea>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-adjustments"></i><span>Necesidades y volumen</span></div>
+          <div class="field">
+            <label>Necesidades especiales</label>
+            <textarea name="necesidades">${esc(p.necesidades||'')}</textarea>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label>Cant. de productos</label>
+              <input type="text" name="cant_productos" value="${esc(p.cant_productos||'')}">
+            </div>
+            <div class="field">
+              <label>Volumen ventas diarias</label>
+              <input type="text" name="cant_ventas" value="${esc(p.cant_ventas||'')}">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-tools"></i><span>Equipamiento</span></div>
+          <div class="chips-group multi">
+            ${EQUIPOS.map(e =>
+              `<label class="chip-label"><input type="checkbox" name="equipamiento" value="${e}" ${(p.equipamiento||[]).includes(e)?'checked':''}><span class="chip">${e}</span></label>`
+            ).join('')}
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label>Observaciones equipamiento</label>
+            <input type="text" name="equip_observaciones" value="${esc(p.equip_observaciones||'')}">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row"><i class="ti ti-clipboard-check"></i><span>Cierre</span></div>
+          <div class="field">
+            <label>Próximos pasos acordados</label>
+            <textarea name="proximos_pasos">${esc(p.proximos_pasos||'')}</textarea>
+          </div>
+          <div class="field">
+            <label>Observaciones generales</label>
+            <textarea name="obs_generales">${esc(p.obs_generales||'')}</textarea>
+          </div>
+          <div class="field">
+            <label>Condiciones comerciales</label>
+            <textarea name="condiciones_comerciales">${esc(p.condiciones_comerciales||'')}</textarea>
+          </div>
+          <div class="field">
+            <label>Motivo de pérdida</label>
+            <input type="text" name="motivo_perdida" value="${esc(p.motivo_perdida||'')}">
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <a href="/prospectos/${p.id}" class="btn btn-ghost">Cancelar</a>
+          <button type="submit" class="btn btn-primary"><i class="ti ti-device-floppy"></i> Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+    <script>
+    document.querySelectorAll('.chip-label input').forEach(input => {
+      function sync() {
+        const chip = input.nextElementSibling;
+        chip.classList.toggle('active', input.checked);
+      }
+      input.addEventListener('change', () => {
+        if (input.type === 'radio') {
+          document.querySelectorAll(\`input[name="\${input.name}"]\`).forEach(i => i.nextElementSibling.classList.remove('active'));
+        }
+        sync();
+      });
+      sync();
+    });
+    </script>
+  `, req));
+});
+
+router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
+  const b = req.body;
+  const modulos = Array.isArray(b.modulos) ? b.modulos : (b.modulos ? [b.modulos] : []);
+  const equipamiento = Array.isArray(b.equipamiento) ? b.equipamiento : (b.equipamiento ? [b.equipamiento] : []);
+  try {
+    await pool.query(`
+      UPDATE prospectos SET
+        nombre_negocio=$1, contacto=$2, telefono=$3, email=$4,
+        rubro=$5, rubro_otro=$6, notas_administrativas=$7,
+        proxima_accion=$8, nota_prospecto=$9,
+        estado=$10, demo_fecha=$11, nivel_interes=$12,
+        modulos=$13, sistema_actual=$14, tiempo_sistema=$15,
+        problema_sistema=$16, necesidades=$17, cant_productos=$18, cant_ventas=$19,
+        equipamiento=$20, equip_observaciones=$21,
+        proximos_pasos=$22, obs_generales=$23,
+        condiciones_comerciales=$24, motivo_perdida=$25,
+        actualizado_en=NOW()
+      WHERE id=$26
+    `, [
+      b.nombre_negocio, b.contacto, b.telefono, b.email,
+      b.rubro, b.rubro_otro, b.notas_administrativas,
+      b.proxima_accion, b.nota_prospecto,
+      b.estado, b.demo_fecha || null, b.nivel_interes || null,
+      modulos, b.sistema_actual, b.tiempo_sistema,
+      b.problema_sistema, b.necesidades, b.cant_productos, b.cant_ventas,
+      equipamiento, b.equip_observaciones,
+      b.proximos_pasos, b.obs_generales,
+      b.condiciones_comerciales, b.motivo_perdida,
+      req.params.id
+    ]);
+    res.redirect('/prospectos/' + req.params.id);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error al guardar');
   }
 });
 

@@ -71,9 +71,10 @@ router.get('/panel', requireAuth, async (req, res) => {
       const fecha = new Date(p.creado_en).toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'2-digit'});
       return `
         <tr onclick="location.href='/prospectos/${p.id}'" class="row-link">
-          <td>
+<td>
             <div class="prospect-name">${esc(p.nombre_negocio)}</div>
-            <div class="prospect-contact">${esc(p.contacto)}</div>
+            <div class="prospect-contact">${esc(p.contacto || '—')}</div>
+            ${p.proxima_accion ? `<div class="prospect-next"><i class="ti ti-player-play"></i> ${esc(p.proxima_accion)}</div>` : ''}
           </td>
           <td>${esc(p.rubro || '—')}</td>
           <td><span class="badge-estado ${est.color}">${est.label}</span></td>
@@ -81,9 +82,10 @@ router.get('/panel', requireAuth, async (req, res) => {
           <td class="text-muted">${esc(p.creado_por_nombre || '—')}</td>
           <td class="text-muted">${fecha}</td>
           <td>
-            <div class="row-actions" onclick="event.stopPropagation()">
+     <div class="row-actions" onclick="event.stopPropagation()">
               <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle"><i class="ti ti-eye"></i></a>
               ${p.estado === 'prospecto' ? `<a href="/prospectos/${p.id}/demo" class="btn-icon" title="Cargar demo"><i class="ti ti-presentation"></i></a>` : ''}
+              ${req.session.usuario.rol === 'admin' ? `<a href="/prospectos/${p.id}/editar" class="btn-icon" title="Editar"><i class="ti ti-pencil"></i></a>` : ''}
             </div>
           </td>
         </tr>

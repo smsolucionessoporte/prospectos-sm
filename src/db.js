@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS prospectos (
   condiciones_comerciales TEXT,
   fecha_confirmacion TIMESTAMP,
   notas_administrativas TEXT
+  
 );
 
 CREATE TABLE IF NOT EXISTS historial_estados (
@@ -74,6 +75,8 @@ CREATE TABLE IF NOT EXISTS session (
 CREATE INDEX IF NOT EXISTS IDX_session_expire ON session (expire);
 CREATE INDEX IF NOT EXISTS idx_prospectos_estado ON prospectos(estado);
 CREATE INDEX IF NOT EXISTS idx_prospectos_creado_en ON prospectos(creado_en DESC);
+ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS proxima_accion VARCHAR(255);
+ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS nota_prospecto TEXT;
 `;
 
 async function runMigrations() {
