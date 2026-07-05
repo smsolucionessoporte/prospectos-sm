@@ -581,14 +581,26 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
       VALUES ($1,$2,$3,$4,$5)
     `, [req.params.id, estadoAnterior, estado, req.session.usuario.id, nota || null]);
 
-    // ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
+// ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
+    console.log('DEBUG estado:', estado, '| demo_fecha:', prospecto.demo_fecha, '| demo_responsable:', prospecto.demo_responsable);
     if (estado === 'confirmado' && prospecto.demo_fecha) {
       const zoomEmail = AGENTE_ZOOM[prospecto.demo_responsable];
+      console.log('DEBUG zoomEmail encontrado:', zoomEmail);
       if (zoomEmail) {
-        const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${prospecto.nombre_negocio}`, prospecto.demo_fecha);
-        await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
-        await enviarPorChatwoot(prospecto.telefono, `¡Reunión confirmada! 🎥\n${joinUrl}\nFecha: ${prospecto.demo_fecha}`);
+        try {
+          const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${prospecto.nombre_negocio}`, prospecto.demo_fecha);
+          console.log('DEBUG reunión creada:', joinUrl);
+          await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
+          const enviado = await enviarPorChatwoot(prospecto.telefono, `¡Reunión confirmada! 🎥\n${joinUrl}\nFecha: ${prospecto.demo_fecha}`);
+          console.log('DEBUG mensaje enviado:', enviado);
+        } catch (zoomErr) {
+          console.error('ERROR creando reunión o enviando mensaje:', zoomErr.response?.data || zoomErr.message);
+        }
+      } else {
+        console.log('DEBUG: no se encontró email de Zoom para el responsable', prospecto.demo_responsable);
       }
+    } else {
+      console.log('DEBUG: no se cumple condición confirmado+demo_fecha');
     }
 
     res.redirect('/prospectos/' + req.params.id);
