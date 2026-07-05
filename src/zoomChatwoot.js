@@ -20,14 +20,29 @@ async function crearReunionZoom(zoomEmail, topic, startTimeISO) {
 }
 
 async function enviarPorChatwoot(telefono, mensaje) {
+  console.log('DEBUG buscando contacto con teléfono:', telefono);
   const { data } = await axios.get(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/search?q=${telefono}`,
     { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
   );
-  const conversationId = data.payload[0]?.conversations?.[0]?.id;
-  if (!conversationId) return false;
+  console.log('DEBUG contactos encontrados:', JSON.stringify(data.payload?.map(c => ({ id: c.id, phone: c.phone_number, conversations: c.conversations }))));
+
+  const contacto = data.payload[0];
+  if (!contacto) {
+    console.error(`No se encontró contacto con teléfono ${telefono}`);
+    return false;
+  }
+
+  const conversation = contacto.conversations?.find(c => c.inbox_id === Number(process.env.CHATWOOT_WHATSAPP_INBOX_ID));
+  console.log('DEBUG INBOX_ID esperado:', process.env.CHATWOOT_WHATSAPP_INBOX_ID, '| conversación encontrada:', conversation?.id);
+
+  if (!conversation) {
+    console.error(`No hay conversación de WhatsApp para ${telefono}`);
+    return false;
+  }
+
   await axios.post(
-    `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
+    `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/messages`,
     { content: mensaje, message_type: 'outgoing' },
     { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
   );
