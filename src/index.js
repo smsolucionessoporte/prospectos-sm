@@ -68,14 +68,22 @@ async function seedAdminIfNeeded() {
 function iniciarRecordatorios() {
   setInterval(async () => {
     try {
-        const { rows } = await pool.query(`
-          SELECT * FROM prospectos 
-          WHERE recordatorio_enviado = false AND zoom_join_url IS NOT NULL
-          AND (demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') - now() 
-              BETWEEN interval '115 min' AND interval '125 min'
-        `);
+      const { rows } = await pool.query(`
+        SELECT p.*, u.nombre as demo_resp_nombre
+        FROM prospectos p
+        LEFT JOIN usuarios u ON p.demo_responsable = u.id
+        WHERE p.recordatorio_enviado = false AND p.zoom_join_url IS NOT NULL
+        AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') - now() 
+            BETWEEN interval '115 min' AND interval '125 min'
+      `);
       for (const p of rows) {
-        await enviarPorChatwoot(p.telefono, `⏰ Recordatorio: tu reunión es en 2 horas.\n${p.zoom_join_url}`);
+        const nombreAgente = p.demo_resp_nombre || 'nuestro equipo';
+        const fechaFormateada = formatearFechaAR(p.demo_fecha.toISOString().slice(0, 16));
+        const telefonoAgente = AGENTE_TELEFONO[p.demo_responsable];
+
+        const mensaje = `¡Hola! Te recordamos que en 2 hs tenés programada la demostración de nuestro sistema de gestión con ${nombreAgente} 🎥\n\n📅 ${fechaFormateada}\n🔗 ${p.zoom_join_url}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.${telefonoAgente ? `\n\n📞 Ante cualquier consulta, podés contactar a tu asesor ${nombreAgente} al ${telefonoAgente}.` : ''}`;
+
+        await enviarPorChatwoot(p.telefono, mensaje);
         await pool.query('UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1', [p.id]);
       }
     } catch (err) {
