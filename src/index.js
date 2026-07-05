@@ -6,6 +6,7 @@ const { pool, runMigrations } = require('./db');
 const authRoutes = require('./routes/auth');
 const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
+const { enviarPorChatwoot } = require('./zoomChatwoot');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,6 +41,7 @@ async function start() {
     app.listen(PORT, () => {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
+    iniciarRecordatorios();  
   } catch (err) {
     console.error('Error al iniciar:', err);
     process.exit(1);
@@ -60,6 +62,25 @@ async function seedAdminIfNeeded() {
     console.log('  Contraseña:', process.env.ADMIN_PASSWORD || 'admin123');
     console.log('  ⚠️  Cambiá la contraseña después del primer login!');
   }
+}
+
+// Revisa cada 5 min si hay demos a 2hs de empezar y manda el recordatorio
+function iniciarRecordatorios() {
+  setInterval(async () => {
+    try {
+      const { rows } = await pool.query(`
+        SELECT * FROM prospectos 
+        WHERE recordatorio_enviado = false AND zoom_join_url IS NOT NULL
+        AND demo_fecha - now() BETWEEN interval '115 min' AND interval '125 min'
+      `);
+      for (const p of rows) {
+        await enviarPorChatwoot(p.telefono, `⏰ Recordatorio: tu reunión es en 2 horas.\n${p.zoom_join_url}`);
+        await pool.query('UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1', [p.id]);
+      }
+    } catch (err) {
+      console.error('Error en recordatorios:', err);
+    }
+  }, 5 * 60 * 1000);
 }
 
 start();

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
+const { crearReunionZoom, enviarPorChatwoot } = require('../zoomChatwoot');
+const { AGENTE_ZOOM } = require('../zoomAgentes');
 
 function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -548,12 +550,13 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
   }
 });
 
-// ─── CAMBIO DE ESTADO (Administrativa) ────────────────────────────────────────
+// ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
 router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
   const { estado, nota, modulos_contratados, condiciones_comerciales, motivo_perdida } = req.body;
   try {
-    const { rows } = await pool.query('SELECT estado FROM prospectos WHERE id=$1', [req.params.id]);
-    const estadoAnterior = rows[0]?.estado;
+    const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+    const prospecto = rows[0];
+    const estadoAnterior = prospecto?.estado;
     const extra = {};
     if (estado === 'confirmado') {
       extra.modulos_contratados = modulos_contratados ? [modulos_contratados] : null;
@@ -577,6 +580,17 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
       VALUES ($1,$2,$3,$4,$5)
     `, [req.params.id, estadoAnterior, estado, req.session.usuario.id, nota || null]);
+
+    // ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
+    if (estado === 'confirmado' && prospecto.demo_fecha) {
+      const zoomEmail = AGENTE_ZOOM[prospecto.demo_responsable];
+      if (zoomEmail) {
+        const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${prospecto.nombre_negocio}`, prospecto.demo_fecha);
+        await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
+        await enviarPorChatwoot(prospecto.telefono, `¡Reunión confirmada! 🎥\n${joinUrl}\nFecha: ${prospecto.demo_fecha}`);
+      }
+    }
+
     res.redirect('/prospectos/' + req.params.id);
   } catch (err) {
     console.error(err);
@@ -831,5 +845,6 @@ function formatObjeciones(obj) {
   if (no.length) parts.push(`<strong>No:</strong> ${no.join(', ')}`);
   return parts.join(' | ') || '—';
 }
+
 
 module.exports = router;
