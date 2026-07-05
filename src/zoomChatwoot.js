@@ -54,6 +54,9 @@ async function enviarPorChatwoot(telefono, mensaje) {
     return false;
   }
 
+console.log('DEBUG conversaciones del contacto:', JSON.stringify(contacto.conversations));
+console.log('DEBUG INBOX_ID que está usando el código:', process.env.CHATWOOT_WHATSAPP_INBOX_ID);
+
   const conversation = contacto.conversations?.find(c => c.inbox_id === Number(process.env.CHATWOOT_WHATSAPP_INBOX_ID));
   if (!conversation) {
     console.error(`No hay conversación de WhatsApp para ${telefono}`);
