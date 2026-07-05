@@ -349,7 +349,7 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
       VALUES ($1,'prospecto','demo_coordinada',$2,$3)
     `, [req.params.id, req.session.usuario.id, nota_demo || 'Demo coordinada']);
 
-    // ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
+ // ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
     console.log('DEBUG demo_fecha:', demo_fecha, '| demo_responsable_id:', demo_responsable_id);
     const zoomEmail = AGENTE_ZOOM[demo_responsable_id];
     console.log('DEBUG zoomEmail encontrado:', zoomEmail);
@@ -358,7 +358,19 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
         const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${prospecto.nombre_negocio}`, demo_fecha);
         console.log('DEBUG reunión creada:', joinUrl);
         await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
-        const enviado = await enviarPorChatwoot(prospecto.telefono, `¡Reunión agendada! 🎥\n${joinUrl}\nFecha: ${demo_fecha}`);
+
+        // Traer el nombre del responsable
+        const { rows: agenteRows } = await pool.query('SELECT nombre FROM usuarios WHERE id=$1', [demo_responsable_id]);
+        const nombreAgente = agenteRows[0]?.nombre || 'nuestro equipo';
+
+        // Formatear la fecha en formato legible (es-AR)
+        const fechaFormateada = new Date(demo_fecha).toLocaleString('es-AR', {
+          weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit'
+        });
+
+        const mensaje = `¡Hola! Te invitamos a la demostración de nuestro sistema de gestión con ${nombreAgente} 🎥\n\n📅 ${fechaFormateada}\n🔗 ${joinUrl}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.`;
+
+        const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje);
         console.log('DEBUG mensaje enviado:', enviado);
       } catch (zoomErr) {
         console.error('ERROR creando reunión o enviando mensaje:', zoomErr.response?.data || zoomErr.message);
