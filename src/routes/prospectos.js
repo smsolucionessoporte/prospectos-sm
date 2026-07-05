@@ -337,6 +337,9 @@ router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
 router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
   const { demo_fecha, demo_responsable_id, nota_demo } = req.body;
   try {
+    const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+    const prospecto = rows[0];
+
     await pool.query(`
       UPDATE prospectos SET estado='demo_coordinada', demo_fecha=$1, demo_responsable=$2, actualizado_en=NOW()
       WHERE id=$3
@@ -345,6 +348,25 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
       VALUES ($1,'prospecto','demo_coordinada',$2,$3)
     `, [req.params.id, req.session.usuario.id, nota_demo || 'Demo coordinada']);
+
+    // ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
+    console.log('DEBUG demo_fecha:', demo_fecha, '| demo_responsable_id:', demo_responsable_id);
+    const zoomEmail = AGENTE_ZOOM[demo_responsable_id];
+    console.log('DEBUG zoomEmail encontrado:', zoomEmail);
+    if (zoomEmail) {
+      try {
+        const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${prospecto.nombre_negocio}`, demo_fecha);
+        console.log('DEBUG reunión creada:', joinUrl);
+        await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
+        const enviado = await enviarPorChatwoot(prospecto.telefono, `¡Reunión agendada! 🎥\n${joinUrl}\nFecha: ${demo_fecha}`);
+        console.log('DEBUG mensaje enviado:', enviado);
+      } catch (zoomErr) {
+        console.error('ERROR creando reunión o enviando mensaje:', zoomErr.response?.data || zoomErr.message);
+      }
+    } else {
+      console.log('DEBUG: no se encontró email de Zoom para el responsable', demo_responsable_id);
+    }
+
     res.redirect('/prospectos/' + req.params.id);
   } catch (err) {
     console.error(err);
@@ -550,13 +572,12 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
   }
 });
 
-// ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
+// ─── CAMBIO DE ESTADO (Administrativa) ────────────────────────────────────────
 router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
   const { estado, nota, modulos_contratados, condiciones_comerciales, motivo_perdida } = req.body;
   try {
-    const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
-    const prospecto = rows[0];
-    const estadoAnterior = prospecto?.estado;
+    const { rows } = await pool.query('SELECT estado FROM prospectos WHERE id=$1', [req.params.id]);
+    const estadoAnterior = rows[0]?.estado;
     const extra = {};
     if (estado === 'confirmado') {
       extra.modulos_contratados = modulos_contratados ? [modulos_contratados] : null;
@@ -580,29 +601,6 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
       VALUES ($1,$2,$3,$4,$5)
     `, [req.params.id, estadoAnterior, estado, req.session.usuario.id, nota || null]);
-
-// ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
-    console.log('DEBUG estado:', estado, '| demo_fecha:', prospecto.demo_fecha, '| demo_responsable:', prospecto.demo_responsable);
-    if (estado === 'confirmado' && prospecto.demo_fecha) {
-      const zoomEmail = AGENTE_ZOOM[prospecto.demo_responsable];
-      console.log('DEBUG zoomEmail encontrado:', zoomEmail);
-      if (zoomEmail) {
-        try {
-          const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${prospecto.nombre_negocio}`, prospecto.demo_fecha);
-          console.log('DEBUG reunión creada:', joinUrl);
-          await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
-          const enviado = await enviarPorChatwoot(prospecto.telefono, `¡Reunión confirmada! 🎥\n${joinUrl}\nFecha: ${prospecto.demo_fecha}`);
-          console.log('DEBUG mensaje enviado:', enviado);
-        } catch (zoomErr) {
-          console.error('ERROR creando reunión o enviando mensaje:', zoomErr.response?.data || zoomErr.message);
-        }
-      } else {
-        console.log('DEBUG: no se encontró email de Zoom para el responsable', prospecto.demo_responsable);
-      }
-    } else {
-      console.log('DEBUG: no se cumple condición confirmado+demo_fecha');
-    }
-
     res.redirect('/prospectos/' + req.params.id);
   } catch (err) {
     console.error(err);
