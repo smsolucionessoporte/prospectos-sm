@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
-const { crearReunionZoom, enviarPorChatwoot } = require('../zoomChatwoot');
 const { AGENTE_ZOOM, AGENTE_TELEFONO } = require('../zoomAgentes');
+const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR } = require('../zoomChatwoot');
 
 function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

@@ -88,4 +88,4 @@ async function enviarPorChatwoot(telefono, mensaje) {
   );
   return true;
 }
-module.exports = { crearReunionZoom, enviarPorChatwoot };
+module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR };
