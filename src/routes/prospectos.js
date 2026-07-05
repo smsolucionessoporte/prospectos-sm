@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
 const { crearReunionZoom, enviarPorChatwoot } = require('../zoomChatwoot');
-const { AGENTE_ZOOM } = require('../zoomAgentes');
+const { AGENTE_ZOOM, AGENTE_TELEFONO } = require('../zoomAgentes');
 
 function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -363,11 +363,9 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
         const { rows: agenteRows } = await pool.query('SELECT nombre FROM usuarios WHERE id=$1', [demo_responsable_id]);
         const nombreAgente = agenteRows[0]?.nombre || 'nuestro equipo';
 
-        // Formatear la fecha en formato legible (es-AR)
         const fechaFormateada = formatearFechaAR(demo_fecha);
-
-        const mensaje = `¡Hola! Te invitamos a la demostración de nuestro sistema de gestión con ${nombreAgente} 🎥\n\n📅 ${fechaFormateada}\n🔗 ${joinUrl}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.`;
-
+        const telefonoAgente = AGENTE_TELEFONO[demo_responsable_id];
+        const mensaje = `¡Hola! Te invitamos a la demostración de nuestro sistema de gestión con ${nombreAgente} 🎥\n\n📅 ${fechaFormateada}\n🔗 ${joinUrl}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.${telefonoAgente ? `\n\n📞 Ante cualquier consulta, podés contactar a tu asesor ${nombreAgente} al ${telefonoAgente}.` : ''}`;
         const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje);
         console.log('DEBUG mensaje enviado:', enviado);
       } catch (zoomErr) {
