@@ -364,9 +364,7 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
         const nombreAgente = agenteRows[0]?.nombre || 'nuestro equipo';
 
         // Formatear la fecha en formato legible (es-AR)
-        const fechaFormateada = new Date(demo_fecha).toLocaleString('es-AR', {
-          weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit'
-        });
+        const fechaFormateada = formatearFechaAR(demo_fecha);
 
         const mensaje = `¡Hola! Te invitamos a la demostración de nuestro sistema de gestión con ${nombreAgente} 🎥\n\n📅 ${fechaFormateada}\n🔗 ${joinUrl}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.`;
 

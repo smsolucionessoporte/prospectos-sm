@@ -9,6 +9,19 @@ async function getZoomToken() {
   return data.access_token;
 }
 
+function formatearFechaAR(demoFechaStr) {
+  // demoFechaStr viene como "2026-07-05T23:00" (hora de Buenos Aires, sin zona)
+  const [fecha, hora] = demoFechaStr.split('T');
+  const [anio, mes, dia] = fecha.split('-');
+  const [hh, mm] = hora.split(':');
+  const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  // Creamos la fecha SOLO para saber el día de la semana, tratándola como si fuera UTC (evita el corrimiento)
+  const fechaUTC = new Date(`${fecha}T${hora}:00Z`);
+  const diaSemana = dias[fechaUTC.getUTCDay()];
+  return `${diaSemana} ${dia} de ${meses[parseInt(mes)-1]} a las ${hh}:${mm}`;
+}
+
 async function crearReunionZoom(zoomEmail, topic, startTimeISO) {
   const token = await getZoomToken();
   const { data } = await axios.post(
