@@ -24,9 +24,16 @@ function formatearFechaAR(demoFechaStr) {
 
 async function crearReunionZoom(zoomEmail, topic, startTimeISO) {
   const token = await getZoomToken();
+  // Zoom espera "yyyy-MM-ddTHH:mm:ss" (con segundos). El input datetime-local
+  // llega sin segundos ("2026-07-05T22:40"), y si el formato no matchea,
+  // Zoom lo ignora silenciosamente y usa la hora de creación como default.
+  const startTimeCompleto = /T\d{2}:\d{2}$/.test(startTimeISO)
+    ? `${startTimeISO}:00`
+    : startTimeISO;
+
   const { data } = await axios.post(
     `https://api.zoom.us/v2/users/${zoomEmail}/meetings`,
-    { topic, type: 2, start_time: startTimeISO, timezone: 'America/Argentina/Buenos_Aires', duration: 30 },
+    { topic, type: 2, start_time: startTimeCompleto, timezone: 'America/Argentina/Buenos_Aires', duration: 30 },
     { headers: { Authorization: `Bearer ${token}` } }
   );
   return data.join_url;
