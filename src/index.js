@@ -68,11 +68,12 @@ async function seedAdminIfNeeded() {
 function iniciarRecordatorios() {
   setInterval(async () => {
     try {
-      const { rows } = await pool.query(`
-        SELECT * FROM prospectos 
-        WHERE recordatorio_enviado = false AND zoom_join_url IS NOT NULL
-        AND demo_fecha - now() BETWEEN interval '115 min' AND interval '125 min'
-      `);
+        const { rows } = await pool.query(`
+          SELECT * FROM prospectos 
+          WHERE recordatorio_enviado = false AND zoom_join_url IS NOT NULL
+          AND (demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') - now() 
+              BETWEEN interval '115 min' AND interval '125 min'
+        `);
       for (const p of rows) {
         await enviarPorChatwoot(p.telefono, `⏰ Recordatorio: tu reunión es en 2 horas.\n${p.zoom_join_url}`);
         await pool.query('UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1', [p.id]);
