@@ -19,23 +19,42 @@ async function crearReunionZoom(zoomEmail, topic, startTimeISO) {
   return data.join_url;
 }
 
-async function enviarPorChatwoot(telefono, mensaje) {
-  console.log('DEBUG buscando contacto con teléfono:', telefono);
-  const { data } = await axios.get(
-    `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/search?q=${telefono}`,
-    { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
-  );
-  console.log('DEBUG contactos encontrados:', JSON.stringify(data.payload?.map(c => ({ id: c.id, phone: c.phone_number, conversations: c.conversations }))));
+function normalizarTelefono(tel) {
+  const limpio = tel.replace(/[\s\-()]/g, ''); // saca espacios, guiones, paréntesis
+  const variantes = [limpio];
+  // Si es +54 sin el 9, agregar la variante con 9
+  if (limpio.startsWith('+54') && !limpio.startsWith('+549')) {
+    variantes.push('+549' + limpio.slice(3));
+  }
+  // Si ya tiene +549, agregar la variante sin el 9 también
+  if (limpio.startsWith('+549')) {
+    variantes.push('+54' + limpio.slice(4));
+  }
+  return variantes;
+}
 
-  const contacto = data.payload[0];
+async function enviarPorChatwoot(telefono, mensaje) {
+  const variantes = normalizarTelefono(telefono);
+  let contacto = null;
+
+  for (const variante of variantes) {
+    console.log('DEBUG probando variante:', variante);
+    const { data } = await axios.get(
+      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/search?q=${encodeURIComponent(variante)}`,
+      { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
+    );
+    if (data.payload?.length) {
+      contacto = data.payload[0];
+      break;
+    }
+  }
+
   if (!contacto) {
-    console.error(`No se encontró contacto con teléfono ${telefono}`);
+    console.error(`No se encontró contacto con ninguna variante de ${telefono}`);
     return false;
   }
 
   const conversation = contacto.conversations?.find(c => c.inbox_id === Number(process.env.CHATWOOT_WHATSAPP_INBOX_ID));
-  console.log('DEBUG INBOX_ID esperado:', process.env.CHATWOOT_WHATSAPP_INBOX_ID, '| conversación encontrada:', conversation?.id);
-
   if (!conversation) {
     console.error(`No hay conversación de WhatsApp para ${telefono}`);
     return false;

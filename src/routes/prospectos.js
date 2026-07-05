@@ -53,7 +53,7 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
           <div class="grid2">
             <div class="field">
               <label for="telefono">Teléfono <span class="req">*</span></label>
-              <input type="text" id="telefono" name="telefono" required placeholder="+54 11 ...">
+              <input type="text" id="telefono" name="telefono" required placeholder="+549 11 2233-4455" pattern="\+549\d{9,10}" title="Formato requerido: +549 seguido del número (ej: +5491122334455)">
             </div>
             <div class="field">
               <label for="email">Email</label>
