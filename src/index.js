@@ -44,8 +44,7 @@ async function start() {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
     iniciarRecordatorios();
-    iniciarAvisoRelevamientoPendiente(); // si ya lo tenés armado
-    iniciarResumenDiario(); // ← NUEVO
+    iniciarResumenDiario(); 
   } catch (err) {
     console.error('Error al iniciar:', err);
     process.exit(1);
