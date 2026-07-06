@@ -53,6 +53,14 @@ function normalizarTelefono(tel) {
   return variantes;
 }
 
+async function enviarMensajePorConversationId(conversationId, mensaje) {
+  await axios.post(
+    `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
+    { content: mensaje, message_type: 'outgoing' },
+    { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
+  );
+}
+
 async function enviarPorChatwoot(telefono, mensaje, inboxId) {
   const variantes = normalizarTelefono(telefono);
   let contacto = null;
@@ -74,6 +82,7 @@ async function enviarPorChatwoot(telefono, mensaje, inboxId) {
     return false;
   }
 
+  
   const { data: convData } = await axios.get(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/${contacto.id}/conversations`,
     { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
@@ -96,4 +105,6 @@ async function enviarPorChatwoot(telefono, mensaje, inboxId) {
   return true;
 }
 
-module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR };
+
+
+module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId };

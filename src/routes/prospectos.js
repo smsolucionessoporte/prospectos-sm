@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX } = require('../zoomAgentes');
-const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR } = require('../zoomChatwoot');
+const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId } = require('../zoomChatwoot');
 
 function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -578,16 +578,25 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       VALUES ($1,'demo_coordinada','demo_realizada',$2,'Relevamiento completado')
     `, [req.params.id, req.session.usuario.id]);
 
-    // ─── Enviar mensaje post-demo con documentación ───
+    // ─── Enviar mensaje post-demo con documentación (al cliente) ───
+    let telefono;
     try {
-      const { rows: prospRows } = await pool.query('SELECT telefono FROM prospectos WHERE id=$1', [req.params.id]);
-      const telefono = prospRows[0]?.telefono;
+      const { rows: prospRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+      const p = prospRows[0];
+      telefono = p.telefono;
       if (telefono) {
         const mensajePostDemo = `Gracias por asistir a la demostración. A continuación te compartimos los documentos con las normas generales y requisitos del sistema, para que puedas revisar toda la información necesaria:\n\n📄 Normas generales: https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/\n⚙️ Requisitos y recomendaciones de equipo: https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/\n\nLa información comercial y de alta será enviada por Administración: 📞 11 2618-1063\n\nQuedo a disposición para cualquier consulta y, en caso de avanzar, para coordinar la implementación.`;
         await enviarPorChatwoot(telefono, mensajePostDemo);
       }
+
+      // ─── Enviar datos del relevamiento al grupo ───
+      const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
+      if (grupoConvId) {
+        const mensajeGrupo = `📋 Relevamiento completado: *${p.nombre_negocio}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n📝 Próximos pasos: ${p.proximos_pasos || '—'}`;
+        await enviarMensajePorConversationId(grupoConvId, mensajeGrupo);
+      }
     } catch (msgErr) {
-      console.error('ERROR enviando mensaje post-demo:', msgErr.response?.data || msgErr.message);
+      console.error('ERROR enviando mensajes post-relevamiento:', msgErr.response?.data || msgErr.message);
     }
 
     res.redirect('/prospectos/' + req.params.id);
@@ -628,13 +637,26 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
       VALUES ($1,$2,$3,$4,$5)
     `, [req.params.id, estadoAnterior, estado, req.session.usuario.id, nota || null]);
 
-    // ─── Mensaje de bienvenida al confirmar ───
+ // ─── Mensaje de bienvenida al confirmar ───
     if (estado === 'confirmado' && telefono) {
       try {
         const mensajeBienvenida = `¡Gracias por elegirnos! 🎉 Te damos la bienvenida a SM Soluciones.\n\nTu asesor se va a estar contactando en breve para coordinar los siguientes pasos de la implementación.\n\nMientras tanto, te compartimos las guías paso a paso para que vayas conociendo el sistema, según el producto contratado:\n\n👉 vPlus: https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/\n👉 Professional Plus: https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/\n\n¡Cualquier consulta, estamos a disposición!`;
         await enviarPorChatwoot(telefono, mensajeBienvenida);
       } catch (msgErr) {
         console.error('ERROR enviando mensaje de bienvenida:', msgErr.response?.data || msgErr.message);
+      }
+
+      // ─── Aviso al grupo con los datos del cliente confirmado ───
+      try {
+        const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
+        if (grupoConvId) {
+          const { rows: fullRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+          const full = fullRows[0];
+          const mensajeAlta = `🆕 Nuevo cliente confirmado: *${full.nombre_negocio}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n💬 Condiciones comerciales: ${condiciones_comerciales || '—'}`;
+          await enviarMensajePorConversationId(grupoConvId, mensajeAlta);
+        }
+      } catch (msgErr) {
+        console.error('ERROR enviando aviso al grupo:', msgErr.response?.data || msgErr.message);
       }
     }
 

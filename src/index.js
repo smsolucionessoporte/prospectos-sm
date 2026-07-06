@@ -2,11 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
+const cron = require('node-cron');
 const { pool, runMigrations } = require('./db');
 const authRoutes = require('./routes/auth');
 const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
-const { enviarPorChatwoot } = require('./zoomChatwoot');
+const { enviarPorChatwoot, enviarMensajePorConversationId } = require('./zoomChatwoot');
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -41,7 +43,9 @@ async function start() {
     app.listen(PORT, () => {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
-    iniciarRecordatorios();  
+    iniciarRecordatorios();
+    iniciarAvisoRelevamientoPendiente(); // si ya lo tenés armado
+    iniciarResumenDiario(); // ← NUEVO
   } catch (err) {
     console.error('Error al iniciar:', err);
     process.exit(1);
@@ -90,6 +94,63 @@ function iniciarRecordatorios() {
       console.error('Error en recordatorios:', err);
     }
   }, 5 * 60 * 1000);
+}
+
+// ─── RESUMEN DIARIO AL GRUPO ───────────────────────────────────────────────
+function iniciarResumenDiario() {
+  cron.schedule('0 9 * * *', () => {
+    enviarResumenDiario();
+  }, { timezone: 'America/Argentina/Buenos_Aires' });
+}
+
+async function enviarResumenDiario() {
+  try {
+    const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
+    if (!grupoConvId) return;
+
+    const pendientesDemo = await pool.query(`
+      SELECT p.*, u.nombre as u_nombre
+      FROM prospectos p
+      LEFT JOIN usuarios u ON p.creado_por = u.id
+      WHERE p.estado = 'prospecto'
+    `);
+    const demosCoordinadas = await pool.query(`
+      SELECT p.*, u.nombre as u_nombre
+      FROM prospectos p
+      LEFT JOIN usuarios u ON p.demo_responsable = u.id
+      WHERE p.estado = 'demo_coordinada'
+    `);
+    const pendientesConfirmar = await pool.query(`
+      SELECT p.*, u.nombre as u_nombre
+      FROM prospectos p
+      LEFT JOIN usuarios u ON p.demo_responsable = u.id
+      WHERE p.estado = 'demo_realizada'
+    `);
+
+    if (!pendientesDemo.rows.length && !demosCoordinadas.rows.length && !pendientesConfirmar.rows.length) return;
+
+    let mensaje = `☀️ Resumen diario de casos pendientes:\n`;
+
+    if (pendientesDemo.rows.length) {
+      mensaje += `\n📋 *Pendientes de coordinar demo (${pendientesDemo.rows.length}):*\n`;
+      pendientesDemo.rows.forEach(p => mensaje += `• ${p.nombre_negocio} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`);
+    }
+    if (demosCoordinadas.rows.length) {
+      mensaje += `\n📅 *Demos coordinadas (${demosCoordinadas.rows.length}):*\n`;
+      demosCoordinadas.rows.forEach(p => {
+        const fecha = new Date(p.demo_fecha).toLocaleString('es-AR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+        mensaje += `• ${p.nombre_negocio} — ${fecha} (${p.u_nombre || '—'})\n`;
+      });
+    }
+    if (pendientesConfirmar.rows.length) {
+      mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
+      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio} (${p.u_nombre || '—'})\n`);
+    }
+
+    await enviarMensajePorConversationId(grupoConvId, mensaje);
+  } catch (err) {
+    console.error('Error en resumen diario:', err);
+  }
 }
 
 start();
