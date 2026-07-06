@@ -572,6 +572,19 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
       VALUES ($1,'demo_coordinada','demo_realizada',$2,'Relevamiento completado')
     `, [req.params.id, req.session.usuario.id]);
+
+    // ─── Enviar mensaje post-demo con documentación ───
+    try {
+      const { rows: prospRows } = await pool.query('SELECT telefono FROM prospectos WHERE id=$1', [req.params.id]);
+      const telefono = prospRows[0]?.telefono;
+      if (telefono) {
+        const mensajePostDemo = `Gracias por asistir a la demostración. A continuación te compartimos los documentos con las normas generales y requisitos del sistema, para que puedas revisar toda la información necesaria:\n\n📄 Normas generales: https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/\n⚙️ Requisitos y recomendaciones de equipo: https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/\n\nLa información comercial y de alta será enviada por Administración: 📞 11 2618-1063\n\nQuedo a disposición para cualquier consulta y, en caso de avanzar, para coordinar la implementación.`;
+        await enviarPorChatwoot(telefono, mensajePostDemo);
+      }
+    } catch (msgErr) {
+      console.error('ERROR enviando mensaje post-demo:', msgErr.response?.data || msgErr.message);
+    }
+
     res.redirect('/prospectos/' + req.params.id);
   } catch (err) {
     console.error(err);
@@ -579,12 +592,13 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
   }
 });
 
-// ─── CAMBIO DE ESTADO (Administrativa) ────────────────────────────────────────
+// ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
 router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
   const { estado, nota, modulos_contratados, condiciones_comerciales, motivo_perdida } = req.body;
   try {
-    const { rows } = await pool.query('SELECT estado FROM prospectos WHERE id=$1', [req.params.id]);
+    const { rows } = await pool.query('SELECT estado, telefono FROM prospectos WHERE id=$1', [req.params.id]);
     const estadoAnterior = rows[0]?.estado;
+    const telefono = rows[0]?.telefono;
     const extra = {};
     if (estado === 'confirmado') {
       extra.modulos_contratados = modulos_contratados ? [modulos_contratados] : null;
@@ -608,6 +622,17 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
       VALUES ($1,$2,$3,$4,$5)
     `, [req.params.id, estadoAnterior, estado, req.session.usuario.id, nota || null]);
+
+    // ─── Mensaje de bienvenida al confirmar ───
+    if (estado === 'confirmado' && telefono) {
+      try {
+        const mensajeBienvenida = `¡Gracias por elegirnos! 🎉 Te damos la bienvenida a SM Soluciones.\n\nTu asesor se va a estar contactando en breve para coordinar los siguientes pasos de la implementación.\n\nMientras tanto, te compartimos las guías paso a paso para que vayas conociendo el sistema, según el producto contratado:\n\n👉 vPlus: https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/\n👉 Professional Plus: https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/\n\n¡Cualquier consulta, estamos a disposición!`;
+        await enviarPorChatwoot(telefono, mensajeBienvenida);
+      } catch (msgErr) {
+        console.error('ERROR enviando mensaje de bienvenida:', msgErr.response?.data || msgErr.message);
+      }
+    }
+
     res.redirect('/prospectos/' + req.params.id);
   } catch (err) {
     console.error(err);
