@@ -81,7 +81,7 @@ function iniciarRecordatorios() {
         const fechaFormateada = formatearFechaAR(p.demo_fecha.toISOString().slice(0, 16));
         const telefonoAgente = AGENTE_TELEFONO[p.demo_responsable];
 
-        const mensaje = `¡Hola! Te recordamos que en 2 hs tenés programada la demostración de nuestro sistema de gestión con ${nombreAgente} 🎥\n\n📅 ${fechaFormateada}\n🔗 ${p.zoom_join_url}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.${telefonoAgente ? `\n\n📞 Ante cualquier consulta, podés contactar a tu asesor ${nombreAgente} al ${telefonoAgente}.` : ''}`;
+        const mensaje = `¡Hola! Te recordamos que en 2 hs tenés programada la demostración de nuestro sistema de gestión 🎥\n\n📅 ${fechaFormateada}\n🔗 ${p.zoom_join_url}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.`;
 
         await enviarPorChatwoot(p.telefono, mensaje);
         await pool.query('UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1', [p.id]);

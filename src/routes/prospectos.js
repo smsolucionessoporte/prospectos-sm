@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
-const { AGENTE_ZOOM, AGENTE_TELEFONO } = require('../zoomAgentes');
+const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX } = require('../zoomAgentes');
 const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR } = require('../zoomChatwoot');
 
 function esc(str) {
@@ -364,8 +364,13 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
 
         const fechaFormateada = formatearFechaAR(demo_fecha);
         const telefonoAgente = AGENTE_TELEFONO[demo_responsable_id];
-        const mensaje = `¡Hola! Te invitamos a la demostración de nuestro sistema de gestión con ${nombreAgente} 🎥\n\n📅 ${fechaFormateada}\n🔗 ${joinUrl}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.${telefonoAgente ? `\n\n📞 Ante cualquier consulta, podés contactar a tu asesor ${nombreAgente} al ${telefonoAgente}.` : ''}`;
-        const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje);
+const mensaje = `¡Todo listo! 😊
+
+Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
+
+🔗 ${joinUrl}
+
+💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;         const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje);
         console.log('DEBUG mensaje enviado:', enviado);
       } catch (zoomErr) {
         console.error('ERROR creando reunión o enviando mensaje:', zoomErr.response?.data || zoomErr.message);
