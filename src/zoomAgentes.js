@@ -18,6 +18,12 @@ const AGENTE_CHATWOOT_ID = {
   5: 10,
 };
 
+const AGENTE_INBOX = {
+  // id del usuario (usuarios.id) : inbox_id de su canal en Chatwoot
+  6: 1,
+  8: 3,
+  10: 2
+};
 
 module.exports = { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID };
 
