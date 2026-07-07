@@ -592,7 +592,7 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       // ─── Enviar datos del relevamiento al grupo ───
       const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
       if (grupoConvId) {
-        const mensajeGrupo = `📋 Relevamiento completado: *${p.nombre_negocio}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n📝 Próximos pasos: ${p.proximos_pasos || '—'}`;
+        const mensajeGrupo = `📋 Demo realizada: *${p.nombre_negocio}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n📝 Próximos pasos: ${p.proximos_pasos || '—'}\n\n`;
         await enviarMensajePorConversationId(grupoConvId, mensajeGrupo);
       }
     } catch (msgErr) {
@@ -640,24 +640,26 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
  // ─── Mensaje de bienvenida al confirmar ───
     if (estado === 'confirmado' && telefono) {
       try {
-        const mensajeBienvenida = `¡Gracias por elegirnos! 🎉 Te damos la bienvenida a SM Soluciones.\n\nTu asesor se va a estar contactando en breve para coordinar los siguientes pasos de la implementación.\n\nMientras tanto, te compartimos las guías paso a paso para que vayas conociendo el sistema, según el producto contratado:\n\n👉 vPlus: https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/\n👉 Professional Plus: https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/\n\n¡Cualquier consulta, estamos a disposición!`;
+        const mensajeBienvenida = `¡Gracias por elegirnos! 🎉 Te damos la bienvenida a SM Soluciones.\n\nTe compartimos las guías paso a paso para que vayas conociendo el sistema, según el producto contratado:\n\n👉 vPlus: https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/\n👉 Professional Plus: https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/`;
         await enviarPorChatwoot(telefono, mensajeBienvenida);
       } catch (msgErr) {
         console.error('ERROR enviando mensaje de bienvenida:', msgErr.response?.data || msgErr.message);
       }
 
       // ─── Aviso al grupo con los datos del cliente confirmado ───
-      try {
-        const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
-        if (grupoConvId) {
-          const { rows: fullRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
-          const full = fullRows[0];
-          const mensajeAlta = `🆕 Nuevo cliente confirmado: *${full.nombre_negocio}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n💬 Condiciones comerciales: ${condiciones_comerciales || '—'}`;
-          await enviarMensajePorConversationId(grupoConvId, mensajeAlta);
-        }
-      } catch (msgErr) {
-        console.error('ERROR enviando aviso al grupo:', msgErr.response?.data || msgErr.message);
-      }
+          try {
+            const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
+            if (grupoConvId) {
+              const { rows: fullRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+              const full = fullRows[0];
+              const linkProspecto = `${process.env.APP_URL}/prospectos/${req.params.id}`;
+              const linkSmAdmin = process.env.SM_ADMIN_URL;
+              const mensajeAlta = `🆕 Nuevo cliente confirmado: *${full.nombre_negocio}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n💬 Condiciones comerciales: ${condiciones_comerciales || '—'}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
+              await enviarMensajePorConversationId(grupoConvId, mensajeAlta);
+            }
+          } catch (msgErr) {
+            console.error('ERROR enviando aviso al grupo:', msgErr.response?.data || msgErr.message);
+          }
     }
 
     res.redirect('/prospectos/' + req.params.id);
