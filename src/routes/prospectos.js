@@ -18,6 +18,16 @@ const ESTADOS_LABEL = {
   perdido: 'Perdido',
 };
 
+const PROXIMA_ACCION = {
+  prospecto: 'Coordinar demo',
+  demo_coordinada: 'Completar relevamiento',
+  demo_realizada: 'Enviar propuesta',
+  propuesta_enviada: 'Cerrar cliente',
+  confirmado: 'Dar de alta en SM Admin',
+  perdido: '—',
+};
+
+
 const ESTADOS_COLOR = {
   prospecto: 'gray', demo_coordinada: 'blue', demo_realizada: 'purple',
   propuesta_enviada: 'orange', confirmado: 'green', perdido: 'red',
@@ -114,12 +124,12 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
 });
 
 router.post('/prospectos', requireAuth, async (req, res) => {
-  const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, proxima_accion, nota_prospecto } = req.body;
+  const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto } = req.body;
   try {
     const result = await pool.query(`
-      INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, proxima_accion, nota_prospecto, creado_por)
+      INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, creado_por)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id
-    `, [nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, proxima_accion, nota_prospecto, req.session.usuario.id]);
+    `, [nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, req.session.usuario.id]);
 
     await pool.query(`
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
@@ -209,7 +219,6 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
           </span></div>
           <div class="detail-item full"><span class="detail-label">Objeciones detectadas</span><span class="detail-val">${formatObjeciones(p.objeciones)}</span></div>
           ${p.obj_detalle ? `<div class="detail-item full"><span class="detail-label">Detalle objeciones</span><span class="detail-val">${esc(p.obj_detalle)}</span></div>` : ''}
-          <div class="detail-item full"><span class="detail-label">Próximos pasos acordados</span><span class="detail-val">${esc(p.proximos_pasos||'—')}</span></div>
           <div class="detail-item full"><span class="detail-label">Observaciones generales</span><span class="detail-val">${esc(p.obs_generales||'—')}</span></div>
         </div>
       </div>
@@ -506,10 +515,6 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
             </div>
           </div>
           <div class="field">
-            <label>Próximos pasos acordados</label>
-            <textarea name="proximos_pasos" placeholder="Enviar link de requerimientos, llamado en 3 días...">${esc(p.proximos_pasos||'')}</textarea>
-          </div>
-          <div class="field">
             <label>Observaciones generales de la demo</label>
             <textarea name="obs_generales" placeholder="Cualquier dato relevante para el área administrativa...">${esc(p.obs_generales||'')}</textarea>
           </div>
@@ -560,17 +565,17 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         problema_sistema = $6, necesidades = $7, cant_productos = $8, cant_ventas = $9,
         equipamiento = $10, equip_observaciones = $11,
         objeciones = $12, obj_detalle = $13,
-        nivel_interes = $14, proximos_pasos = $15, obs_generales = $16,
-        relevamiento_completado_por = $17, relevamiento_fecha = NOW(),
+        nivel_interes = $14, obs_generales = $15,
+        relevamiento_completado_por = $16, relevamiento_fecha = NOW(),
         actualizado_en = NOW()
-      WHERE id = $18
+      WHERE id = $17
     `, [
       b.rubro, b.rubro_otro,
       modulos, b.sistema_actual, b.tiempo_sistema,
       b.problema_sistema, b.necesidades, b.cant_productos, b.cant_ventas,
       equipamiento, b.equip_observaciones,
       JSON.stringify(objeciones), b.obj_detalle,
-      b.nivel_interes, b.proximos_pasos, b.obs_generales,
+      b.nivel_interes, b.obs_generales,
       req.session.usuario.id, req.params.id
     ]);
     await pool.query(`
@@ -590,9 +595,10 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       }
 
       // ─── Enviar datos del relevamiento al grupo ───
-      const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
+        const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
       if (grupoConvId) {
-        const mensajeGrupo = `📋 Demo realizada: *${p.nombre_negocio}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n📝 Próximos pasos: ${p.proximos_pasos || '—'}\n\n`;
+        const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
+        const mensajeGrupo = `📋 Demo realizada: *${p.nombre_negocio}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n\n👉 Enviar propuesta: ${link}`;
         await enviarMensajePorConversationId(grupoConvId, mensajeGrupo);
       }
     } catch (msgErr) {
@@ -654,7 +660,7 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
               const full = fullRows[0];
               const linkProspecto = `${process.env.APP_URL}/prospectos/${req.params.id}`;
               const linkSmAdmin = process.env.SM_ADMIN_URL;
-              const mensajeAlta = `🆕 Nuevo cliente confirmado: *${full.nombre_negocio}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n💬 Condiciones comerciales: ${condiciones_comerciales || '—'}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
+              const mensajeAlta = `🆕 Nuevo cliente confirmado: *${full.nombre_negocio}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
               await enviarMensajePorConversationId(grupoConvId, mensajeAlta);
             }
           } catch (msgErr) {
@@ -732,14 +738,13 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
         </div>
 
         <div class="form-section">
-          <div class="section-title-row"><i class="ti ti-player-play"></i><span>Próxima acción</span></div>
-          <div class="field">
-            <label>¿Qué sigue?</label>
-            <input type="text" name="proxima_accion" value="${esc(p.proxima_accion||'')}" placeholder="Ej: Llamar el lunes...">
+          <div class="section-title-row">
+            <i class="ti ti-note"></i>
+            <span>Nota</span>
           </div>
           <div class="field">
-            <label>Nota</label>
-            <textarea name="nota_prospecto">${esc(p.nota_prospecto||'')}</textarea>
+            <label for="nota_prospecto">Nota</label>
+            <textarea id="nota_prospecto" name="nota_prospecto" placeholder="Contexto del primer contacto, observaciones..."></textarea>
           </div>
         </div>
 
@@ -879,24 +884,24 @@ router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
       UPDATE prospectos SET
         nombre_negocio=$1, contacto=$2, telefono=$3, email=$4,
         rubro=$5, rubro_otro=$6, notas_administrativas=$7,
-        proxima_accion=$8, nota_prospecto=$9,
-        estado=$10, demo_fecha=$11, nivel_interes=$12,
-        modulos=$13, sistema_actual=$14, tiempo_sistema=$15,
-        problema_sistema=$16, necesidades=$17, cant_productos=$18, cant_ventas=$19,
-        equipamiento=$20, equip_observaciones=$21,
-        proximos_pasos=$22, obs_generales=$23,
-        condiciones_comerciales=$24, motivo_perdida=$25,
+        nota_prospecto=$8,
+        estado=$9, demo_fecha=$10, nivel_interes=$11,
+        modulos=$12, sistema_actual=$13, tiempo_sistema=$14,
+        problema_sistema=$15, necesidades=$16, cant_productos=$17, cant_ventas=$18,
+        equipamiento=$19, equip_observaciones=$20,
+        obs_generales=$21,
+        condiciones_comerciales=$22, motivo_perdida=$23,
         actualizado_en=NOW()
-      WHERE id=$26
+      WHERE id=$24
     `, [
       b.nombre_negocio, b.contacto, b.telefono, b.email,
       b.rubro, b.rubro_otro, b.notas_administrativas,
-      b.proxima_accion, b.nota_prospecto,
+      b.nota_prospecto,
       b.estado, b.demo_fecha || null, b.nivel_interes || null,
       modulos, b.sistema_actual, b.tiempo_sistema,
       b.problema_sistema, b.necesidades, b.cant_productos, b.cant_ventas,
       equipamiento, b.equip_observaciones,
-      b.proximos_pasos, b.obs_generales,
+      b.obs_generales,
       b.condiciones_comerciales, b.motivo_perdida,
       req.params.id
     ]);
