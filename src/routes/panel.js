@@ -12,6 +12,15 @@ const ESTADOS = {
   perdido: { label: "Perdido", color: "red" },
 };
 
+const PROXIMA_ACCION = {
+  prospecto: "Coordinar demo",
+  demo_coordinada: "Realizar demo",
+  demo_realizada: "Enviar propuesta",
+  propuesta_enviada: "Esperar respuesta",
+  confirmado: "Implementación",
+  perdido: "Sin acción",
+};
+
 router.get("/panel", requireAuth, async (req, res) => {
   try {
     const { estado, buscar, interes } = req.query;
