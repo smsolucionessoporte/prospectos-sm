@@ -21,6 +21,12 @@ const PROXIMA_ACCION = {
   perdido: "Sin acción",
 };
 
+const ORIGEN_LABEL = {
+  'manual': 'Manual',
+  'prospecto-redes': '📱 Redes',
+  'prospecto-interno': '💬 Interno',
+};
+
 router.get("/panel", requireAuth, async (req, res) => {
   try {
     const { estado, buscar, interes } = req.query;
@@ -115,6 +121,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           <td>${esc(p.rubro || "—")}</td>
           <td><span class="badge-estado ${est.color}">${est.label}</span></td>
           <td class="text-muted">${PROXIMA_ACCION[p.estado] || '—'}</td>
+          <td class="text-muted">${ORIGEN_LABEL[p.origen] || '—'}</td>
           <td>${intBadge}</td>
           <td class="text-muted">${esc(p.creado_por_nombre || "—")}</td>
           <td class="text-muted">${fecha}</td>
@@ -176,14 +183,15 @@ router.get("/panel", requireAuth, async (req, res) => {
         <table class="prospects-table">
           <thead>
             <tr>
-                <th>Negocio / Contacto</th>
-                <th>Rubro</th>
-                <th>Estado</th>
-                <th>Próxima acción</th>
-                <th>Interés</th>
-                <th>Cargado por</th>
-                <th>Fecha</th>
-                <th></th>
+              <th>Negocio / Contacto</th>
+              <th>Rubro</th>
+              <th>Estado</th>
+              <th>Próxima acción</th>
+              <th>Origen</th>
+              <th>Interés</th>
+              <th>Cargado por</th>
+              <th>Fecha</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>${filasHtml}</tbody>

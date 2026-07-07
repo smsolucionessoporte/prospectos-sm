@@ -50,24 +50,24 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
       return res.status(200).json({ ok: true, duplicado: true, id: existe[0].id });
     }
 
-    // ─── Determinar creado_por según el origen ───
     let creadoPor;
     if (origen === 'prospecto-redes') {
-      creadoPor = Number(process.env.RAFAEL_USUARIO_ID); // siempre Rafael, él recibe las redes
+      creadoPor = Number(process.env.RAFAEL_USUARIO_ID);
     } else {
-      creadoPor = AGENTE_CHATWOOT_ID[chatwoot_agent_id] || null; // mapea el agente asignado en Chatwoot
+      creadoPor = AGENTE_CHATWOOT_ID[chatwoot_agent_id] || null;
     }
 
     const result = await pool.query(`
-      INSERT INTO prospectos (nombre_negocio, contacto, telefono, rubro, nota_prospecto, creado_por)
-      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+      INSERT INTO prospectos (nombre_negocio, contacto, telefono, rubro, nota_prospecto, creado_por, origen)
+      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
     `, [
       'Nombre comercio',
       nombre_contacto || null,
       telefono,
       'Otro',
       `Cargado automáticamente desde Chatwoot (${origen || 'etiqueta'})`,
-      creadoPor
+      creadoPor,
+      origen || 'manual'
     ]);
 
     await pool.query(`
@@ -75,7 +75,7 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
       VALUES ($1, null, 'prospecto', $2, 'Alta automática desde Chatwoot')
     `, [result.rows[0].id, creadoPor]);
 
-    console.log('DEBUG auto-crear: prospecto creado, id', result.rows[0].id, 'creado_por', creadoPor);
+    console.log('DEBUG auto-crear: prospecto creado, id', result.rows[0].id, 'creado_por', creadoPor, 'origen', origen);
     res.status(201).json({ ok: true, id: result.rows[0].id });
   } catch (err) {
     console.error('Error creando prospecto automático:', err);
@@ -315,6 +315,7 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Rubro</span><span class="detail-val">${esc(p.rubro||'—')}${p.rubro_otro?' ('+esc(p.rubro_otro)+')':''}</span></div>
               <div class="detail-item"><span class="detail-label">Teléfono</span><span class="detail-val">${esc(p.telefono||'—')}</span></div>
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email||'—')}</span></div>
+              <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${{'manual':'Manual','prospecto-redes':'📱 Redes','prospecto-interno':'💬 Interno'}[p.origen] || '—'}</span></div>
               ${p.notas_administrativas ? `<div class="detail-item full"><span class="detail-label">Notas administrativas</span><span class="detail-val">${esc(p.notas_administrativas)}</span></div>` : ''}
 ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})} — ${esc(p.demo_resp_nombre||'—')}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ''}</span></div>` : ''}            </div>
           </div>
