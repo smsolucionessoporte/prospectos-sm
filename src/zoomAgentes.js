@@ -11,12 +11,13 @@ const AGENTE_TELEFONO = {
   8: '+54 9 11 5564-4899'
 };
 
-const AGENTE_INBOX ={
-  6: 1, 
-  10: 2, 
-  8: 3,
+const AGENTE_CHATWOOT_ID = {
+  // id del agente en Chatwoot : id del usuario en tu tabla usuarios de prospectos-sm
+  1: 6,  
+  4: 8,
+  5: 10,
 };
 
 
-module.exports = { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX };
+module.exports = { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID };
 

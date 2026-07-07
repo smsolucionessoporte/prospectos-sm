@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
-const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX } = require('../zoomAgentes');
+const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('../zoomAgentes');
 const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId } = require('../zoomChatwoot');
 
 function esc(str) {
@@ -32,6 +32,56 @@ const ESTADOS_COLOR = {
   prospecto: 'gray', demo_coordinada: 'blue', demo_realizada: 'purple',
   propuesta_enviada: 'orange', confirmado: 'green', perdido: 'red',
 };
+
+// ─── ALTA AUTOMÁTICA DESDE AUTOMATIZACIÓN EXTERNA (Chatwoot) ─────────────────
+router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey !== process.env.AUTOMATION_API_KEY) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+
+  const { nombre_contacto, telefono, origen, chatwoot_agent_id } = req.body;
+  if (!telefono) return res.status(400).json({ error: 'Falta teléfono' });
+
+  try {
+    const { rows: existe } = await pool.query('SELECT id FROM prospectos WHERE telefono = $1', [telefono]);
+    if (existe.length) {
+      console.log('DEBUG auto-crear: ya existe prospecto con ese teléfono, id', existe[0].id);
+      return res.status(200).json({ ok: true, duplicado: true, id: existe[0].id });
+    }
+
+    // ─── Determinar creado_por según el origen ───
+    let creadoPor;
+    if (origen === 'prospecto-redes') {
+      creadoPor = Number(process.env.RAFAEL_USUARIO_ID); // siempre Rafael, él recibe las redes
+    } else {
+      creadoPor = AGENTE_CHATWOOT_ID[chatwoot_agent_id] || null; // mapea el agente asignado en Chatwoot
+    }
+
+    const result = await pool.query(`
+      INSERT INTO prospectos (nombre_negocio, contacto, telefono, rubro, nota_prospecto, creado_por)
+      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+    `, [
+      'Nombre comercio',
+      nombre_contacto || null,
+      telefono,
+      'Otro',
+      `Cargado automáticamente desde Chatwoot (${origen || 'etiqueta'})`,
+      creadoPor
+    ]);
+
+    await pool.query(`
+      INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+      VALUES ($1, null, 'prospecto', $2, 'Alta automática desde Chatwoot')
+    `, [result.rows[0].id, creadoPor]);
+
+    console.log('DEBUG auto-crear: prospecto creado, id', result.rows[0].id, 'creado_por', creadoPor);
+    res.status(201).json({ ok: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error('Error creando prospecto automático:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // ─── NUEVO PROSPECTO (Administrativa) ─────────────────────────────────────────
 router.get('/prospectos/nuevo', requireAuth, (req, res) => {
