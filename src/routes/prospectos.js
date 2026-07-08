@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('../zoomAgentes');
-const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId } = require('../zoomChatwoot');
+const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId, normalizarTelefono } = require('../zoomChatwoot');
 
 function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -44,7 +44,8 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
   if (!telefono) return res.status(400).json({ error: 'Falta teléfono' });
 
   try {
-    const { rows: existe } = await pool.query('SELECT id FROM prospectos WHERE telefono = $1', [telefono]);
+    const variantes = normalizarTelefono(telefono);
+    const { rows: existe } = await pool.query('SELECT id FROM prospectos WHERE telefono = ANY($1)', [variantes]);
     if (existe.length) {
       console.log('DEBUG auto-crear: ya existe prospecto con ese teléfono, id', existe[0].id);
       return res.status(200).json({ ok: true, duplicado: true, id: existe[0].id });
@@ -83,7 +84,7 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
   }
 });
 
-// ─── NUEVO PROSPECTO (Administrativa) ─────────────────────────────────────────
+// ─── NUEVO PROSPECTO (Manual) ─────────────────────────────────────────
 router.get('/prospectos/nuevo', requireAuth, (req, res) => {
   res.send(layout('Nuevo prospecto', `
     <div class="page-header">
@@ -176,9 +177,20 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
 router.post('/prospectos', requireAuth, async (req, res) => {
   const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto } = req.body;
   try {
+    const variantes = normalizarTelefono(telefono);
+    const { rows: existe } = await pool.query('SELECT id, nombre_negocio FROM prospectos WHERE telefono = ANY($1)', [variantes]);
+    if (existe.length) {
+      return res.status(400).send(`
+        <script>
+          alert('Ya existe un prospecto con ese teléfono: "${existe[0].nombre_negocio.replace(/'/g, "\\'")}" (ver /prospectos/${existe[0].id})');
+          window.history.back();
+        </script>
+      `);
+    }
+
     const result = await pool.query(`
       INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, creado_por)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id
     `, [nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, req.session.usuario.id]);
 
     await pool.query(`
@@ -190,6 +202,20 @@ router.post('/prospectos', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).send('Error al guardar');
+  }
+});
+
+// ─── ELIMINAR PROSPECTO (solo usuario id 6) ───────────────────────────────────
+router.post('/prospectos/:id/eliminar', requireAuth, async (req, res) => {
+  if (req.session.usuario.id !== 6) {
+    return res.status(403).send('No autorizado');
+  }
+  try {
+    await pool.query('DELETE FROM prospectos WHERE id=$1', [req.params.id]);
+    res.redirect('/panel');
+  } catch (err) {
+    console.error('Error eliminando prospecto:', err);
+    res.status(500).send('Error al eliminar');
   }
 });
 

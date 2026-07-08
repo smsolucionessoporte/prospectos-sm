@@ -107,4 +107,4 @@ async function enviarPorChatwoot(telefono, mensaje, inboxId) {
 
 
 
-module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId };
+module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId, normalizarTelefono };
