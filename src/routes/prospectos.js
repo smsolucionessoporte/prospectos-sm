@@ -272,9 +272,9 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
           <button class="btn btn-danger"><i class="ti ti-x"></i> Marcar como perdido</button>
         </form>
       `);
-      if (u.rol === 'admin') {
-      acciones.push(`<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`);
     }
+    if (u.rol === 'admin') {
+      acciones.push(`<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`);
     }
 
     // Sección de relevamiento (si existe)
@@ -510,7 +510,7 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         </div>
 
         <div class="form-section">
-          <div class="section-title-row"><i class="ti ti-star"></i><span>Módulos de interés</span><span class="badge-req">obligatorio</span></div>
+          <div class="section-title-row"><i class="ti ti-star"></i><span>Módulos de interés</span><span class="badge-opc">opcional</span></div>
           <div class="chips-group multi">
             ${MODULOS.map(m =>
               `<label class="chip-label"><input type="checkbox" name="modulos" value="${m}"><span class="chip">${m}</span></label>`
@@ -519,7 +519,7 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         </div>
 
         <div class="form-section">
-          <div class="section-title-row"><i class="ti ti-device-desktop"></i><span>Sistema actual</span><span class="badge-req">obligatorio</span></div>
+          <div class="section-title-row"><i class="ti ti-device-desktop"></i><span>Sistema actual</span><span class="badge-opc">opcional</span></div>
           <div class="grid2">
             <div class="field">
               <label>¿Qué sistema usa hoy?</label>
@@ -555,7 +555,7 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         </div>
 
         <div class="form-section">
-          <div class="section-title-row"><i class="ti ti-tools"></i><span>Equipamiento disponible</span><span class="badge-req">obligatorio</span></div>
+          <div class="section-title-row"><i class="ti ti-tools"></i><span>Equipamiento disponible</span><span class="badge-opt">opcional</span></div>
           <div class="chips-group multi">
             ${EQUIPOS.map(e =>
               `<label class="chip-label"><input type="checkbox" name="equipamiento" value="${e}"><span class="chip">${e}</span></label>`
@@ -568,7 +568,7 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         </div>
 
         <div class="form-section">
-          <div class="section-title-row"><i class="ti ti-message-exclamation"></i><span>Objeciones detectadas</span><span class="badge-req">obligatorio</span></div>
+          <div class="section-title-row"><i class="ti ti-message-exclamation"></i><span>Objeciones detectadas</span><span class="badge-opt">opcional</span></div>
           ${OBJECIONES.map((obj, idx) => `
             <div class="objecion-row">
               <span class="objecion-label">${esc(obj)}</span>
@@ -585,7 +585,7 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         </div>
 
         <div class="form-section">
-          <div class="section-title-row"><i class="ti ti-clipboard-check"></i><span>Interés y próximos pasos</span><span class="badge-req">obligatorio</span></div>
+          <div class="section-title-row"><i class="ti ti-clipboard-check"></i><span>Interés y próximos pasos</span><span class="badge-opt">opcional</span></div>
           <div class="field">
             <label>Nivel de interés del prospecto</label>
             <div class="chips-group">
@@ -762,7 +762,9 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).send('No encontrado');
   const p = rows[0];
-
+  const demoCoordinada = p.estado !== 'prospecto';
+  const demoHecha = ['demo_realizada','propuesta_enviada','confirmado','perdido'].includes(p.estado);
+  
   const MODULOS = ['Productos / stock','Ventas / POS','Compras','Cuentas corrientes','Facturación electrónica','Promociones por cantidad','Tienda online','Green Points (fidelización)','Reportes / contabilidad'];
   const EQUIPOS = ['Balanza con impresora','Impresora de tickets','Lectora de código de barras','Multi-PC / red local','Tablet / móvil','Cajón de dinero'];
   const ESTADOS_OPTS = ['prospecto','demo_coordinada','demo_realizada','propuesta_enviada','confirmado','perdido'];
@@ -838,11 +840,13 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
               ${ESTADOS_OPTS.map(e => `<option value="${e}" ${p.estado===e?'selected':''}>${e}</option>`).join('')}
             </select>
           </div>
+          ${demoCoordinada ? `
           <div class="grid2">
             <div class="field">
               <label>Fecha demo</label>
               <input type="datetime-local" name="demo_fecha" value="${p.demo_fecha ? new Date(p.demo_fecha).toISOString().slice(0,16) : ''}">
             </div>
+            ${demoHecha ? `
             <div class="field">
               <label>Nivel de interés</label>
               <select name="nivel_interes">
@@ -852,9 +856,12 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
                 <option value="bajo" ${p.nivel_interes==='bajo'?'selected':''}>❄️ Bajo</option>
               </select>
             </div>
+            ` : ''}
           </div>
+          ` : ''}
         </div>
 
+      ${demoHecha ? `
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-star"></i><span>Módulos de interés</span></div>
           <div class="chips-group multi">
@@ -863,7 +870,9 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
             ).join('')}
           </div>
         </div>
+        ` : ''}
 
+        ${demoHecha ? `
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-device-desktop"></i><span>Sistema actual</span></div>
           <div class="grid2">
@@ -881,7 +890,9 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
             <textarea name="problema_sistema">${esc(p.problema_sistema||'')}</textarea>
           </div>
         </div>
+        ` : ''}
 
+        ${demoHecha ? `
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-adjustments"></i><span>Necesidades y volumen</span></div>
           <div class="field">
@@ -899,7 +910,9 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
             </div>
           </div>
         </div>
+        ` : ''}
 
+        ${demoHecha ? `
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-tools"></i><span>Equipamiento</span></div>
           <div class="chips-group multi">
@@ -912,12 +925,14 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
             <input type="text" name="equip_observaciones" value="${esc(p.equip_observaciones||'')}">
           </div>
         </div>
+        ` : ''}
 
+     ${demoHecha ? `
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-clipboard-check"></i><span>Cierre</span></div>
           <div class="field">
-            <label>Próximos pasos acordados</label>
-            <textarea name="proximos_pasos">${esc(p.proximos_pasos||'')}</textarea>
+            <label>Próxima acción (automática según estado)</label>
+            <input type="text" value="${esc(PROXIMA_ACCION[p.estado] || '—')}" disabled>
           </div>
           <div class="field">
             <label>Observaciones generales</label>
@@ -932,6 +947,7 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
             <input type="text" name="motivo_perdida" value="${esc(p.motivo_perdida||'')}">
           </div>
         </div>
+        ` : ''}
 
         <div class="form-actions">
           <a href="/prospectos/${p.id}" class="btn btn-ghost">Cancelar</a>
@@ -959,9 +975,20 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
 
 router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
   const b = req.body;
-  const modulos = Array.isArray(b.modulos) ? b.modulos : (b.modulos ? [b.modulos] : []);
-  const equipamiento = Array.isArray(b.equipamiento) ? b.equipamiento : (b.equipamiento ? [b.equipamiento] : []);
   try {
+    const { rows: curRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+    if (!curRows.length) return res.status(404).send('No encontrado');
+    const actual = curRows[0];
+    const demoCoordinada = actual.estado !== 'prospecto';
+    const demoHecha = ['demo_realizada','propuesta_enviada','confirmado','perdido'].includes(actual.estado);
+
+    const modulos = demoHecha
+      ? (Array.isArray(b.modulos) ? b.modulos : (b.modulos ? [b.modulos] : []))
+      : actual.modulos;
+    const equipamiento = demoHecha
+      ? (Array.isArray(b.equipamiento) ? b.equipamiento : (b.equipamiento ? [b.equipamiento] : []))
+      : actual.equipamiento;
+
     await pool.query(`
       UPDATE prospectos SET
         nombre_negocio=$1, contacto=$2, telefono=$3, email=$4,
@@ -979,12 +1006,21 @@ router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
       b.nombre_negocio || null, b.contacto, b.telefono, b.email,
       b.rubro, b.rubro_otro, b.notas_administrativas,
       b.nota_prospecto,
-      b.estado, b.demo_fecha || null, b.nivel_interes || null,
-      modulos, b.sistema_actual, b.tiempo_sistema,
-      b.problema_sistema, b.necesidades, b.cant_productos, b.cant_ventas,
-      equipamiento, b.equip_observaciones,
-      b.obs_generales,
-      b.condiciones_comerciales, b.motivo_perdida,
+      b.estado,
+      demoCoordinada ? (b.demo_fecha || null) : actual.demo_fecha,
+      demoHecha ? (b.nivel_interes || null) : actual.nivel_interes,
+      modulos,
+      demoHecha ? b.sistema_actual : actual.sistema_actual,
+      demoHecha ? b.tiempo_sistema : actual.tiempo_sistema,
+      demoHecha ? b.problema_sistema : actual.problema_sistema,
+      demoHecha ? b.necesidades : actual.necesidades,
+      demoHecha ? b.cant_productos : actual.cant_productos,
+      demoHecha ? b.cant_ventas : actual.cant_ventas,
+      equipamiento,
+      demoHecha ? b.equip_observaciones : actual.equip_observaciones,
+      demoHecha ? b.obs_generales : actual.obs_generales,
+      demoHecha ? b.condiciones_comerciales : actual.condiciones_comerciales,
+      demoHecha ? b.motivo_perdida : actual.motivo_perdida,
       req.params.id
     ]);
     res.redirect('/prospectos/' + req.params.id);
