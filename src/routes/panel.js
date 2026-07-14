@@ -114,7 +114,6 @@ router.get("/panel", requireAuth, async (req, res) => {
             return `
         <tr onclick="location.href='/prospectos/${p.id}'" class="row-link">
 <td>
-            <div class="prospect-name">${esc(p.nombre_negocio)}</div>
             <div class="prospect-contact">${esc(p.contacto || "—")}</div>
             ${p.proxima_accion ? `<div class="prospect-next"><i class="ti ti-player-play"></i> ${esc(p.proxima_accion)}</div>` : ""}
           </td>

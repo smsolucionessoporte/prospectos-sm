@@ -62,7 +62,7 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
       INSERT INTO prospectos (nombre_negocio, contacto, telefono, rubro, nota_prospecto, creado_por, origen)
       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
     `, [
-      'Nombre comercio',
+      null,
       nombre_contacto || null,
       telefono,
       'Otro',
@@ -103,12 +103,12 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
           </div>
           <div class="grid2">
             <div class="field">
-              <label for="nombre_negocio">Nombre / negocio <span class="req">*</span></label>
-              <input type="text" id="nombre_negocio" name="nombre_negocio" required placeholder="Ej: Dietética La Vida">
+              <label for="contacto">Nombre <span class="req">*</span></label>
+              <input type="text" id="contacto" name="contacto" required placeholder="Nombre de la persona">
             </div>
             <div class="field">
-              <label for="contacto">Responsable / contacto</label>
-              <input type="text" id="contacto" name="contacto" placeholder="Nombre de la persona">
+              <label for="nombre_negocio">Nombre del negocio</label>
+              <input type="text" id="nombre_negocio" name="nombre_negocio" placeholder="Ej: Dietética La Vida (opcional)">
             </div>
           </div>
           <div class="grid2">
@@ -178,11 +178,12 @@ router.post('/prospectos', requireAuth, async (req, res) => {
   const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto } = req.body;
   try {
     const variantes = normalizarTelefono(telefono);
-    const { rows: existe } = await pool.query('SELECT id, nombre_negocio FROM prospectos WHERE telefono = ANY($1)', [variantes]);
+    const { rows: existe } = await pool.query('SELECT id, nombre_negocio, contacto FROM prospectos WHERE telefono = ANY($1)', [variantes]);
     if (existe.length) {
+      const nombreExistente = (existe[0].nombre_negocio || existe[0].contacto || 'Sin nombre').replace(/'/g, "\\'");
       return res.status(400).send(`
         <script>
-          alert('Ya existe un prospecto con ese teléfono: "${existe[0].nombre_negocio.replace(/'/g, "\\'")}" (ver /prospectos/${existe[0].id})');
+          alert('Ya existe un prospecto con ese teléfono: "${nombreExistente}" (ver /prospectos/${existe[0].id})');
           window.history.back();
         </script>
       `);
@@ -191,7 +192,7 @@ router.post('/prospectos', requireAuth, async (req, res) => {
     const result = await pool.query(`
       INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, creado_por)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id
-    `, [nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, req.session.usuario.id]);
+    `, [nombre_negocio || null, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, req.session.usuario.id]);
 
     await pool.query(`
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
@@ -318,12 +319,12 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
       </div>
     `).join('');
 
-    res.send(layout(p.nombre_negocio, `
+    res.send(layout(p.contacto || p.nombre_negocio || 'Prospecto', `
       <div class="page-header">
         <div>
           <a href="/panel" class="back-link"><i class="ti ti-arrow-left"></i> Volver al panel</a>
-          <h1 class="page-title">${esc(p.nombre_negocio)}</h1>
-          <p class="page-sub">${esc(p.contacto)}${p.telefono?' · '+esc(p.telefono):''}${p.email?' · '+esc(p.email):''}</p>
+          <h1 class="page-title">${esc(p.contacto || 'Sin nombre')}</h1>
+          <p class="page-sub">${p.nombre_negocio?esc(p.nombre_negocio)+' · ':''}${p.telefono?esc(p.telefono):''}${p.email?' · '+esc(p.email):''}</p>
         </div>
         <div class="header-actions">
           <span class="badge-estado ${est} lg">${estadoLabel}</span>
@@ -338,6 +339,7 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
               <span class="section-meta">cargado por ${esc(p.creado_por_nombre||'—')}</span>
             </div>
             <div class="detail-grid">
+              <div class="detail-item"><span class="detail-label">Negocio</span><span class="detail-val">${esc(p.nombre_negocio||'—')}</span></div>
               <div class="detail-item"><span class="detail-label">Rubro</span><span class="detail-val">${esc(p.rubro||'—')}${p.rubro_otro?' ('+esc(p.rubro_otro)+')':''}</span></div>
               <div class="detail-item"><span class="detail-label">Teléfono</span><span class="detail-val">${esc(p.telefono||'—')}</span></div>
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email||'—')}</span></div>
@@ -383,7 +385,7 @@ router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
       <div>
         <a href="/prospectos/${p.id}" class="back-link"><i class="ti ti-arrow-left"></i> Volver</a>
         <h1 class="page-title">Coordinar demo</h1>
-        <p class="page-sub">${esc(p.nombre_negocio)}</p>
+        <p class="page-sub">${esc(p.contacto || p.nombre_negocio || 'Sin nombre')}</p>
       </div>
     </div>
     <div class="form-card">
@@ -440,7 +442,8 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
     console.log('DEBUG zoomEmail encontrado:', zoomEmail);
     if (zoomEmail) {
       try {
-        const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${prospecto.nombre_negocio}`, demo_fecha);
+        const nombreParaZoom = prospecto.nombre_negocio || prospecto.contacto || 'Prospecto';
+        const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${nombreParaZoom}`, demo_fecha);
         console.log('DEBUG reunión creada:', joinUrl);
         await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
 
@@ -487,7 +490,7 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       <div>
         <a href="/prospectos/${p.id}" class="back-link"><i class="ti ti-arrow-left"></i> Volver</a>
         <h1 class="page-title">Relevamiento post-demo</h1>
-        <p class="page-sub">${esc(p.nombre_negocio)} · Área Soporte</p>
+        <p class="page-sub">${esc(p.contacto || p.nombre_negocio || 'Sin nombre')} · Área Soporte</p>
       </div>
     </div>
     <div class="form-card">
@@ -673,9 +676,10 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
 
       // ─── Enviar datos del relevamiento al grupo ───
         const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
+        const nombreParaGrupo = p.nombre_negocio || p.contacto || 'Sin nombre';
       if (grupoConvId) {
         const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
-        const mensajeGrupo = `📋 Demo realizada: *${p.nombre_negocio}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n\n👉 Enviar propuesta: ${link}`;
+        const mensajeGrupo = `📋 Demo realizada: *${nombreParaGrupo}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n\n👉 Enviar propuesta: ${link}`;
         await enviarMensajePorConversationId(grupoConvId, mensajeGrupo);
       }
     } catch (msgErr) {
@@ -735,9 +739,10 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
             if (grupoConvId) {
               const { rows: fullRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
               const full = fullRows[0];
+              const nombreParaGrupo = full.nombre_negocio || full.contacto || 'Sin nombre';
               const linkProspecto = `${process.env.APP_URL}/prospectos/${req.params.id}`;
               const linkSmAdmin = process.env.SM_ADMIN_URL;
-              const mensajeAlta = `🆕 Nuevo cliente confirmado: *${full.nombre_negocio}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
+              const mensajeAlta = `🆕 Nuevo cliente confirmado: *${nombreParaGrupo}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
               await enviarMensajePorConversationId(grupoConvId, mensajeAlta);
             }
           } catch (msgErr) {
@@ -766,7 +771,7 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
     <div class="page-header">
       <div>
         <a href="/prospectos/${p.id}" class="back-link"><i class="ti ti-arrow-left"></i> Volver</a>
-        <h1 class="page-title">Editar: ${esc(p.nombre_negocio)}</h1>
+        <h1 class="page-title">Editar: ${esc(p.contacto || p.nombre_negocio || 'Sin nombre')}</h1>
         <p class="page-sub">Edición completa — Admin</p>
       </div>
     </div>
@@ -777,12 +782,12 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
           <div class="section-title-row"><i class="ti ti-user"></i><span>Datos del prospecto</span></div>
           <div class="grid2">
             <div class="field">
-              <label>Nombre / negocio <span class="req">*</span></label>
-              <input type="text" name="nombre_negocio" value="${esc(p.nombre_negocio)}" required>
+              <label>Nombre <span class="req">*</span></label>
+              <input type="text" name="contacto" value="${esc(p.contacto||'')}" required>
             </div>
             <div class="field">
-              <label>Contacto</label>
-              <input type="text" name="contacto" value="${esc(p.contacto||'')}">
+              <label>Nombre del negocio</label>
+              <input type="text" name="nombre_negocio" value="${esc(p.nombre_negocio||'')}">
             </div>
           </div>
           <div class="grid2">
@@ -971,7 +976,7 @@ router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
         actualizado_en=NOW()
       WHERE id=$24
     `, [
-      b.nombre_negocio, b.contacto, b.telefono, b.email,
+      b.nombre_negocio || null, b.contacto, b.telefono, b.email,
       b.rubro, b.rubro_otro, b.notas_administrativas,
       b.nota_prospecto,
       b.estado, b.demo_fecha || null, b.nivel_interes || null,
