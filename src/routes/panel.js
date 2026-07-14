@@ -117,6 +117,7 @@ router.get("/panel", requireAuth, async (req, res) => {
             <div class="prospect-contact">${esc(p.contacto || "—")}</div>
             ${p.proxima_accion ? `<div class="prospect-next"><i class="ti ti-player-play"></i> ${esc(p.proxima_accion)}</div>` : ""}
           </td>
+          <td>${esc(p.telefono || "—")}</td>
           <td>${esc(p.rubro || "—")}</td>
           <td><span class="badge-estado ${est.color}">${est.label}</span></td>
           <td class="text-muted">${PROXIMA_ACCION[p.estado] || '—'}</td>
@@ -187,7 +188,8 @@ router.get("/panel", requireAuth, async (req, res) => {
         <table class="prospects-table">
           <thead>
             <tr>
-              <th>Negocio / Contacto</th>
+              <th>Nombre</th>
+              <th>Teléfono</th>
               <th>Rubro</th>
               <th>Estado</th>
               <th>Próxima acción</th>
