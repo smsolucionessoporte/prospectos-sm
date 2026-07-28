@@ -27,9 +27,12 @@ const ORIGEN_LABEL = {
   'prospecto-interno': '💬 Interno',
 };
 
+const PAGE_SIZE = 20;
+
 router.get("/panel", requireAuth, async (req, res) => {
   try {
-    const { estado, buscar, interes } = req.query;
+    const { estado, buscar, interes, responsable } = req.query;
+    const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
 
     // Conteos por estado para las cards
     const conteos = await pool.query(`
@@ -39,7 +42,12 @@ router.get("/panel", requireAuth, async (req, res) => {
     conteos.rows.forEach((r) => (totales[r.estado] = parseInt(r.total)));
     const totalGeneral = Object.values(totales).reduce((a, b) => a + b, 0);
 
-    // Lista filtrada
+    // Lista de responsables para el filtro (soporte + admin activos)
+    const responsables = await pool.query(
+      `SELECT id, nombre FROM usuarios WHERE activo = true AND rol IN ('soporte','admin') ORDER BY nombre`
+    );
+
+    // Filtros
     let where = [];
     let params = [];
     let i = 1;
@@ -51,6 +59,11 @@ router.get("/panel", requireAuth, async (req, res) => {
       where.push(`p.nivel_interes = $${i++}`);
       params.push(interes);
     }
+    if (responsable) {
+      // "responsable" = quien tiene la demo asignada, o quien cargó el prospecto si nunca hubo demo
+      where.push(`COALESCE(p.demo_responsable, p.creado_por) = $${i++}`);
+      params.push(responsable);
+    }
     if (buscar) {
       where.push(
         `(p.nombre_negocio ILIKE $${i} OR p.contacto ILIKE $${i} OR p.telefono ILIKE $${i})`,
@@ -59,6 +72,19 @@ router.get("/panel", requireAuth, async (req, res) => {
       i++;
     }
     const whereClause = where.length ? "WHERE " + where.join(" AND ") : "";
+
+    // Total de filas que matchean el filtro (para el paginado)
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as total FROM prospectos p ${whereClause}`,
+      params
+    );
+    const totalFiltrado = parseInt(countResult.rows[0].total);
+    const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / PAGE_SIZE));
+    const paginaActual = Math.min(pagina, totalPaginas);
+    const offset = (paginaActual - 1) * PAGE_SIZE;
+
+    const limitParamIdx = i++;
+    const offsetParamIdx = i++;
 
     const prospectos = await pool.query(
       `
@@ -70,8 +96,9 @@ router.get("/panel", requireAuth, async (req, res) => {
       LEFT JOIN usuarios ud ON p.demo_responsable = ud.id
       ${whereClause}
       ORDER BY p.actualizado_en DESC
+      LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
     `,
-      params,
+      [...params, PAGE_SIZE, offset],
     );
 
     const rows = prospectos.rows;
@@ -92,7 +119,7 @@ router.get("/panel", requireAuth, async (req, res) => {
     const filasHtml =
       rows.length === 0
         ? `
-      <tr><td colspan="7" class="empty-row">
+      <tr><td colspan="10" class="empty-row">
         <i class="ti ti-users-group"></i>
         <span>No hay prospectos${estado ? " en este estado" : ""}${buscar ? " con esa búsqueda" : ""}</span>
       </td></tr>
@@ -123,7 +150,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           <td class="text-muted">${PROXIMA_ACCION[p.estado] || '—'}</td>
           <td class="text-muted">${ORIGEN_LABEL[p.origen] || '—'}</td>
           <td>${intBadge}</td>
-          <td class="text-muted">${esc(p.creado_por_nombre || "—")}</td>
+          <td class="text-muted">${esc(p.demo_responsable_nombre || p.creado_por_nombre || "—")}</td>
           <td class="text-muted">${fecha}</td>
           <td>
           <div class="row-actions" onclick="event.stopPropagation()">
@@ -142,6 +169,23 @@ router.get("/panel", requireAuth, async (req, res) => {
       `;
           })
           .join("");
+
+    // Controles de paginado
+    const paginacionHtml = totalPaginas > 1 ? `
+      <div class="pagination">
+        <a href="${buildUrl(req, { pagina: paginaActual - 1 })}" 
+           class="btn-icon ${paginaActual <= 1 ? 'disabled' : ''}" 
+           ${paginaActual <= 1 ? 'aria-disabled="true"' : ''}>
+          <i class="ti ti-chevron-left"></i>
+        </a>
+        <span class="pagination-info">Página ${paginaActual} de ${totalPaginas} (${totalFiltrado} resultados)</span>
+        <a href="${buildUrl(req, { pagina: paginaActual + 1 })}" 
+           class="btn-icon ${paginaActual >= totalPaginas ? 'disabled' : ''}"
+           ${paginaActual >= totalPaginas ? 'aria-disabled="true"' : ''}>
+          <i class="ti ti-chevron-right"></i>
+        </a>
+      </div>
+    ` : '';
 
     res.send(
       layout(
@@ -172,7 +216,18 @@ router.get("/panel", requireAuth, async (req, res) => {
             <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
               value="${esc(buscar || "")}" class="search-input">
           </div>
-          ${estado ? `<input type="hidden" name="estado" value="${esc(estado)}">` : ""}
+          <select name="estado" class="filter-select">
+            <option value="">Todos los estados</option>
+            ${Object.entries(ESTADOS).map(([key, meta]) =>
+              `<option value="${key}" ${estado === key ? "selected" : ""}>${meta.label}</option>`
+            ).join("")}
+          </select>
+          <select name="responsable" class="filter-select">
+            <option value="">Todos los responsables</option>
+            ${responsables.rows.map(u =>
+              `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
+            ).join("")}
+          </select>
           <select name="interes" class="filter-select">
             <option value="">Todos los intereses</option>
             <option value="alto" ${interes === "alto" ? "selected" : ""}>🔥 Alto</option>
@@ -180,7 +235,7 @@ router.get("/panel", requireAuth, async (req, res) => {
             <option value="bajo" ${interes === "bajo" ? "selected" : ""}>❄️ Bajo</option>
           </select>
           <button type="submit" class="btn btn-secondary">Filtrar</button>
-          ${buscar || interes ? '<a href="/panel" class="btn btn-ghost">Limpiar</a>' : ""}
+          ${buscar || interes || responsable || estado ? '<a href="/panel" class="btn btn-ghost">Limpiar</a>' : ""}
         </form>
       </div>
 
@@ -195,7 +250,7 @@ router.get("/panel", requireAuth, async (req, res) => {
               <th>Próxima acción</th>
               <th>Origen</th>
               <th>Interés</th>
-              <th>Cargado por</th>
+              <th>Responsable</th>
               <th>Fecha</th>
               <th></th>
             </tr>
@@ -203,6 +258,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           <tbody>${filasHtml}</tbody>
         </table>
       </div>
+      ${paginacionHtml}
     `,
         req,
       ),
@@ -212,6 +268,12 @@ router.get("/panel", requireAuth, async (req, res) => {
     res.status(500).send("Error interno");
   }
 });
+
+function buildUrl(req, overrides) {
+  const params = new URLSearchParams(req.query);
+  Object.entries(overrides).forEach(([k, v]) => params.set(k, v));
+  return `/panel?${params.toString()}`;
+}
 
 function esc(str) {
   return String(str || "")
