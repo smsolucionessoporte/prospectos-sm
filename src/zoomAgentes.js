@@ -13,7 +13,7 @@ const AGENTE_TELEFONO = {
 
 const AGENTE_CHATWOOT_ID = {
   // id del agente en Chatwoot : id del usuario en tu tabla usuarios de prospectos-sm
-  1: 6,  
+  2: 6,  
   4: 8,
   5: 10,
 };
