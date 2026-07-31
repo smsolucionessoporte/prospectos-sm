@@ -312,7 +312,7 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
           <div class="detail-item full"><span class="detail-label">Observaciones generales</span><span class="detail-val">${esc(p.obs_generales||'—')}</span></div>
         </div>
       </div>
-    ` : (p.estado !== 'prospecto' ? `
+    ` : (p.estado !== 'prospecto' && p.estado !== 'sin_respuesta' ? `
       <div class="detail-section empty-section">
         <i class="ti ti-clipboard"></i>
         <span>El relevamiento post-demo aún no fue cargado.</span>
@@ -789,7 +789,7 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).send('No encontrado');
   const p = rows[0];
-  const demoCoordinada = p.estado !== 'prospecto';
+  const demoCoordinada = p.estado !== 'prospecto' && p.estado !== 'sin_respuesta';
   const demoHecha = ['demo_realizada','propuesta_enviada','confirmado','perdido'].includes(p.estado);
   
   const MODULOS = ['Productos / stock','Ventas / POS','Compras','Cuentas corrientes','Facturación electrónica','Promociones por cantidad','Tienda online','Green Points (fidelización)','Reportes / contabilidad'];
@@ -1006,7 +1006,7 @@ router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
     const { rows: curRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
     if (!curRows.length) return res.status(404).send('No encontrado');
     const actual = curRows[0];
-    const demoCoordinada = actual.estado !== 'prospecto';
+    const demoCoordinada = actual.estado !== 'prospecto' && actual.estado !== 'sin_respuesta';
     const demoHecha = ['demo_realizada','propuesta_enviada','confirmado','perdido'].includes(actual.estado);
 
     const modulos = demoHecha
