@@ -5,6 +5,7 @@ const { requireAuth, layout } = require("../middleware/auth");
 
 const ESTADOS = {
   prospecto: { label: "Prospecto", color: "gray" },
+  sin_respuesta: { label: "Sin respuesta", color: "yellow" },
   demo_coordinada: { label: "Demo coordinada", color: "blue" },
   demo_realizada: { label: "Demo realizada", color: "purple" },
   propuesta_enviada: { label: "Propuesta enviada", color: "orange" },
@@ -14,6 +15,7 @@ const ESTADOS = {
 
 const PROXIMA_ACCION = {
   prospecto: "Coordinar demo",
+  sin_respuesta: "Reintentar contacto",
   demo_coordinada: "Realizar demo",
   demo_realizada: "Enviar propuesta",
   propuesta_enviada: "Esperar respuesta",
@@ -317,6 +319,8 @@ router.get("/panel", requireAuth, async (req, res) => {
         .modal-box .req { color:#dc2626; }
         .modal-box .opc { color:#6b7280; font-weight:normal; font-size:0.85em; }
         .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+        .badge-estado.yellow { background:#fef9c3; color:#854d0e; }
+        .stat-num.yellow { color:#854d0e; }
       </style>
 
       <script>

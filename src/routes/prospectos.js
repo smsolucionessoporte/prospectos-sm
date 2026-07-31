@@ -11,6 +11,7 @@ function esc(str) {
 
 const ESTADOS_LABEL = {
   prospecto: 'Prospecto',
+  sin_respuesta: 'Sin respuesta',
   demo_coordinada: 'Demo coordinada',
   demo_realizada: 'Demo realizada',
   propuesta_enviada: 'Propuesta enviada',
@@ -20,6 +21,7 @@ const ESTADOS_LABEL = {
 
 const PROXIMA_ACCION = {
   prospecto: 'Coordinar demo',
+  sin_respuesta: 'Reintentar contacto',
   demo_coordinada: 'Completar relevamiento',
   demo_realizada: 'Enviar propuesta',
   propuesta_enviada: 'Cerrar cliente',
@@ -29,7 +31,7 @@ const PROXIMA_ACCION = {
 
 
 const ESTADOS_COLOR = {
-  prospecto: 'gray', demo_coordinada: 'blue', demo_realizada: 'purple',
+  prospecto: 'gray', sin_respuesta: 'yellow', demo_coordinada: 'blue', demo_realizada: 'purple',
   propuesta_enviada: 'orange', confirmado: 'green', perdido: 'red',
 };
 
@@ -253,16 +255,27 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
     const acciones = [];
     if (p.estado === 'prospecto' && (u.rol === 'soporte' || u.rol === 'admin')) {
       acciones.push(`<a href="/prospectos/${p.id}/demo" class="btn btn-primary"><i class="ti ti-calendar-event"></i> Coordinar demo</a>`);
+      acciones.push(`
+        <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline" onsubmit="return confirm('¿Marcar este prospecto como sin respuesta?')">
+          <input type="hidden" name="estado" value="sin_respuesta">
+          <input type="hidden" name="nota" value="Se le escribió 3 veces y no respondió.">
+          <button class="btn btn-secondary"><i class="ti ti-message-off"></i> Marcar sin respuesta</button>
+        </form>
+      `);
     }
     if (p.estado === 'demo_coordinada' && (u.rol === 'soporte' || u.rol === 'admin')) {
       acciones.push(`<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary"><i class="ti ti-clipboard-list"></i> Completar relevamiento</a>`);
     }
-    if ((p.estado === 'demo_realizada' || p.estado === 'propuesta_enviada') && (u.rol === 'administrativa' || u.rol === 'admin')) {
+    if (p.estado === 'demo_realizada' && (u.rol === 'administrativa' || u.rol === 'admin')) {
       acciones.push(`
         <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
           <input type="hidden" name="estado" value="propuesta_enviada">
           <button class="btn btn-secondary"><i class="ti ti-send"></i> Marcar propuesta enviada</button>
         </form>
+      `);
+    }
+    if (p.estado === 'propuesta_enviada' && (u.rol === 'administrativa' || u.rol === 'admin')) {
+      acciones.push(`
         <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
           <input type="hidden" name="estado" value="confirmado">
           <button class="btn btn-success"><i class="ti ti-check"></i> Confirmar cliente</button>
@@ -348,6 +361,12 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
 ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})} — ${esc(p.demo_resp_nombre||'—')}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ''}</span></div>` : ''}            </div>
           </div>
 
+          ${p.estado === 'sin_respuesta' ? `
+          <div class="detail-section" style="border-left:4px solid #eab308; background:#fefce8;">
+            <div class="section-title-row"><i class="ti ti-message-off"></i><span>Sin respuesta</span></div>
+            <p style="margin:0;">Se le escribió 3 veces y no respondió.</p>
+          </div>` : ''}
+
           ${relHtml}
 
           ${p.estado === 'confirmado' ? `
@@ -367,6 +386,11 @@ ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agend
           </div>
         </div>
       </div>
+
+      <style>
+        .badge-estado.yellow { background:#fef9c3; color:#854d0e; }
+        .hist-dot.yellow { background:#eab308; }
+      </style>
     `, req));
   } catch (err) {
     console.error(err);
@@ -770,7 +794,7 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
   
   const MODULOS = ['Productos / stock','Ventas / POS','Compras','Cuentas corrientes','Facturación electrónica','Promociones por cantidad','Tienda online','Green Points (fidelización)','Reportes / contabilidad'];
   const EQUIPOS = ['Balanza con impresora','Impresora de tickets','Lectora de código de barras','Multi-PC / red local','Tablet / móvil','Cajón de dinero'];
-  const ESTADOS_OPTS = ['prospecto','demo_coordinada','demo_realizada','propuesta_enviada','confirmado','perdido'];
+  const ESTADOS_OPTS = ['prospecto','sin_respuesta','demo_coordinada','demo_realizada','propuesta_enviada','confirmado','perdido'];
 
   res.send(layout('Editar prospecto', `
     <div class="page-header">
