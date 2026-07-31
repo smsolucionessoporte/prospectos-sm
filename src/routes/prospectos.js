@@ -702,7 +702,10 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
     const telefono = rows[0]?.telefono;
     const extra = {};
     if (estado === 'confirmado') {
-      extra.modulos_contratados = modulos_contratados ? [modulos_contratados] : null;
+      // Separamos los módulos contratados por coma, igual que en el relevamiento (array de strings)
+      extra.modulos_contratados = modulos_contratados
+        ? modulos_contratados.split(',').map(m => m.trim()).filter(m => m.length > 0)
+        : null;
       extra.condiciones_comerciales = condiciones_comerciales;
       extra.fecha_confirmacion = new Date();
     }

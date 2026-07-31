@@ -157,6 +157,16 @@ router.get("/panel", requireAuth, async (req, res) => {
             <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle"><i class="ti ti-eye"></i></a>
             ${p.estado === 'prospecto' ? `<a href="/prospectos/${p.id}/demo" class="btn-icon" title="Cargar demo"><i class="ti ti-presentation"></i></a>` : ''}
             ${p.estado === 'demo_coordinada' && p.zoom_join_url ? `<a href="${p.zoom_join_url}" target="_blank" class="btn-icon" title="Entrar a la reunión" onclick="event.stopPropagation()"><i class="ti ti-video"></i></a>` : ''}
+            ${p.estado === 'demo_realizada' && (req.session.usuario.rol === 'administrativa' || req.session.usuario.rol === 'admin') ? `
+              <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
+                <input type="hidden" name="estado" value="propuesta_enviada">
+                <button type="submit" class="btn-icon" title="Marcar propuesta enviada"><i class="ti ti-send"></i></button>
+              </form>
+            ` : ''}
+            ${p.estado === 'propuesta_enviada' && (req.session.usuario.rol === 'administrativa' || req.session.usuario.rol === 'admin') ? `
+              <button type="button" class="btn-icon" title="Confirmar cliente" style="color:#16a34a" onclick="abrirModalConfirmar(${p.id})"><i class="ti ti-check"></i></button>
+              <button type="button" class="btn-icon" title="Marcar como perdido" style="color:#dc2626" onclick="abrirModalPerdido(${p.id})"><i class="ti ti-x"></i></button>
+            ` : ''}
             ${req.session.usuario.rol === 'admin' ? `<a href="/prospectos/${p.id}/editar" class="btn-icon" title="Editar"><i class="ti ti-pencil"></i></a>` : ''}
             ${req.session.usuario.id === 6 ? `
               <form method="POST" action="/prospectos/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar este prospecto? Esta acción no se puede deshacer.')">
@@ -259,6 +269,74 @@ router.get("/panel", requireAuth, async (req, res) => {
         </table>
       </div>
       ${paginacionHtml}
+
+      <div id="modal-confirmar" class="modal-overlay">
+        <div class="modal-box">
+          <h3><i class="ti ti-check-circle"></i> Confirmar cliente</h3>
+          <form method="POST" id="form-confirmar">
+            <input type="hidden" name="estado" value="confirmado">
+            <div class="field">
+              <label>Módulos contratados <span class="opc">(opcional)</span></label>
+              <input type="text" name="modulos_contratados" placeholder="Ej: POS, Facturación electrónica, Cuentas corrientes">
+            </div>
+            <div class="field">
+              <label>Condiciones comerciales <span class="opc">(opcional)</span></label>
+              <textarea name="condiciones_comerciales" placeholder="Plan, forma de pago, descuentos acordados..."></textarea>
+            </div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" onclick="cerrarModal('modal-confirmar')">Cancelar</button>
+              <button type="submit" class="btn btn-success"><i class="ti ti-check"></i> Confirmar cliente</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="modal-perdido" class="modal-overlay">
+        <div class="modal-box">
+          <h3><i class="ti ti-x-circle"></i> Marcar como perdido</h3>
+          <form method="POST" id="form-perdido">
+            <input type="hidden" name="estado" value="perdido">
+            <div class="field">
+              <label>Motivo <span class="opc">(opcional)</span></label>
+              <input type="text" name="motivo_perdida" placeholder="Ej: eligió otro sistema, precio, no responde...">
+            </div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" onclick="cerrarModal('modal-perdido')">Cancelar</button>
+              <button type="submit" class="btn btn-danger"><i class="ti ti-x"></i> Marcar como perdido</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <style>
+        .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1000; }
+        .modal-overlay.open { display:flex; }
+        .modal-box { background:#fff; border-radius:10px; padding:24px; width:100%; max-width:440px; box-shadow:0 10px 40px rgba(0,0,0,0.2); }
+        .modal-box h3 { margin-top:0; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+        .modal-box .field { margin-bottom:14px; }
+        .modal-box .req { color:#dc2626; }
+        .modal-box .opc { color:#6b7280; font-weight:normal; font-size:0.85em; }
+        .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+      </style>
+
+      <script>
+        function abrirModalConfirmar(id) {
+          document.getElementById('form-confirmar').action = '/prospectos/' + id + '/estado';
+          document.getElementById('modal-confirmar').classList.add('open');
+        }
+        function abrirModalPerdido(id) {
+          document.getElementById('form-perdido').action = '/prospectos/' + id + '/estado';
+          document.getElementById('modal-perdido').classList.add('open');
+        }
+        function cerrarModal(id) {
+          document.getElementById(id).classList.remove('open');
+        }
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cerrarModal(overlay.id);
+          });
+        });
+      </script>
     `,
         req,
       ),
