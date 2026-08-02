@@ -132,18 +132,18 @@ async function enviarResumenDiario() {
 
     if (pendientesDemo.rows.length) {
       mensaje += `\n📋 *Pendientes de coordinar demo (${pendientesDemo.rows.length}):*\n`;
-      pendientesDemo.rows.forEach(p => mensaje += `• ${p.nombre_negocio} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`);
+      pendientesDemo.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`);
     }
     if (demosCoordinadas.rows.length) {
       mensaje += `\n📅 *Demos coordinadas (${demosCoordinadas.rows.length}):*\n`;
       demosCoordinadas.rows.forEach(p => {
         const fecha = new Date(p.demo_fecha).toLocaleString('es-AR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-        mensaje += `• ${p.nombre_negocio} — ${fecha} (${p.u_nombre || '—'})\n`;
+        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${fecha} (${p.u_nombre || '—'})\n`;
       });
     }
     if (pendientesConfirmar.rows.length) {
       mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
-      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio} (${p.u_nombre || '—'})\n`);
+      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} (${p.u_nombre || '—'})\n`);
     }
 
     await enviarMensajePorConversationId(grupoConvId, mensaje);
