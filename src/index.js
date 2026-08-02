@@ -97,7 +97,7 @@ function iniciarRecordatorios() {
 
 // ─── RESUMEN DIARIO AL GRUPO ───────────────────────────────────────────────
 function iniciarResumenDiario() {
-  cron.schedule('0 9 * * *', () => {
+  cron.schedule('0 9 * * 1-5', () => {
     enviarResumenDiario();
   }, { timezone: 'America/Argentina/Buenos_Aires' });
 }
