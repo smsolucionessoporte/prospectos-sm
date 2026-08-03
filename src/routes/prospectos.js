@@ -694,7 +694,7 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       const p = prospRows[0];
       telefono = p.telefono;
       if (telefono) {
-        const mensajePostDemo = `Gracias por asistir a la demostración. A continuación te compartimos los documentos con las normas generales y requisitos del sistema, para que puedas revisar toda la información necesaria:\n\n📄 Normas generales: https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/\n⚙️ Requisitos y recomendaciones de equipo: https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/\n\nLa información comercial y de alta será enviada por Administración: 📞 11 2618-1063\n\nQuedo a disposición para cualquier consulta y, en caso de avanzar, para coordinar la implementación.`;
+        const mensajePostDemo = `Gracias por asistir a la demostración. A continuación te compartimos los documentos con las normas generales y requisitos del sistema, para que puedas revisar toda la información necesaria:\n\n📄 Normas generales: https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/\n⚙️ Requisitos y recomendaciones de equipo: https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/\n\nLa información comercial y de alta será enviada por Administración.\n\nQuedo a disposición para cualquier consulta y, en caso de avanzar, para coordinar la implementación.`;
         await enviarPorChatwoot(telefono, mensajePostDemo);
       }
 
