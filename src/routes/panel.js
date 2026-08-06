@@ -43,7 +43,7 @@ const PAGE_SIZE = 20;
 
 router.get("/panel", requireAuth, async (req, res) => {
   try {
-    const { estado, buscar, interes, responsable } = req.query;
+    const { estado, buscar, responsable } = req.query;
     const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
 
     // Conteos por estado para las cards
@@ -66,10 +66,6 @@ router.get("/panel", requireAuth, async (req, res) => {
     if (estado) {
       where.push(`p.estado = $${i++}`);
       params.push(estado);
-    }
-    if (interes) {
-      where.push(`p.nivel_interes = $${i++}`);
-      params.push(interes);
     }
     if (responsable) {
       // "responsable" = quien tiene la demo asignada, o quien cargó el prospecto si nunca hubo demo
@@ -140,12 +136,6 @@ router.get("/panel", requireAuth, async (req, res) => {
         : rows
           .map((p) => {
             const est = ESTADOS[p.estado] || {};
-            const intBadge = p.nivel_interes
-              ? `<span class="badge-interes ${p.nivel_interes}">${{ alto: "🔥 Alto", medio: "👀 Medio", bajo: "❄️ Bajo" }[
-              p.nivel_interes
-              ] || p.nivel_interes
-              }</span>`
-              : '<span class="text-muted">—</span>';
             const fecha = new Date(p.creado_en).toLocaleDateString("es-AR", {
               day: "2-digit",
               month: "2-digit",
@@ -243,15 +233,8 @@ router.get("/panel", requireAuth, async (req, res) => {
             ${responsables.rows.map(u =>
               `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
             ).join("")}
-          </select>
-          <select name="interes" class="filter-select">
-            <option value="">Todos los intereses</option>
-            <option value="alto" ${interes === "alto" ? "selected" : ""}>🔥 Alto</option>
-            <option value="medio" ${interes === "medio" ? "selected" : ""}>👀 Medio</option>
-            <option value="bajo" ${interes === "bajo" ? "selected" : ""}>❄️ Bajo</option>
-          </select>
-          <button type="submit" class="btn btn-secondary">Filtrar</button>
-          ${buscar || interes || responsable || estado ? '<a href="/panel" class="btn btn-ghost">Limpiar</a>' : ""}
+              <button type="submit" class="btn btn-secondary">Filtrar</button>
+          ${buscar || responsable || estado ? '<a href="/panel" class="btn btn-ghost">Limpiar</a>' : ""}
         </form>
       </div>
 
