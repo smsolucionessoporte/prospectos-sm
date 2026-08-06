@@ -8,7 +8,7 @@ const ESTADOS = {
   sin_respuesta: { label: "Sin respuesta", color: "yellow" },
   demo_coordinada: { label: "Demo coordinada", color: "blue" },
   demo_realizada: { label: "Demo realizada", color: "purple" },
-  propuesta_enviada: { label: "Propuesta enviada", color: "orange" },
+  cierre: { label: "Cierre", color: "orange" },
   confirmado: { label: "Confirmado ✓", color: "green" },
   perdido: { label: "Perdido", color: "red" },
 };
@@ -17,11 +17,23 @@ const PROXIMA_ACCION = {
   prospecto: "Coordinar demo",
   sin_respuesta: "Reintentar contacto",
   demo_coordinada: "Realizar demo",
-  demo_realizada: "Enviar propuesta",
-  propuesta_enviada: "Esperar respuesta",
+  demo_realizada: "Pasar a cierre",
+  cierre: "Cerrar cliente",
   confirmado: "Implementación",
   perdido: "Sin acción",
 };
+
+// Usuario que representa a "SM" (el jefe) para el cierre de prospectos
+// cargados por soporte. Configurable por env var, default id 1 (Administrador).
+const JEFE_USUARIO_ID = Number(process.env.JEFE_USUARIO_ID) || 1;
+
+// Determina si el usuario logueado puede ejecutar acciones de cierre
+// (confirmar / marcar perdido) sobre un prospecto puntual.
+function puedeCerrar(usuarioSesion, prospecto) {
+  if (usuarioSesion.rol === 'admin' || usuarioSesion.rol === 'administrativa') return true;
+  if (usuarioSesion.rol === 'vendedor') return prospecto.creado_por === usuarioSesion.id;
+  return false;
+}
 
 const ORIGEN_LABEL = {
   'manual': 'Manual',
@@ -46,7 +58,7 @@ router.get("/panel", requireAuth, async (req, res) => {
 
     // Lista de responsables para el filtro (soporte + admin activos)
     const responsables = await pool.query(
-      `SELECT id, nombre FROM usuarios WHERE activo = true AND rol IN ('soporte','admin') ORDER BY nombre`
+      `SELECT id, nombre FROM usuarios WHERE activo = true AND rol IN ('soporte','admin','vendedor') ORDER BY nombre`
     );
 
     // Filtros
@@ -92,6 +104,7 @@ router.get("/panel", requireAuth, async (req, res) => {
       `
       SELECT p.*, 
         uc.nombre as creado_por_nombre,
+        uc.rol as creado_por_rol,
         ud.nombre as demo_responsable_nombre
       FROM prospectos p
       LEFT JOIN usuarios uc ON p.creado_por = uc.id
@@ -144,7 +157,7 @@ router.get("/panel", requireAuth, async (req, res) => {
         <tr onclick="location.href='/prospectos/${p.id}'" class="row-link">
 <td>
             <div class="prospect-contact">${esc(p.contacto || "—")}</div>
-            ${p.proxima_accion ? `<div class="prospect-next"><i class="ti ti-player-play"></i> ${esc(p.proxima_accion)}</div>` : ""}
+            ${p.propuesta_texto ? `<div class="prospect-next"><i class="ti ti-message-check"></i> Propuesta cargada</div>` : ""}
           </td>
           <td>${esc(p.telefono || "—")}</td>
           <td>${esc(p.rubro || "—")}</td>
@@ -159,13 +172,13 @@ router.get("/panel", requireAuth, async (req, res) => {
             <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle"><i class="ti ti-eye"></i></a>
             ${p.estado === 'prospecto' ? `<a href="/prospectos/${p.id}/demo" class="btn-icon" title="Cargar demo"><i class="ti ti-presentation"></i></a>` : ''}
             ${p.estado === 'demo_coordinada' && p.zoom_join_url ? `<a href="${p.zoom_join_url}" target="_blank" class="btn-icon" title="Entrar a la reunión" onclick="event.stopPropagation()"><i class="ti ti-video"></i></a>` : ''}
-            ${p.estado === 'demo_realizada' && (req.session.usuario.rol === 'administrativa' || req.session.usuario.rol === 'admin') ? `
+            ${p.estado === 'demo_realizada' && puedeCerrar(req.session.usuario, p) ? `
               <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
-                <input type="hidden" name="estado" value="propuesta_enviada">
-                <button type="submit" class="btn-icon" title="Marcar propuesta enviada"><i class="ti ti-send"></i></button>
+                <input type="hidden" name="estado" value="cierre">
+                <button type="submit" class="btn-icon" title="Pasar a cierre"><i class="ti ti-send"></i></button>
               </form>
             ` : ''}
-            ${p.estado === 'propuesta_enviada' && (req.session.usuario.rol === 'administrativa' || req.session.usuario.rol === 'admin') ? `
+            ${p.estado === 'cierre' && puedeCerrar(req.session.usuario, p) ? `
               <button type="button" class="btn-icon" title="Confirmar cliente" style="color:#16a34a" onclick="abrirModalConfirmar(${p.id})"><i class="ti ti-check"></i></button>
               <button type="button" class="btn-icon" title="Marcar como perdido" style="color:#dc2626" onclick="abrirModalPerdido(${p.id})"><i class="ti ti-x"></i></button>
             ` : ''}
