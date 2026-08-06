@@ -8,7 +8,6 @@ const ESTADOS = {
   sin_respuesta: { label: "Sin respuesta", color: "yellow" },
   demo_coordinada: { label: "Demo coordinada", color: "blue" },
   demo_realizada: { label: "Demo realizada", color: "purple" },
-  cierre: { label: "Cierre", color: "orange" },
   confirmado: { label: "Confirmado ✓", color: "green" },
   perdido: { label: "Perdido", color: "red" },
 };
@@ -17,8 +16,7 @@ const PROXIMA_ACCION = {
   prospecto: "Coordinar demo",
   sin_respuesta: "Reintentar contacto",
   demo_coordinada: "Realizar demo",
-  demo_realizada: "Pasar a cierre",
-  cierre: "Cerrar cliente",
+  demo_realizada: "Cerrar cliente",
   confirmado: "Implementación",
   perdido: "Sin acción",
 };
@@ -162,8 +160,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           <td>${esc(p.telefono || "—")}</td>
           <td>${esc(p.rubro || "—")}</td>
           <td><span class="badge-estado ${est.color}">${est.label}</span></td>
-          <td class="text-muted">${PROXIMA_ACCION[p.estado] || '—'}</td>
-          <td class="text-muted">${ORIGEN_LABEL[p.origen] || '—'}</td>
+          <td class="text-muted">${PROXIMA_ACCION[p.estado] || '—'}${p.estado === 'demo_realizada' ? ' (' + esc(responsableCierre(p)) + ')' : ''}</td>          <td class="text-muted">${ORIGEN_LABEL[p.origen] || '—'}</td>
           <td>${intBadge}</td>
           <td class="text-muted">${esc(p.demo_responsable_nombre || p.creado_por_nombre || "—")}</td>
           <td class="text-muted">${fecha}</td>
@@ -173,16 +170,10 @@ router.get("/panel", requireAuth, async (req, res) => {
             ${p.estado === 'prospecto' ? `<a href="/prospectos/${p.id}/demo" class="btn-icon" title="Cargar demo"><i class="ti ti-presentation"></i></a>` : ''}
             ${p.estado === 'demo_coordinada' && p.zoom_join_url ? `<a href="${p.zoom_join_url}" target="_blank" class="btn-icon" title="Entrar a la reunión" onclick="event.stopPropagation()"><i class="ti ti-video"></i></a>` : ''}
             ${p.estado === 'demo_realizada' && puedeCerrar(req.session.usuario, p) ? `
-              <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
-                <input type="hidden" name="estado" value="cierre">
-                <button type="submit" class="btn-icon" title="Pasar a cierre"><i class="ti ti-send"></i></button>
-              </form>
-            ` : ''}
-            ${p.estado === 'cierre' && puedeCerrar(req.session.usuario, p) ? `
               <button type="button" class="btn-icon" title="Confirmar cliente" style="color:#16a34a" onclick="abrirModalConfirmar(${p.id})"><i class="ti ti-check"></i></button>
               <button type="button" class="btn-icon" title="Marcar como perdido" style="color:#dc2626" onclick="abrirModalPerdido(${p.id})"><i class="ti ti-x"></i></button>
             ` : ''}
-            ${req.session.usuario.rol === 'admin' ? `<a href="/prospectos/${p.id}/editar" class="btn-icon" title="Editar"><i class="ti ti-pencil"></i></a>` : ''}
+                        ${req.session.usuario.rol === 'admin' ? `<a href="/prospectos/${p.id}/editar" class="btn-icon" title="Editar"><i class="ti ti-pencil"></i></a>` : ''}
             ${req.session.usuario.id === 6 ? `
               <form method="POST" action="/prospectos/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar este prospecto? Esta acción no se puede deshacer.')">
                 <button type="submit" class="btn-icon" title="Eliminar" style="color:#dc2626"><i class="ti ti-trash"></i></button>
@@ -377,5 +368,11 @@ function esc(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+function responsableCierre(p) {
+  if (p.origen === 'prospecto-interno') return 'Andrés';
+  return p.creado_por_nombre || '—';
+}
+
 
 module.exports = router;

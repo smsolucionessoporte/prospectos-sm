@@ -14,7 +14,6 @@ const ESTADOS_LABEL = {
   sin_respuesta: 'Sin respuesta',
   demo_coordinada: 'Demo coordinada',
   demo_realizada: 'Demo realizada',
-  propuesta_enviada: 'Propuesta enviada',
   confirmado: 'Confirmado',
   perdido: 'Perdido',
 };
@@ -23,17 +22,24 @@ const PROXIMA_ACCION = {
   prospecto: 'Coordinar demo',
   sin_respuesta: 'Reintentar contacto',
   demo_coordinada: 'Completar relevamiento',
-  demo_realizada: 'Enviar propuesta',
-  propuesta_enviada: 'Cerrar cliente',
+  demo_realizada: 'Cerrar cliente',
   confirmado: 'Dar de alta en SM Admin',
   perdido: '—',
 };
 
-
 const ESTADOS_COLOR = {
   prospecto: 'gray', sin_respuesta: 'yellow', demo_coordinada: 'blue', demo_realizada: 'purple',
-  propuesta_enviada: 'orange', confirmado: 'green', perdido: 'red',
+  confirmado: 'green', perdido: 'red',
 };
+
+// Determina si el usuario logueado puede ejecutar acciones de cierre
+// (confirmar / marcar perdido) sobre un prospecto puntual.
+function puedeCerrar(usuarioSesion, prospecto) {
+  if (usuarioSesion.rol === 'admin' || usuarioSesion.rol === 'administrativa') return true;
+  if (usuarioSesion.rol === 'vendedor') return prospecto.creado_por === usuarioSesion.id;
+  return false;
+}
+
 
 // ─── ALTA AUTOMÁTICA DESDE AUTOMATIZACIÓN EXTERNA (Chatwoot) ─────────────────
 router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
@@ -266,15 +272,8 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
     if (p.estado === 'demo_coordinada' && (u.rol === 'soporte' || u.rol === 'admin')) {
       acciones.push(`<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary"><i class="ti ti-clipboard-list"></i> Completar relevamiento</a>`);
     }
-    if (p.estado === 'demo_realizada' && (u.rol === 'administrativa' || u.rol === 'admin')) {
-      acciones.push(`
-        <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
-          <input type="hidden" name="estado" value="propuesta_enviada">
-          <button class="btn btn-secondary"><i class="ti ti-send"></i> Marcar propuesta enviada</button>
-        </form>
-      `);
-    }
-    if (p.estado === 'propuesta_enviada' && (u.rol === 'administrativa' || u.rol === 'admin')) {
+
+    if (p.estado === 'demo_realizada' && puedeCerrar(u, p)) {
       acciones.push(`
         <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
           <input type="hidden" name="estado" value="confirmado">
@@ -358,8 +357,9 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email||'—')}</span></div>
               <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${{'manual':'Manual','prospecto-redes':'📱 Redes','prospecto-interno':'💬 Interno'}[p.origen] || '—'}</span></div>
               ${p.notas_administrativas ? `<div class="detail-item full"><span class="detail-label">Notas administrativas</span><span class="detail-val">${esc(p.notas_administrativas)}</span></div>` : ''}
-${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})} — ${esc(p.demo_resp_nombre||'—')}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ''}</span></div>` : ''}            </div>
-          </div>
+              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})} — ${esc(p.demo_resp_nombre||'—')}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ''}</span></div>` : ''}
+              ${p.estado === 'demo_realizada' ? `<div class="detail-item"><span class="detail-label">Próxima acción</span><span class="detail-val">Cerrar cliente (${esc(responsableCierre(p))})</span></div>` : ''}
+            </div>
 
           ${p.estado === 'sin_respuesta' ? `
           <div class="detail-section" style="border-left:4px solid #eab308; background:#fefce8;">
@@ -717,6 +717,11 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
   }
 });
 
+function responsableCierre(p) {
+  if (p.origen === 'prospecto-interno') return 'Andrés';
+  return p.creado_por_nombre || '—';
+}
+
 // ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
 router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
   const { estado, nota, modulos_contratados, condiciones_comerciales, motivo_perdida } = req.body;
@@ -790,11 +795,11 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
   if (!rows.length) return res.status(404).send('No encontrado');
   const p = rows[0];
   const demoCoordinada = p.estado !== 'prospecto' && p.estado !== 'sin_respuesta';
-  const demoHecha = ['demo_realizada','propuesta_enviada','confirmado','perdido'].includes(p.estado);
+  const demoHecha = ['demo_realizada','confirmado','perdido'].includes(p.estado);
   
   const MODULOS = ['Productos / stock','Ventas / POS','Compras','Cuentas corrientes','Facturación electrónica','Promociones por cantidad','Tienda online','Green Points (fidelización)','Reportes / contabilidad'];
   const EQUIPOS = ['Balanza con impresora','Impresora de tickets','Lectora de código de barras','Multi-PC / red local','Tablet / móvil','Cajón de dinero'];
-  const ESTADOS_OPTS = ['prospecto','sin_respuesta','demo_coordinada','demo_realizada','propuesta_enviada','confirmado','perdido'];
+  const ESTADOS_OPTS = ['prospecto','sin_respuesta','demo_coordinada','demo_realizada','confirmado','perdido'];
 
   res.send(layout('Editar prospecto', `
     <div class="page-header">
@@ -959,8 +964,7 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
           <div class="section-title-row"><i class="ti ti-clipboard-check"></i><span>Cierre</span></div>
           <div class="field">
             <label>Próxima acción (automática según estado)</label>
-            <input type="text" value="${esc(PROXIMA_ACCION[p.estado] || '—')}" disabled>
-          </div>
+              <input type="text" value="${esc(PROXIMA_ACCION[p.estado] || '—')}${p.estado==='demo_realizada' ? ' (' + esc(responsableCierre(p)) + ')' : ''}" disabled>          </div>
           <div class="field">
             <label>Observaciones generales</label>
             <textarea name="obs_generales">${esc(p.obs_generales||'')}</textarea>
@@ -1007,7 +1011,7 @@ router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
     if (!curRows.length) return res.status(404).send('No encontrado');
     const actual = curRows[0];
     const demoCoordinada = actual.estado !== 'prospecto' && actual.estado !== 'sin_respuesta';
-    const demoHecha = ['demo_realizada','propuesta_enviada','confirmado','perdido'].includes(actual.estado);
+    const demoHecha = ['demo_realizada','confirmado','perdido'].includes(actual.estado);
 
     const modulos = demoHecha
       ? (Array.isArray(b.modulos) ? b.modulos : (b.modulos ? [b.modulos] : []))

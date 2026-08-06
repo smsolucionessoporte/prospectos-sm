@@ -43,7 +43,6 @@ CREATE TABLE IF NOT EXISTS prospectos (
   objeciones JSONB,
   obj_detalle TEXT,
   nivel_interes VARCHAR(20) CHECK (nivel_interes IN ('alto','medio','bajo')),
-  proximos_pasos TEXT,
   obs_generales TEXT,
   relevamiento_completado_por INTEGER REFERENCES usuarios(id),
   relevamiento_fecha TIMESTAMP,
@@ -52,8 +51,7 @@ CREATE TABLE IF NOT EXISTS prospectos (
   condiciones_comerciales TEXT,
   fecha_confirmacion TIMESTAMP,
   notas_administrativas TEXT
-  
-);
+  );
 
 CREATE TABLE IF NOT EXISTS historial_estados (
   id SERIAL PRIMARY KEY,
