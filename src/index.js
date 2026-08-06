@@ -9,6 +9,7 @@ const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
 const { enviarPorChatwoot, enviarMensajePorConversationId } = require('./zoomChatwoot');
 const { responsableCierre } = require('./routes/prospectos');
+const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
 
 
 const app = express();

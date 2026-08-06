@@ -61,16 +61,29 @@ async function enviarMensajePorConversationId(conversationId, mensaje) {
   );
 }
 
-async function enviarPorChatwoot(telefono, mensaje, inboxId) {
+async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
+
+  const inboxId = AGENTE_INBOX[usuarioId];
+
+  // Si no tiene canal asignado no se envía
+  if (!inboxId) {
+    console.log(`Usuario ${usuarioId} no tiene inbox Chatwoot configurado`);
+    return false;
+  }
+
   const variantes = normalizarTelefono(telefono);
   let contacto = null;
 
   for (const variante of variantes) {
-    console.log('DEBUG probando variante:', variante);
     const { data } = await axios.get(
       `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/search?q=${encodeURIComponent(variante)}`,
-      { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
+      {
+        headers: {
+          api_access_token: process.env.CHATWOOT_API_TOKEN
+        }
+      }
     );
+
     if (data.payload?.length) {
       contacto = data.payload[0];
       break;
@@ -78,30 +91,80 @@ async function enviarPorChatwoot(telefono, mensaje, inboxId) {
   }
 
   if (!contacto) {
-    console.error(`No se encontró contacto con ninguna variante de ${telefono}`);
+    console.error(`No se encontró contacto ${telefono}`);
     return false;
   }
 
-  
+
   const { data: convData } = await axios.get(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/${contacto.id}/conversations`,
-    { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
+    {
+      headers: {
+        api_access_token: process.env.CHATWOOT_API_TOKEN
+      }
+    }
   );
-  console.log('DEBUG conversaciones del contacto:', JSON.stringify(convData.payload?.map(c => ({ id: c.id, inbox_id: c.inbox_id }))));
 
-  const inboxBuscado = Number(inboxId || process.env.CHATWOOT_WHATSAPP_INBOX_ID);
-  const conversation = convData.payload?.find(c => c.inbox_id === inboxBuscado);
 
-  if (!conversation) {
-    console.error(`No hay conversación en el inbox ${inboxBuscado} para ${telefono}`);
-    return false;
+  let conversation = convData.payload?.find(
+    c => c.inbox_id === inboxId
+  );
+
+
+  // Si existe pero está cerrada, abrirla
+  if (conversation && conversation.status !== 'open') {
+
+    await axios.post(
+      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/toggle_status`,
+      {
+        status: "open"
+      },
+      {
+        headers: {
+          api_access_token: process.env.CHATWOOT_API_TOKEN
+        }
+      }
+    );
+
   }
+
+
+  // Si no existe conversación, crearla
+  if (!conversation) {
+
+    const { data } = await axios.post(
+      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations`,
+      {
+        source_id: contacto.source_id,
+        inbox_id: inboxId,
+        contact_id: contacto.id,
+        status: "open"
+      },
+      {
+        headers: {
+          api_access_token: process.env.CHATWOOT_API_TOKEN
+        }
+      }
+    );
+
+    conversation = data;
+  }
+
 
   await axios.post(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/messages`,
-    { content: mensaje, message_type: 'outgoing' },
-    { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
+    {
+      content: mensaje,
+      message_type: 'outgoing'
+    },
+    {
+      headers: {
+        api_access_token: process.env.CHATWOOT_API_TOKEN
+      }
+    }
   );
+
+
   return true;
 }
 
