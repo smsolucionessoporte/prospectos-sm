@@ -227,14 +227,15 @@ router.get("/panel", requireAuth, async (req, res) => {
               `<option value="${key}" ${estado === key ? "selected" : ""}>${meta.label}</option>`
             ).join("")}
           </select>
-          <select name="responsable" class="filter-select">
+                  <select name="responsable" class="filter-select">
             <option value="">Todos los responsables</option>
             ${responsables.rows.map(u =>
               `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
             ).join("")}
-              <button type="submit" class="btn btn-secondary">Filtrar</button>
-          ${buscar || responsable || estado ? '<a href="/panel" class="btn btn-ghost">Limpiar</a>' : ""}
-        </form>
+          </select>
+          <button type="submit" class="btn btn-secondary">Filtrar</button>
+            ${buscar || responsable || estado ? '<a href="/panel" class="btn btn-ghost">Limpiar</a>' : ""}
+          </form>
       </div>
 
       <div class="table-wrap">
