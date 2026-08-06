@@ -147,19 +147,34 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
           </div>
         </div>
 
-        <div class="form-section">
+            <div class="form-section">
           <div class="section-title-row">
-            <i class="ti ti-player-play"></i>
-            <span>Próxima acción</span>
+            <i class="ti ti-file-invoice"></i>
+            <span>Propuesta comercial <span class="opc">(opcional)</span></span>
           </div>
           <div class="grid2">
             <div class="field">
-              <label for="proxima_accion">¿Qué sigue?</label>
-              <input type="text" id="proxima_accion" name="proxima_accion" placeholder="Ej: Llamar el lunes, enviar info...">
+              <label for="propuesta_monto_inicial">Monto inicial</label>
+              <input type="number" step="0.01" id="propuesta_monto_inicial" name="propuesta_monto_inicial" placeholder="Ej: 150000">
+            </div>
+            <div class="field">
+              <label for="propuesta_cuotas">Cantidad de cuotas</label>
+              <input type="number" id="propuesta_cuotas" name="propuesta_cuotas" placeholder="Ej: 3">
             </div>
           </div>
           <div class="field">
-            <label for="nota_prospecto">Nota</label>
+            <label for="propuesta_monto_mantenimiento">Monto mantenimiento</label>
+            <input type="number" step="0.01" id="propuesta_monto_mantenimiento" name="propuesta_monto_mantenimiento" placeholder="Ej: 15000">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-title-row">
+            <i class="ti ti-note"></i>
+            <span>Notas</span>
+          </div>
+          <div class="field">
+            <label for="nota_prospecto">Notas</label>
             <textarea id="nota_prospecto" name="nota_prospecto" placeholder="Contexto del primer contacto, observaciones..."></textarea>
           </div>
         </div>
@@ -183,7 +198,7 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
 });
 
 router.post('/prospectos', requireAuth, async (req, res) => {
-  const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto } = req.body;
+  const { nombre_negocio, contacto, telefono, email, rubro, rubro_otro, nota_prospecto, propuesta_monto_inicial, propuesta_cuotas, propuesta_monto_mantenimiento } = req.body;
   try {
     const variantes = normalizarTelefono(telefono);
     const { rows: existe } = await pool.query('SELECT id, nombre_negocio, contacto FROM prospectos WHERE telefono = ANY($1)', [variantes]);
@@ -198,9 +213,14 @@ router.post('/prospectos', requireAuth, async (req, res) => {
     }
 
     const result = await pool.query(`
-      INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, creado_por)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id
-    `, [nombre_negocio || null, contacto, telefono, email, rubro, rubro_otro, notas_administrativas, nota_prospecto, req.session.usuario.id]);
+      INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, nota_prospecto, propuesta_monto_inicial, propuesta_cuotas, propuesta_monto_mantenimiento, creado_por)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
+    `, [
+      nombre_negocio || null, contacto, telefono, email, rubro, rubro_otro,
+      nota_prospecto || null,
+      propuesta_monto_inicial || null, propuesta_cuotas || null, propuesta_monto_mantenimiento || null,
+      req.session.usuario.id
+    ]);
 
     await pool.query(`
       INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
@@ -356,10 +376,20 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Teléfono</span><span class="detail-val">${esc(p.telefono||'—')}</span></div>
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email||'—')}</span></div>
               <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${{'manual':'Manual','prospecto-redes':'📱 Redes','prospecto-interno':'💬 Interno'}[p.origen] || '—'}</span></div>
-              ${p.notas_administrativas ? `<div class="detail-item full"><span class="detail-label">Notas administrativas</span><span class="detail-val">${esc(p.notas_administrativas)}</span></div>` : ''}
-              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})} — ${esc(p.demo_resp_nombre||'—')}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ''}</span></div>` : ''}
+              ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ''}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})} — ${esc(p.demo_resp_nombre||'—')}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ''}</span></div>` : ''}
               ${p.estado === 'demo_realizada' ? `<div class="detail-item"><span class="detail-label">Próxima acción</span><span class="detail-val">Cerrar cliente (${esc(responsableCierre(p))})</span></div>` : ''}
             </div>
+
+            ${(p.propuesta_monto_inicial || p.propuesta_cuotas || p.propuesta_monto_mantenimiento) ? `
+            <div class="detail-section">
+              <div class="section-title-row"><i class="ti ti-file-invoice"></i><span>Propuesta comercial</span></div>
+              <div class="detail-grid">
+                <div class="detail-item"><span class="detail-label">Monto inicial</span><span class="detail-val">${p.propuesta_monto_inicial ? '$' + Number(p.propuesta_monto_inicial).toLocaleString('es-AR') : '—'}</span></div>
+                <div class="detail-item"><span class="detail-label">Cuotas</span><span class="detail-val">${p.propuesta_cuotas || '—'}</span></div>
+                <div class="detail-item"><span class="detail-label">Mantenimiento</span><span class="detail-val">${p.propuesta_monto_mantenimiento ? '$' + Number(p.propuesta_monto_mantenimiento).toLocaleString('es-AR') : '—'}</span></div>
+              </div>
+            </div>
+            ` : ''}
 
           ${p.estado === 'sin_respuesta' ? `
           <div class="detail-section" style="border-left:4px solid #eab308; background:#fefce8;">
@@ -834,10 +864,6 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
               <input type="email" name="email" value="${esc(p.email||'')}">
             </div>
           </div>
-          <div class="field">
-            <label>Notas administrativas</label>
-            <textarea name="notas_administrativas">${esc(p.notas_administrativas||'')}</textarea>
-          </div>
         </div>
 
         <div class="form-section">
@@ -853,16 +879,37 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
           </div>
         </div>
 
-        <div class="form-section">
-          <div class="section-title-row">
-            <i class="ti ti-note"></i>
-            <span>Nota</span>
+            <div class="form-section">
+            <div class="section-title-row">
+              <i class="ti ti-file-invoice"></i>
+              <span>Propuesta comercial <span class="opc">(opcional)</span></span>
+            </div>
+            <div class="grid2">
+              <div class="field">
+                <label>Monto inicial</label>
+                <input type="number" step="0.01" name="propuesta_monto_inicial" value="${p.propuesta_monto_inicial ?? ''}">
+              </div>
+              <div class="field">
+                <label>Cantidad de cuotas</label>
+                <input type="number" name="propuesta_cuotas" value="${p.propuesta_cuotas ?? ''}">
+              </div>
+            </div>
+            <div class="field">
+              <label>Monto mantenimiento</label>
+              <input type="number" step="0.01" name="propuesta_monto_mantenimiento" value="${p.propuesta_monto_mantenimiento ?? ''}">
+            </div>
           </div>
-          <div class="field">
-            <label for="nota_prospecto">Nota</label>
-            <textarea id="nota_prospecto" name="nota_prospecto" placeholder="Contexto del primer contacto, observaciones..."></textarea>
+
+          <div class="form-section">
+            <div class="section-title-row">
+              <i class="ti ti-note"></i>
+              <span>Notas</span>
+            </div>
+            <div class="field">
+              <label for="nota_prospecto">Notas</label>
+              <textarea id="nota_prospecto" name="nota_prospecto">${esc(p.nota_prospecto||'')}</textarea>
+            </div>
           </div>
-        </div>
 
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-flag"></i><span>Estado</span></div>
@@ -1020,40 +1067,42 @@ router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
       ? (Array.isArray(b.equipamiento) ? b.equipamiento : (b.equipamiento ? [b.equipamiento] : []))
       : actual.equipamiento;
 
-    await pool.query(`
-      UPDATE prospectos SET
-        nombre_negocio=$1, contacto=$2, telefono=$3, email=$4,
-        rubro=$5, rubro_otro=$6, notas_administrativas=$7,
-        nota_prospecto=$8,
-        estado=$9, demo_fecha=$10, nivel_interes=$11,
-        modulos=$12, sistema_actual=$13, tiempo_sistema=$14,
-        problema_sistema=$15, necesidades=$16, cant_productos=$17, cant_ventas=$18,
-        equipamiento=$19, equip_observaciones=$20,
-        obs_generales=$21,
-        condiciones_comerciales=$22, motivo_perdida=$23,
-        actualizado_en=NOW()
-      WHERE id=$24
-    `, [
-      b.nombre_negocio || null, b.contacto, b.telefono, b.email,
-      b.rubro, b.rubro_otro, b.notas_administrativas,
-      b.nota_prospecto,
-      b.estado,
-      demoCoordinada ? (b.demo_fecha || null) : actual.demo_fecha,
-      demoHecha ? (b.nivel_interes || null) : actual.nivel_interes,
-      modulos,
-      demoHecha ? b.sistema_actual : actual.sistema_actual,
-      demoHecha ? b.tiempo_sistema : actual.tiempo_sistema,
-      demoHecha ? b.problema_sistema : actual.problema_sistema,
-      demoHecha ? b.necesidades : actual.necesidades,
-      demoHecha ? b.cant_productos : actual.cant_productos,
-      demoHecha ? b.cant_ventas : actual.cant_ventas,
-      equipamiento,
-      demoHecha ? b.equip_observaciones : actual.equip_observaciones,
-      demoHecha ? b.obs_generales : actual.obs_generales,
-      demoHecha ? b.condiciones_comerciales : actual.condiciones_comerciales,
-      demoHecha ? b.motivo_perdida : actual.motivo_perdida,
-      req.params.id
-    ]);
+          await pool.query(`
+            UPDATE prospectos SET
+              nombre_negocio=$1, contacto=$2, telefono=$3, email=$4,
+              rubro=$5, rubro_otro=$6,
+              nota_prospecto=$7,
+              propuesta_monto_inicial=$8, propuesta_cuotas=$9, propuesta_monto_mantenimiento=$10,
+              estado=$11, demo_fecha=$12, nivel_interes=$13,
+              modulos=$14, sistema_actual=$15, tiempo_sistema=$16,
+              problema_sistema=$17, necesidades=$18, cant_productos=$19, cant_ventas=$20,
+              equipamiento=$21, equip_observaciones=$22,
+              obs_generales=$23,
+              condiciones_comerciales=$24, motivo_perdida=$25,
+              actualizado_en=NOW()
+            WHERE id=$26
+          `, [
+            b.nombre_negocio || null, b.contacto, b.telefono, b.email,
+            b.rubro, b.rubro_otro,
+            b.nota_prospecto || null,
+            b.propuesta_monto_inicial || null, b.propuesta_cuotas || null, b.propuesta_monto_mantenimiento || null,
+            b.estado,
+            demoCoordinada ? (b.demo_fecha || null) : actual.demo_fecha,
+            demoHecha ? (b.nivel_interes || null) : actual.nivel_interes,
+            modulos,
+            demoHecha ? b.sistema_actual : actual.sistema_actual,
+            demoHecha ? b.tiempo_sistema : actual.tiempo_sistema,
+            demoHecha ? b.problema_sistema : actual.problema_sistema,
+            demoHecha ? b.necesidades : actual.necesidades,
+            demoHecha ? b.cant_productos : actual.cant_productos,
+            demoHecha ? b.cant_ventas : actual.cant_ventas,
+            equipamiento,
+            demoHecha ? b.equip_observaciones : actual.equip_observaciones,
+            demoHecha ? b.obs_generales : actual.obs_generales,
+            demoHecha ? b.condiciones_comerciales : actual.condiciones_comerciales,
+            demoHecha ? b.motivo_perdida : actual.motivo_perdida,
+            req.params.id
+          ]);
     res.redirect('/prospectos/' + req.params.id);
   } catch (err) {
     console.error(err);
