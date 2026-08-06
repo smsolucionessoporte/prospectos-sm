@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS prospectos (
   
   -- Estado del proceso
   estado VARCHAR(30) NOT NULL DEFAULT 'prospecto'
-    CHECK (estado IN ('prospecto','demo_coordinada','demo_realizada','propuesta_enviada','confirmado','perdido')),
+    CHECK (estado IN ('prospecto','demo_coordinada','demo_realizada','confirmado','perdido')),
   
   -- Auditoría
   creado_por INTEGER REFERENCES usuarios(id),

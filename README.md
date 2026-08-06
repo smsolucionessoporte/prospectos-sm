@@ -11,11 +11,10 @@ Sistema de gestión de prospectos para el proceso comercial de SM Soluciones / S
 
 | Estado | Responsable | Acción |
 |---|---|---|
-| Prospecto | Administrativa | Da de alta el contacto inicial |
+| Prospecto | Administrativa o Vendedor | Da de alta el contacto inicial |
 | Demo coordinada | Soporte | Agenda fecha y responsable |
 | Demo realizada | Soporte | Completa el formulario de relevamiento |
-| Propuesta enviada | Administrativa | Marca que se envió la propuesta |
-| Confirmado | Administrativa | Cliente pasa a SM Admin |
+| Confirmado | Administrativa o Vendedor | Cliente pasa a SM Admin |
 | Perdido | Cualquiera | No avanzó |
 
 ## Deploy en Railway

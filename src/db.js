@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS prospectos (
   telefono VARCHAR(50),
   email VARCHAR(150),
   estado VARCHAR(30) NOT NULL DEFAULT 'prospecto'
-    CHECK (estado IN ('prospecto','demo_coordinada','demo_realizada','propuesta_enviada','confirmado','perdido')),
+    CHECK (estado IN ('prospecto','demo_coordinada','demo_realizada','confirmado','perdido')),
   creado_por INTEGER REFERENCES usuarios(id),
   creado_en TIMESTAMP DEFAULT NOW(),
   actualizado_en TIMESTAMP DEFAULT NOW(),
