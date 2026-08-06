@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, layout } = require("../middleware/auth");
+const { responsableCierre } = require('./routes/prospectos');
 
 const ESTADOS = {
   prospecto: { label: "Prospecto", color: "gray" },
@@ -350,11 +351,5 @@ function esc(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
-
-function responsableCierre(p) {
-  if (p.origen === 'prospecto-interno') return 'Andrés';
-  return p.creado_por_nombre || '—';
-}
-
 
 module.exports = router;

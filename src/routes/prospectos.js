@@ -1122,3 +1122,4 @@ function formatObjeciones(obj) {
 
 
 module.exports = router;
+module.exports.responsableCierre = responsableCierre;

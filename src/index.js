@@ -8,7 +8,7 @@ const authRoutes = require('./routes/auth');
 const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
 const { enviarPorChatwoot, enviarMensajePorConversationId } = require('./zoomChatwoot');
-
+const { responsableCierre } = require('./routes/prospectos');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -120,9 +120,9 @@ async function enviarResumenDiario() {
       WHERE p.estado = 'demo_coordinada'
     `);
     const pendientesConfirmar = await pool.query(`
-      SELECT p.*, u.nombre as u_nombre
+      SELECT p.*, uc.nombre as creado_por_nombre
       FROM prospectos p
-      LEFT JOIN usuarios u ON p.demo_responsable = u.id
+      LEFT JOIN usuarios uc ON p.creado_por = uc.id
       WHERE p.estado = 'demo_realizada'
     `);
 
@@ -132,7 +132,11 @@ async function enviarResumenDiario() {
 
     if (pendientesDemo.rows.length) {
       mensaje += `\n📋 *Pendientes de coordinar demo (${pendientesDemo.rows.length}):*\n`;
-      pendientesDemo.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`);
+      pendientesDemo.rows.forEach(p => {
+        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})`;
+        if (p.nota_prospecto) mensaje += `\n  📝 ${p.nota_prospecto}`;
+        mensaje += `\n`;
+      });
     }
     if (demosCoordinadas.rows.length) {
       mensaje += `\n📅 *Demos coordinadas (${demosCoordinadas.rows.length}):*\n`;
@@ -143,7 +147,9 @@ async function enviarResumenDiario() {
     }
     if (pendientesConfirmar.rows.length) {
       mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
-      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} (${p.u_nombre || '—'})\n`);
+      pendientesConfirmar.rows.forEach(p => {
+        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} (Cerrar cliente: ${responsableCierre(p)})\n`;
+      });
     }
 
     await enviarMensajePorConversationId(grupoConvId, mensaje);
