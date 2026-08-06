@@ -8,6 +8,8 @@ const authRoutes = require('./routes/auth');
 const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
 const { enviarPorChatwoot, enviarMensajePorConversationId } = require('./zoomChatwoot');
+const { responsableCierre } = require('./routes/prospectos');
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -92,11 +94,6 @@ function iniciarRecordatorios() {
       console.error('Error en recordatorios:', err);
     }
   }, 5 * 60 * 1000);
-}
-
-function responsableCierre(p) {
-  if (p.origen === 'prospecto-interno') return 'Andrés';
-  return p.creado_por_nombre || '—';
 }
 
 // ─── RESUMEN DIARIO AL GRUPO ───────────────────────────────────────────────

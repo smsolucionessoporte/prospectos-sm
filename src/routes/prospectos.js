@@ -40,6 +40,11 @@ function puedeCerrar(usuarioSesion, prospecto) {
   return false;
 }
 
+function responsableCierre(p) {
+  if (p.origen === 'prospecto-interno') return 'Andrés';
+  return p.creado_por_nombre || '—';
+}
+
 
 // ─── ALTA AUTOMÁTICA DESDE AUTOMATIZACIÓN EXTERNA (Chatwoot) ─────────────────
 router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
@@ -747,10 +752,6 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
   }
 });
 
-function responsableCierre(p) {
-  if (p.origen === 'prospecto-interno') return 'Andrés';
-  return p.creado_por_nombre || '—';
-}
 
 // ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
 router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
