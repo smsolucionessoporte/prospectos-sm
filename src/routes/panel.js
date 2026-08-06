@@ -151,7 +151,6 @@ router.get("/panel", requireAuth, async (req, res) => {
           <td>${esc(p.rubro || "—")}</td>
           <td><span class="badge-estado ${est.color}">${est.label}</span></td>
           <td class="text-muted">${PROXIMA_ACCION[p.estado] || '—'}${p.estado === 'demo_realizada' ? ' (' + esc(responsableCierre(p)) + ')' : ''}</td>          <td class="text-muted">${ORIGEN_LABEL[p.origen] || '—'}</td>
-          <td>${intBadge}</td>
           <td class="text-muted">${esc(p.demo_responsable_nombre || p.creado_por_nombre || "—")}</td>
           <td class="text-muted">${fecha}</td>
           <td>
