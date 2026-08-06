@@ -128,7 +128,7 @@ router.get("/panel", requireAuth, async (req, res) => {
     const filasHtml =
       rows.length === 0
         ? `
-      <tr><td colspan="10" class="empty-row">
+      <tr><td colspan="9" class="empty-row">
         <i class="ti ti-users-group"></i>
         <span>No hay prospectos${estado ? " en este estado" : ""}${buscar ? " con esa búsqueda" : ""}</span>
       </td></tr>
@@ -247,7 +247,6 @@ router.get("/panel", requireAuth, async (req, res) => {
               <th>Estado</th>
               <th>Próxima acción</th>
               <th>Origen</th>
-              <th>Interés</th>
               <th>Responsable</th>
               <th>Fecha</th>
               <th></th>
