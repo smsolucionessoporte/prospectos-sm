@@ -108,7 +108,7 @@ async function enviarResumenDiario() {
   try {
     const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
     if (!grupoConvId) return;
-
+ 
     const pendientesDemo = await pool.query(`
       SELECT p.*, u.nombre as u_nombre
       FROM prospectos p
@@ -122,23 +122,19 @@ async function enviarResumenDiario() {
       WHERE p.estado = 'demo_coordinada'
     `);
     const pendientesConfirmar = await pool.query(`
-      SELECT p.*, uc.nombre as creado_por_nombre
+      SELECT p.*, u.nombre as u_nombre
       FROM prospectos p
-      LEFT JOIN usuarios uc ON p.creado_por = uc.id
+      LEFT JOIN usuarios u ON p.demo_responsable = u.id
       WHERE p.estado = 'demo_realizada'
     `);
-
+ 
     if (!pendientesDemo.rows.length && !demosCoordinadas.rows.length && !pendientesConfirmar.rows.length) return;
-
+ 
     let mensaje = `☀️ Resumen diario de casos pendientes:\n`;
-
+ 
     if (pendientesDemo.rows.length) {
       mensaje += `\n📋 *Pendientes de coordinar demo (${pendientesDemo.rows.length}):*\n`;
-      pendientesDemo.rows.forEach(p => {
-        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})`;
-        if (p.nota_prospecto) mensaje += `\n  📝 ${p.nota_prospecto}`;
-        mensaje += `\n`;
-      });
+      pendientesDemo.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`);
     }
     if (demosCoordinadas.rows.length) {
       mensaje += `\n📅 *Demos coordinadas (${demosCoordinadas.rows.length}):*\n`;
@@ -149,11 +145,9 @@ async function enviarResumenDiario() {
     }
     if (pendientesConfirmar.rows.length) {
       mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
-      pendientesConfirmar.rows.forEach(p => {
-        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} (Cerrar cliente: ${responsableCierre(p)})\n`;
-      });
+      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} (${p.u_nombre || '—'})\n`);
     }
-
+ 
     await enviarMensajePorConversationId(grupoConvId, mensaje);
   } catch (err) {
     console.error('Error en resumen diario:', err);
