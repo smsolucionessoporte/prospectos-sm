@@ -512,13 +512,15 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
 
         const fechaFormateada = formatearFechaAR(demo_fecha);
         const telefonoAgente = AGENTE_TELEFONO[demo_responsable_id];
-const mensaje = `¡Todo listo! 😊
+        const demoResponsable = demo_responsable_id; 
+        const mensaje = `¡Todo listo! 😊
 
 Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
 
 🔗 ${joinUrl}
 
-💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;         const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje);
+💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;         
+      const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje, demoResponsable);
         console.log('DEBUG mensaje enviado:', enviado);
       } catch (zoomErr) {
         console.error('ERROR creando reunión o enviando mensaje:', zoomErr.response?.data || zoomErr.message);
@@ -727,10 +729,12 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
     try {
       const { rows: prospRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
       const p = prospRows[0];
+      const demoResponsable = p.demo_responsable;
+      
       telefono = p.telefono;
       if (telefono) {
         const mensajePostDemo = `Gracias por asistir a la demostración. A continuación te compartimos los documentos con las normas generales y requisitos del sistema, para que puedas revisar toda la información necesaria:\n\n📄 Normas generales: https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/\n⚙️ Requisitos y recomendaciones de equipo: https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/\n\nLa información comercial y de alta será enviada por Administración.\n\nQuedo a disposición para cualquier consulta y, en caso de avanzar, para coordinar la implementación.`;
-        await enviarPorChatwoot(telefono, mensajePostDemo);
+        await enviarPorChatwoot(telefono, mensajePostDemo, demoResponsable);
       }
 
       // ─── Enviar datos del relevamiento al grupo ───
@@ -757,9 +761,10 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
 router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
   const { estado, nota, modulos_contratados, condiciones_comerciales, motivo_perdida } = req.body;
   try {
-    const { rows } = await pool.query('SELECT estado, telefono FROM prospectos WHERE id=$1', [req.params.id]);
+    const { rows } = await pool.query('SELECT estado, telefono, demo_responsable FROM prospectos WHERE id=$1', [req.params.id]);
     const estadoAnterior = rows[0]?.estado;
     const telefono = rows[0]?.telefono;
+    const demoResponsable = rows[0]?.demo_responsable;
     const extra = {};
     if (estado === 'confirmado') {
       // Separamos los módulos contratados por coma, igual que en el relevamiento (array de strings)
@@ -791,7 +796,7 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
     if (estado === 'confirmado' && telefono) {
       try {
         const mensajeBienvenida = `¡Gracias por elegirnos! 🎉 Te damos la bienvenida a SM Soluciones.\n\nTe compartimos las guías paso a paso para que vayas conociendo el sistema, según el producto contratado:\n\n👉 vPlus: https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/\n👉 Professional Plus: https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/`;
-        await enviarPorChatwoot(telefono, mensajeBienvenida);
+      await enviarPorChatwoot(telefono, mensajeBienvenida, demoResponsable);
       } catch (msgErr) {
         console.error('ERROR enviando mensaje de bienvenida:', msgErr.response?.data || msgErr.message);
       }

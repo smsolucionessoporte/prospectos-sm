@@ -88,7 +88,7 @@ function iniciarRecordatorios() {
 
         const mensaje = `¡Hola! Te recordamos que en 2 hs tenés programada la demostración de nuestro sistema de gestión 🎥\n\n📅 ${fechaFormateada}\n🔗 ${p.zoom_join_url}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.`;
 
-        await enviarPorChatwoot(p.telefono, mensaje);
+        await enviarPorChatwoot(p.telefono, mensaje, p.demo_responsable);
         await pool.query('UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1', [p.id]);
       }
     } catch (err) {
