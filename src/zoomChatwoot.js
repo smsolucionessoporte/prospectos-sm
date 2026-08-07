@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { AGENTE_INBOX } = require('../zoomAgentes'); 
+const { AGENTE_INBOX } = require('./zoomAgentes'); 
 
 async function getZoomToken() {
   const auth = Buffer.from(`${process.env.ZOOM_CLIENT_ID}:${process.env.ZOOM_CLIENT_SECRET}`).toString('base64');
