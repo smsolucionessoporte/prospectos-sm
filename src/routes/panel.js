@@ -259,38 +259,41 @@ router.get("/panel", requireAuth, async (req, res) => {
       </div>
 
       <div class="filter-bar">
-        <form method="GET" action="/panel" class="filter-form">
-          <input type="hidden" name="filtrado" value="1">
-          <div class="search-wrap">
-            <i class="ti ti-search"></i>
-            <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
-              value="${esc(buscar || "")}" class="search-input">
-          </div>
+  <form method="GET" action="/panel" class="filter-form">
+    <input type="hidden" name="filtrado" value="1">
 
-          <div class="estados-check-group">
-            ${Object.entries(ESTADOS).map(([key, meta]) => `
-              <label class="estado-check">
-                <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
-                ${meta.label}
-              </label>
-            `).join("")}
-          </div>
-
-          <div class="periodo-group">
-            <label>Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
-            <label>Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
-          </div>
-
-          <select name="responsable" class="filter-select">
-            <option value="">Todos los responsables</option>
-            ${responsables.rows.map(u =>
-              `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
-            ).join("")}
-          </select>
-          <button type="submit" class="btn btn-secondary">Filtrar</button>
-          <a href="/panel" class="btn btn-ghost">Restablecer defaults</a>
-          </form>
+    <div class="filter-row filter-row-search">
+      <div class="search-wrap">
+        <i class="ti ti-search"></i>
+        <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
+          value="${esc(buscar || "")}" class="search-input">
       </div>
+      <select name="responsable" class="filter-select">
+        <option value="">Todos los responsables</option>
+        ${responsables.rows.map(u =>
+          `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
+        ).join("")}
+      </select>
+      <label class="periodo-field">Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
+      <label class="periodo-field">Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
+    </div>
+
+    <div class="filter-row filter-row-estados">
+      <span class="filter-row-label">Estados:</span>
+      ${Object.entries(ESTADOS).map(([key, meta]) => `
+        <label class="estado-check">
+          <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
+          ${meta.label}
+        </label>
+      `).join("")}
+    </div>
+
+    <div class="filter-row filter-row-actions">
+      <button type="submit" class="btn btn-secondary">Filtrar</button>
+      <a href="/panel" class="btn btn-ghost">Restablecer defaults</a>
+    </div>
+  </form>
+</div>
 
       <div class="table-wrap">
         <table class="prospects-table">
