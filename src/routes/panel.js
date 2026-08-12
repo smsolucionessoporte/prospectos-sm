@@ -168,6 +168,18 @@ router.get("/panel", requireAuth, async (req, res) => {
       .join("&");
     const esTodos = estadosSeleccionados.length === Object.keys(ESTADOS).length;
 
+    // Cantidad de filtros "no default" activos, para el badge del botón Filtros
+    let filtrosActivosCount = 0;
+    if (responsable) filtrosActivosCount++;
+    if (desdeFiltro !== primerDiaMes) filtrosActivosCount++;
+    if (hastaFiltro !== hoyStr) filtrosActivosCount++;
+    if (
+      estadosSeleccionados.length !== ESTADOS_DEFAULT.length ||
+      !ESTADOS_DEFAULT.every((e) => estadosSeleccionados.includes(e))
+    ) {
+      filtrosActivosCount++;
+    }
+
     // Tabla de prospectos
     const filasHtml =
       rows.length === 0
@@ -262,38 +274,57 @@ router.get("/panel", requireAuth, async (req, res) => {
         <form method="GET" action="/panel" class="filter-form">
           <input type="hidden" name="filtrado" value="1">
 
-          <div class="filter-row filter-row-search">
+          <div class="filter-row-search">
             <div class="search-wrap">
               <i class="ti ti-search"></i>
               <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
                 value="${esc(buscar || "")}" class="search-input">
             </div>
-            <select name="responsable" class="filter-select">
-              <option value="">Todos los responsables</option>
-              ${responsables.rows.map(u =>
-                `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
-              ).join("")}
-            </select>
+            <button type="button" class="btn btn-secondary" onclick="abrirModalFiltros()">
+              <i class="ti ti-filter"></i> Filtros${filtrosActivosCount > 0 ? ` <span class="filtros-badge">${filtrosActivosCount}</span>` : ''}
+            </button>
+            <button type="submit" class="btn btn-secondary">Buscar</button>
           </div>
 
-          <div class="filter-row filter-row-periodo">
-            <label class="periodo-field">Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
-            <label class="periodo-field">Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
-          </div>
+          <div id="modal-filtros" class="modal-overlay">
+            <div class="modal-box">
+              <h3><i class="ti ti-filter"></i> Filtros</h3>
 
-          <div class="filter-row filter-row-estados">
-            <span class="filter-row-label">Estados:</span>
-            ${Object.entries(ESTADOS).map(([key, meta]) => `
-              <label class="estado-check">
-                <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
-                ${meta.label}
-              </label>
-            `).join("")}
-          </div>
+              <div class="field">
+                <label>Responsable</label>
+                <select name="responsable" class="filter-select">
+                  <option value="">Todos los responsables</option>
+                  ${responsables.rows.map(u =>
+                    `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
+                  ).join("")}
+                </select>
+              </div>
 
-          <div class="filter-row filter-row-actions">
-            <button type="submit" class="btn btn-secondary">Filtrar</button>
-            <a href="/panel" class="btn btn-ghost">Limpiar</a>
+              <div class="field">
+                <label>Período</label>
+                <div class="periodo-group">
+                  <label class="periodo-field">Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
+                  <label class="periodo-field">Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
+                </div>
+              </div>
+
+              <div class="field">
+                <label>Estados</label>
+                <div class="filter-row-estados">
+                  ${Object.entries(ESTADOS).map(([key, meta]) => `
+                    <label class="estado-check">
+                      <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
+                      ${meta.label}
+                    </label>
+                  `).join("")}
+                </div>
+              </div>
+
+              <div class="modal-actions">
+                <a href="/panel" class="btn btn-ghost">Limpiar</a>
+                <button type="submit" class="btn btn-secondary">Filtrar</button>
+              </div>
+            </div>
           </div>
         </form>
       </div>
@@ -378,13 +409,20 @@ router.get("/panel", requireAuth, async (req, res) => {
           margin-bottom: 16px;
         }
         .filter-form { display: flex; flex-direction: column; gap: 12px; }
-        .filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-        .filter-row + .filter-row { padding-top: 12px; border-top: 1px solid #f1f5f9; }
 
+        .filter-row-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
         .filter-row-search .search-wrap { flex: 1 1 240px; }
-        .filter-row-search .filter-select { flex: 0 0 200px; }
 
-        .filter-row-periodo { justify-content: flex-start; }
+        .filtros-badge {
+          background: #4338ca; color: #fff; border-radius: 999px;
+          font-size: 0.72em; padding: 1px 7px; margin-left: 4px;
+        }
+
+        .modal-box .field { text-align: left; }
+        .modal-box .field label { display: block; font-size: 0.82em; color: #64748b; font-weight: 600; margin-bottom: 6px; }
+        .modal-box .filter-select { width: 100%; }
+
+        .periodo-group { display: flex; gap: 10px; flex-wrap: wrap; }
         .periodo-field {
           display: flex; align-items: center; gap: 6px;
           font-size: 0.82em; color: #475569; white-space: nowrap;
@@ -393,8 +431,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           padding: 5px 6px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9em;
         }
 
-        .filter-row-label { font-size: 0.82em; color: #64748b; font-weight: 600; margin-right: 2px; }
-
+        .filter-row-estados { display: flex; flex-wrap: wrap; gap: 8px; }
         .estado-check {
           display: flex; align-items: center; gap: 5px;
           font-size: 0.82em; white-space: nowrap;
@@ -405,15 +442,15 @@ router.get("/panel", requireAuth, async (req, res) => {
           background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 600;
         }
 
-        .filter-row-actions { justify-content: flex-start; padding-top: 4px; }
-
         @media (max-width: 720px) {
           .filter-row-search { flex-direction: column; align-items: stretch; }
-          .filter-row-search .filter-select { flex: 1 1 auto; }
         }
       </style>
 
       <script>
+        function abrirModalFiltros() {
+          document.getElementById('modal-filtros').classList.add('open');
+        }
         function abrirModalConfirmar(id) {
           document.getElementById('form-confirmar').action = '/prospectos/' + id + '/estado';
           document.getElementById('modal-confirmar').classList.add('open');
