@@ -13,6 +13,12 @@ const ESTADOS = {
   perdido: { label: "Perdido", color: "red" },
 };
 
+// Estados tildados por defecto la primera vez que se entra al panel
+// (todos menos perdido y sin_respuesta)
+const ESTADOS_DEFAULT = Object.keys(ESTADOS).filter(
+  (k) => k !== "perdido" && k !== "sin_respuesta",
+);
+
 const PROXIMA_ACCION = {
   prospecto: "Coordinar demo",
   sin_respuesta: "Reintentar contacto",
@@ -44,8 +50,25 @@ const PAGE_SIZE = 20;
 
 router.get("/panel", requireAuth, async (req, res) => {
   try {
-    const { estado, buscar, responsable } = req.query;
+    const { buscar, responsable, desde, hasta, filtrado } = req.query;
     const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
+
+    // Si el form ya fue enviado (filtrado=1), respeto lo que vino, aunque sea vacío
+    // (ej: el usuario destildó todos los estados a propósito).
+    // Si es la primera carga del panel, aplico los defaults.
+    const estadosSeleccionados = filtrado
+      ? (req.query.estados
+          ? (Array.isArray(req.query.estados) ? req.query.estados : [req.query.estados])
+          : [])
+      : ESTADOS_DEFAULT;
+
+    const hoy = new Date();
+    const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
+      .toISOString()
+      .slice(0, 10);
+    const hoyStr = hoy.toISOString().slice(0, 10);
+    const desdeFiltro = filtrado ? (desde || null) : primerDiaMes;
+    const hastaFiltro = filtrado ? (hasta || null) : hoyStr;
 
     // Conteos por estado para las cards
     const conteos = await pool.query(`
@@ -64,14 +87,26 @@ router.get("/panel", requireAuth, async (req, res) => {
     let where = [];
     let params = [];
     let i = 1;
-    if (estado) {
-      where.push(`p.estado = $${i++}`);
-      params.push(estado);
+
+    if (estadosSeleccionados.length) {
+      where.push(`p.estado = ANY($${i++})`);
+      params.push(estadosSeleccionados);
+    } else {
+      // ningún estado tildado => no mostrar nada
+      where.push(`1=0`);
     }
     if (responsable) {
       // "responsable" = quien tiene la demo asignada, o quien cargó el prospecto si nunca hubo demo
       where.push(`COALESCE(p.demo_responsable, p.creado_por) = $${i++}`);
       params.push(responsable);
+    }
+    if (desdeFiltro) {
+      where.push(`p.creado_en >= $${i++}`);
+      params.push(desdeFiltro);
+    }
+    if (hastaFiltro) {
+      where.push(`p.creado_en < $${i++}::date + interval '1 day'`);
+      params.push(hastaFiltro);
     }
     if (buscar) {
       where.push(
@@ -113,17 +148,25 @@ router.get("/panel", requireAuth, async (req, res) => {
 
     const rows = prospectos.rows;
 
-    // Cards de estado
+    // Cards de estado (cada una tilda solo ese estado y dispara filtrado=1)
+    const qsFechas = `${desdeFiltro ? "&desde=" + desdeFiltro : ""}${hastaFiltro ? "&hasta=" + hastaFiltro : ""}`;
     const cardsHtml = Object.entries(ESTADOS)
-      .map(
-        ([key, meta]) => `
-      <a href="/panel?estado=${key}" class="stat-card ${estado === key ? "active" : ""}">
+      .map(([key, meta]) => {
+        const esUnico =
+          estadosSeleccionados.length === 1 && estadosSeleccionados[0] === key;
+        return `
+      <a href="/panel?filtrado=1&estados=${key}${qsFechas}" class="stat-card ${esUnico ? "active" : ""}">
         <span class="stat-num ${meta.color}">${totales[key] || 0}</span>
         <span class="stat-label">${meta.label}</span>
       </a>
-    `,
-      )
+    `;
+      })
       .join("");
+
+    const todosLosEstadosQs = Object.keys(ESTADOS)
+      .map((k) => `estados=${k}`)
+      .join("&");
+    const esTodos = estadosSeleccionados.length === Object.keys(ESTADOS).length;
 
     // Tabla de prospectos
     const filasHtml =
@@ -131,7 +174,7 @@ router.get("/panel", requireAuth, async (req, res) => {
         ? `
       <tr><td colspan="9" class="empty-row">
         <i class="ti ti-users-group"></i>
-        <span>No hay prospectos${estado ? " en este estado" : ""}${buscar ? " con esa búsqueda" : ""}</span>
+        <span>No hay prospectos${buscar ? " con esa búsqueda" : ""}</span>
       </td></tr>
     `
         : rows
@@ -208,7 +251,7 @@ router.get("/panel", requireAuth, async (req, res) => {
       </div>
 
       <div class="stats-row">
-        <a href="/panel" class="stat-card ${!estado ? "active" : ""}">
+        <a href="/panel?filtrado=1&${todosLosEstadosQs}${qsFechas}" class="stat-card ${esTodos ? "active" : ""}">
           <span class="stat-num">${totalGeneral}</span>
           <span class="stat-label">Todos</span>
         </a>
@@ -217,25 +260,35 @@ router.get("/panel", requireAuth, async (req, res) => {
 
       <div class="filter-bar">
         <form method="GET" action="/panel" class="filter-form">
+          <input type="hidden" name="filtrado" value="1">
           <div class="search-wrap">
             <i class="ti ti-search"></i>
             <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
               value="${esc(buscar || "")}" class="search-input">
           </div>
-          <select name="estado" class="filter-select">
-            <option value="">Todos los estados</option>
-            ${Object.entries(ESTADOS).map(([key, meta]) =>
-              `<option value="${key}" ${estado === key ? "selected" : ""}>${meta.label}</option>`
-            ).join("")}
-          </select>
-                  <select name="responsable" class="filter-select">
+
+          <div class="estados-check-group">
+            ${Object.entries(ESTADOS).map(([key, meta]) => `
+              <label class="estado-check">
+                <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
+                ${meta.label}
+              </label>
+            `).join("")}
+          </div>
+
+          <div class="periodo-group">
+            <label>Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
+            <label>Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
+          </div>
+
+          <select name="responsable" class="filter-select">
             <option value="">Todos los responsables</option>
             ${responsables.rows.map(u =>
               `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
             ).join("")}
           </select>
           <button type="submit" class="btn btn-secondary">Filtrar</button>
-            ${buscar || responsable || estado ? '<a href="/panel" class="btn btn-ghost">Limpiar</a>' : ""}
+          <a href="/panel" class="btn btn-ghost">Restablecer defaults</a>
           </form>
       </div>
 
@@ -308,6 +361,10 @@ router.get("/panel", requireAuth, async (req, res) => {
         .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
         .badge-estado.yellow { background:#fef9c3; color:#854d0e; }
         .stat-num.yellow { color:#854d0e; }
+        .estados-check-group { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+        .estado-check { display:flex; align-items:center; gap:4px; font-size:0.85em; white-space:nowrap; }
+        .periodo-group { display:flex; gap:10px; align-items:center; font-size:0.85em; }
+        .periodo-group input[type="date"] { padding:4px 6px; }
       </style>
 
       <script>
@@ -339,8 +396,18 @@ router.get("/panel", requireAuth, async (req, res) => {
 });
 
 function buildUrl(req, overrides) {
-  const params = new URLSearchParams(req.query);
-  Object.entries(overrides).forEach(([k, v]) => params.set(k, v));
+  const params = new URLSearchParams();
+  Object.entries(req.query).forEach(([k, v]) => {
+    if (Array.isArray(v)) {
+      v.forEach((val) => params.append(k, val));
+    } else if (v !== undefined) {
+      params.append(k, v);
+    }
+  });
+  Object.entries(overrides).forEach(([k, v]) => {
+    params.delete(k);
+    params.append(k, v);
+  });
   return `/panel?${params.toString()}`;
 }
 
