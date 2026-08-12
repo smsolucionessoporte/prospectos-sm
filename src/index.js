@@ -134,8 +134,12 @@ async function enviarResumenDiario() {
 
     if (pendientesDemo.rows.length) {
       mensaje += `\n📋 *Pendientes de coordinar demo (${pendientesDemo.rows.length}):*\n`;
-      pendientesDemo.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`);
+      pendientesDemo.rows.forEach(p => {
+        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`;
+        if (p.notas) mensaje += `   📝 ${p.notas}\n`;
+      });
     }
+    
     if (demosCoordinadas.rows.length) {
       mensaje += `\n📅 *Demos coordinadas (${demosCoordinadas.rows.length}):*\n`;
       demosCoordinadas.rows.forEach(p => {
@@ -143,10 +147,19 @@ async function enviarResumenDiario() {
         mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} — ${fecha} (${p.u_nombre || '—'})\n`;
       });
     }
-    if (pendientesConfirmar.rows.length) {
-      mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
-      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (${responsableCierre(p)})\n`);
-    }
+      if (pendientesConfirmar.rows.length) {
+        mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
+        const porResponsable = {};
+        pendientesConfirmar.rows.forEach(p => {
+          const resp = responsableCierre(p) || '—';
+          if (!porResponsable[resp]) porResponsable[resp] = [];
+          porResponsable[resp].push(p);
+        });
+        Object.entries(porResponsable).forEach(([resp, items]) => {
+          mensaje += `\n Cierre: ${resp}_\n`;
+          items.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (${p.u_nombre || '—'})\n`);
+        });
+      }
 
     await enviarMensajePorConversationId(grupoConvId, mensaje);
   } catch (err) {
