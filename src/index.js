@@ -108,7 +108,7 @@ async function enviarResumenDiario() {
   try {
     const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
     if (!grupoConvId) return;
- 
+
     const pendientesDemo = await pool.query(`
       SELECT p.*, u.nombre as u_nombre
       FROM prospectos p
@@ -127,11 +127,11 @@ async function enviarResumenDiario() {
       LEFT JOIN usuarios u ON p.demo_responsable = u.id
       WHERE p.estado = 'demo_realizada'
     `);
- 
+
     if (!pendientesDemo.rows.length && !demosCoordinadas.rows.length && !pendientesConfirmar.rows.length) return;
- 
+
     let mensaje = `☀️ Resumen diario de casos pendientes:\n`;
- 
+
     if (pendientesDemo.rows.length) {
       mensaje += `\n📋 *Pendientes de coordinar demo (${pendientesDemo.rows.length}):*\n`;
       pendientesDemo.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`);
@@ -140,14 +140,14 @@ async function enviarResumenDiario() {
       mensaje += `\n📅 *Demos coordinadas (${demosCoordinadas.rows.length}):*\n`;
       demosCoordinadas.rows.forEach(p => {
         const fecha = new Date(p.demo_fecha).toLocaleString('es-AR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${fecha} (${p.u_nombre || '—'})\n`;
+        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} — ${fecha} (${p.u_nombre || '—'})\n`;
       });
     }
     if (pendientesConfirmar.rows.length) {
       mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
-      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} (${p.u_nombre || '—'})\n`);
+      pendientesConfirmar.rows.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (${responsableCierre(p)})\n`);
     }
- 
+
     await enviarMensajePorConversationId(grupoConvId, mensaje);
   } catch (err) {
     console.error('Error en resumen diario:', err);
