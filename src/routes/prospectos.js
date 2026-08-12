@@ -142,7 +142,7 @@ router.get('/prospectos/nuevo', requireAuth, (req, res) => {
             <span>Rubro <span class="req">*</span></span>
           </div>
           <div class="chips-group" id="chips-rubro">
-            ${['Dietética','Almacén / minimercado','Carnicería','Fiambrería','Mayorista','Otro'].map(r =>
+            ${['Dietética','Almacén / minimercado','Carnicería', 'Pollería', 'Pet Shop', 'Forrajería', 'Fiambrería','Mayorista','Otro'].map(r =>
               `<label class="chip-label"><input type="radio" name="rubro" value="${r}" required><span class="chip">${r}</span></label>`
             ).join('')}
           </div>
@@ -560,7 +560,7 @@ router.get('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-building-store"></i><span>Rubro del negocio</span><span class="badge-req">obligatorio</span></div>
           <div class="chips-group">
-            ${['Dietética','Almacén / minimercado','Carnicería','Fiambrería','Mayorista','Otro'].map(r =>
+            ${['Dietética','Almacén / minimercado','Carnicería', 'Pollería', 'Pet Shop', 'Forrajería', 'Fiambrería','Mayorista','Otro'].map(r =>
               `<label class="chip-label"><input type="radio" name="rubro" value="${r}" ${p.rubro===r?'checked':''}><span class="chip">${r}</span></label>`
             ).join('')}
           </div>
@@ -875,7 +875,7 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-building-store"></i><span>Rubro</span></div>
           <div class="chips-group">
-            ${['Dietética','Almacén / minimercado','Carnicería','Fiambrería','Mayorista','Otro'].map(r =>
+            ${['Dietética','Almacén / minimercado','Carnicería', 'Pollería', 'Pet Shop', 'Forrajería', 'Fiambrería','Mayorista','Otro'].map(r =>
               `<label class="chip-label"><input type="radio" name="rubro" value="${r}" ${p.rubro===r?'checked':''}><span class="chip">${r}</span></label>`
             ).join('')}
           </div>
