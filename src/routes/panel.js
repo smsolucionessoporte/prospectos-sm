@@ -274,6 +274,9 @@ router.get("/panel", requireAuth, async (req, res) => {
                 `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
               ).join("")}
             </select>
+          </div>
+
+          <div class="filter-row filter-row-periodo">
             <label class="periodo-field">Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
             <label class="periodo-field">Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
           </div>
@@ -290,7 +293,7 @@ router.get("/panel", requireAuth, async (req, res) => {
 
           <div class="filter-row filter-row-actions">
             <button type="submit" class="btn btn-secondary">Filtrar</button>
-            <a href="/panel" class="btn btn-ghost">Restablecer defaults</a>
+            <a href="/panel" class="btn btn-ghost">Limpiar</a>
           </div>
         </form>
       </div>
@@ -376,11 +379,12 @@ router.get("/panel", requireAuth, async (req, res) => {
         }
         .filter-form { display: flex; flex-direction: column; gap: 12px; }
         .filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .filter-row + .filter-row { padding-top: 12px; border-top: 1px solid #f1f5f9; }
 
-        .filter-row-search { border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
         .filter-row-search .search-wrap { flex: 1 1 240px; }
-        .filter-row-search .filter-select { flex: 0 0 180px; }
+        .filter-row-search .filter-select { flex: 0 0 200px; }
 
+        .filter-row-periodo { justify-content: flex-start; }
         .periodo-field {
           display: flex; align-items: center; gap: 6px;
           font-size: 0.82em; color: #475569; white-space: nowrap;
@@ -401,7 +405,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 600;
         }
 
-        .filter-row-actions { justify-content: flex-end; padding-top: 2px; }
+        .filter-row-actions { justify-content: flex-start; padding-top: 4px; }
 
         @media (max-width: 720px) {
           .filter-row-search { flex-direction: column; align-items: stretch; }
