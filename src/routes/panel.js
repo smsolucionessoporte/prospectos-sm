@@ -259,41 +259,41 @@ router.get("/panel", requireAuth, async (req, res) => {
       </div>
 
       <div class="filter-bar">
-  <form method="GET" action="/panel" class="filter-form">
-    <input type="hidden" name="filtrado" value="1">
+        <form method="GET" action="/panel" class="filter-form">
+          <input type="hidden" name="filtrado" value="1">
 
-    <div class="filter-row filter-row-search">
-      <div class="search-wrap">
-        <i class="ti ti-search"></i>
-        <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
-          value="${esc(buscar || "")}" class="search-input">
+          <div class="filter-row filter-row-search">
+            <div class="search-wrap">
+              <i class="ti ti-search"></i>
+              <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
+                value="${esc(buscar || "")}" class="search-input">
+            </div>
+            <select name="responsable" class="filter-select">
+              <option value="">Todos los responsables</option>
+              ${responsables.rows.map(u =>
+                `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
+              ).join("")}
+            </select>
+            <label class="periodo-field">Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
+            <label class="periodo-field">Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
+          </div>
+
+          <div class="filter-row filter-row-estados">
+            <span class="filter-row-label">Estados:</span>
+            ${Object.entries(ESTADOS).map(([key, meta]) => `
+              <label class="estado-check">
+                <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
+                ${meta.label}
+              </label>
+            `).join("")}
+          </div>
+
+          <div class="filter-row filter-row-actions">
+            <button type="submit" class="btn btn-secondary">Filtrar</button>
+            <a href="/panel" class="btn btn-ghost">Restablecer defaults</a>
+          </div>
+        </form>
       </div>
-      <select name="responsable" class="filter-select">
-        <option value="">Todos los responsables</option>
-        ${responsables.rows.map(u =>
-          `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
-        ).join("")}
-      </select>
-      <label class="periodo-field">Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
-      <label class="periodo-field">Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
-    </div>
-
-    <div class="filter-row filter-row-estados">
-      <span class="filter-row-label">Estados:</span>
-      ${Object.entries(ESTADOS).map(([key, meta]) => `
-        <label class="estado-check">
-          <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
-          ${meta.label}
-        </label>
-      `).join("")}
-    </div>
-
-    <div class="filter-row filter-row-actions">
-      <button type="submit" class="btn btn-secondary">Filtrar</button>
-      <a href="/panel" class="btn btn-ghost">Restablecer defaults</a>
-    </div>
-  </form>
-</div>
 
       <div class="table-wrap">
         <table class="prospects-table">
@@ -364,10 +364,49 @@ router.get("/panel", requireAuth, async (req, res) => {
         .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
         .badge-estado.yellow { background:#fef9c3; color:#854d0e; }
         .stat-num.yellow { color:#854d0e; }
-        .estados-check-group { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
-        .estado-check { display:flex; align-items:center; gap:4px; font-size:0.85em; white-space:nowrap; }
-        .periodo-group { display:flex; gap:10px; align-items:center; font-size:0.85em; }
-        .periodo-group input[type="date"] { padding:4px 6px; }
+        .stats-row { flex-wrap: wrap; gap: 10px; }
+        .stat-card { min-width: 110px; }
+
+        .filter-bar {
+          background: #fff;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          padding: 14px 16px;
+          margin-bottom: 16px;
+        }
+        .filter-form { display: flex; flex-direction: column; gap: 12px; }
+        .filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+        .filter-row-search { border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; }
+        .filter-row-search .search-wrap { flex: 1 1 240px; }
+        .filter-row-search .filter-select { flex: 0 0 180px; }
+
+        .periodo-field {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 0.82em; color: #475569; white-space: nowrap;
+        }
+        .periodo-field input[type="date"] {
+          padding: 5px 6px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9em;
+        }
+
+        .filter-row-label { font-size: 0.82em; color: #64748b; font-weight: 600; margin-right: 2px; }
+
+        .estado-check {
+          display: flex; align-items: center; gap: 5px;
+          font-size: 0.82em; white-space: nowrap;
+          background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px;
+          padding: 5px 10px; cursor: pointer;
+        }
+        .estado-check:has(input:checked) {
+          background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 600;
+        }
+
+        .filter-row-actions { justify-content: flex-end; padding-top: 2px; }
+
+        @media (max-width: 720px) {
+          .filter-row-search { flex-direction: column; align-items: stretch; }
+          .filter-row-search .filter-select { flex: 1 1 auto; }
+        }
       </style>
 
       <script>
