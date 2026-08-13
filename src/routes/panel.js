@@ -295,7 +295,6 @@ router.get("/panel", requireAuth, async (req, res) => {
 
           <div class="filter-row-search">
             <div class="search-wrap">
-              <i class="ti ti-search"></i>
               <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
                 value="${esc(buscar || "")}" class="search-input">
             </div>
