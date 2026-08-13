@@ -41,8 +41,8 @@ function puedeCerrar(usuarioSesion, prospecto) {
 }
 
 function responsableCierre(p) {
-  if (p.origen === 'prospecto-interno') return 'Andrés';
-  return p.creado_por_nombre || '—';
+  if (p.origen === 'prospecto-interno') return 'Admin';
+  return p.creado_por_nombre || 'Ventas';
 }
 
 
