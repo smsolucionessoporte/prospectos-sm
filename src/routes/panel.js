@@ -50,8 +50,14 @@ const PAGE_SIZE = 20;
 
 router.get("/panel", requireAuth, async (req, res) => {
   try {
-    const { buscar, responsable, desde, hasta, filtrado } = req.query;
+    const { buscar, desde, hasta, filtrado } = req.query;
     const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
+
+    // soporte y vendedor solo ven sus propios prospectos (donde son demo_responsable,
+    // o creado_por si nunca hubo demo) y no pueden filtrar por otro responsable
+    const usuarioSesion = req.session.usuario;
+    const vistaRestringida = usuarioSesion.rol === "soporte" || usuarioSesion.rol === "vendedor";
+    const responsable = vistaRestringida ? String(usuarioSesion.id) : req.query.responsable;
 
     // Si el form ya fue enviado (filtrado=1), respeto lo que vino, aunque sea vacío
     // (ej: el usuario destildó todos los estados a propósito).
@@ -70,18 +76,35 @@ router.get("/panel", requireAuth, async (req, res) => {
     const desdeFiltro = filtrado ? (desde || null) : primerDiaMes;
     const hastaFiltro = filtrado ? (hasta || null) : hoyStr;
 
-    // Conteos por estado para las cards
-    const conteos = await pool.query(`
-      SELECT estado, COUNT(*) as total FROM prospectos GROUP BY estado
-    `);
+    // Conteos por estado para las cards — respetan el período seleccionado
+    // (no el filtro de estados, para que las cards sigan mostrando el desglose completo)
+    let conteosWhere = [];
+    let conteosParams = [];
+    let ci = 1;
+    if (desdeFiltro) {
+      conteosWhere.push(`creado_en >= $${ci++}`);
+      conteosParams.push(desdeFiltro);
+    }
+    if (hastaFiltro) {
+      conteosWhere.push(`creado_en < $${ci++}::date + interval '1 day'`);
+      conteosParams.push(hastaFiltro);
+    }
+    const conteosWhereClause = conteosWhere.length ? "WHERE " + conteosWhere.join(" AND ") : "";
+    const conteos = await pool.query(
+      `SELECT estado, COUNT(*) as total FROM prospectos ${conteosWhereClause} GROUP BY estado`,
+      conteosParams
+    );
     const totales = {};
     conteos.rows.forEach((r) => (totales[r.estado] = parseInt(r.total)));
     const totalGeneral = Object.values(totales).reduce((a, b) => a + b, 0);
 
-    // Lista de responsables para el filtro (soporte + admin activos)
-    const responsables = await pool.query(
-      `SELECT id, nombre FROM usuarios WHERE activo = true AND rol IN ('soporte','admin','vendedor') ORDER BY nombre`
-    );
+    // Lista de responsables para el filtro (soporte + admin activos).
+    // No hace falta si el usuario tiene vista restringida (no puede elegir otro responsable).
+    const responsables = vistaRestringida
+      ? { rows: [] }
+      : await pool.query(
+          `SELECT id, nombre FROM usuarios WHERE activo = true AND rol IN ('soporte','admin','vendedor') ORDER BY nombre`
+        );
 
     // Filtros
     let where = [];
@@ -170,7 +193,7 @@ router.get("/panel", requireAuth, async (req, res) => {
 
     // Cantidad de filtros "no default" activos, para el badge del botón Filtros
     let filtrosActivosCount = 0;
-    if (responsable) filtrosActivosCount++;
+    if (responsable && !vistaRestringida) filtrosActivosCount++;
     if (desdeFiltro !== primerDiaMes) filtrosActivosCount++;
     if (hastaFiltro !== hoyStr) filtrosActivosCount++;
     if (
@@ -290,6 +313,7 @@ router.get("/panel", requireAuth, async (req, res) => {
             <div class="modal-box">
               <h3><i class="ti ti-filter"></i> Filtros</h3>
 
+              ${vistaRestringida ? '' : `
               <div class="field">
                 <label>Responsable</label>
                 <select name="responsable" class="filter-select">
@@ -299,6 +323,7 @@ router.get("/panel", requireAuth, async (req, res) => {
                   ).join("")}
                 </select>
               </div>
+              `}
 
               <div class="field">
                 <label>Período</label>
