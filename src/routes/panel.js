@@ -46,12 +46,9 @@ const ORIGEN_LABEL = {
   'prospecto-interno': '💬 Interno',
 };
 
-const PAGE_SIZE = 20;
-
 router.get("/panel", requireAuth, async (req, res) => {
   try {
     const { buscar, desde, hasta, filtrado } = req.query;
-    const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
 
     // soporte y vendedor solo ven sus propios prospectos (donde son demo_responsable,
     // o creado_por si nunca hubo demo) y no pueden filtrar por otro responsable
@@ -140,19 +137,9 @@ router.get("/panel", requireAuth, async (req, res) => {
     }
     const whereClause = where.length ? "WHERE " + where.join(" AND ") : "";
 
-    // Total de filas que matchean el filtro (para el paginado)
-    const countResult = await pool.query(
-      `SELECT COUNT(*) as total FROM prospectos p ${whereClause}`,
-      params
-    );
-    const totalFiltrado = parseInt(countResult.rows[0].total);
-    const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / PAGE_SIZE));
-    const paginaActual = Math.min(pagina, totalPaginas);
-    const offset = (paginaActual - 1) * PAGE_SIZE;
-
-    const limitParamIdx = i++;
-    const offsetParamIdx = i++;
-
+    // Traigo todos los prospectos que matchean el filtro (sin paginado, ya que
+    // el filtro por período acota el volumen). Ordeno por fecha de actualización
+    // y después agrupo por estado en JS respetando el orden de ESTADOS.
     const prospectos = await pool.query(
       `
       SELECT p.*, 
@@ -164,12 +151,19 @@ router.get("/panel", requireAuth, async (req, res) => {
       LEFT JOIN usuarios ud ON p.demo_responsable = ud.id
       ${whereClause}
       ORDER BY p.actualizado_en DESC
-      LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
     `,
-      [...params, PAGE_SIZE, offset],
+      params,
     );
 
     const rows = prospectos.rows;
+    const totalFiltrado = rows.length;
+
+    // Agrupo las filas por estado, respetando el orden definido en ESTADOS
+    const gruposPorEstado = {};
+    rows.forEach((p) => {
+      if (!gruposPorEstado[p.estado]) gruposPorEstado[p.estado] = [];
+      gruposPorEstado[p.estado].push(p);
+    });
 
     // Cards de estado (cada una tilda solo ese estado y dispara filtrado=1)
     const qsFechas = `${desdeFiltro ? "&desde=" + desdeFiltro : ""}${hastaFiltro ? "&hasta=" + hastaFiltro : ""}`;
@@ -203,24 +197,15 @@ router.get("/panel", requireAuth, async (req, res) => {
       filtrosActivosCount++;
     }
 
-    // Tabla de prospectos
-    const filasHtml =
-      rows.length === 0
-        ? `
-      <tr><td colspan="9" class="empty-row">
-        <i class="ti ti-users-group"></i>
-        <span>No hay prospectos${buscar ? " con esa búsqueda" : ""}</span>
-      </td></tr>
-    `
-        : rows
-          .map((p) => {
-            const est = ESTADOS[p.estado] || {};
-            const fecha = new Date(p.creado_en).toLocaleDateString("es-AR", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "2-digit",
-            });
-            return `
+    // Filas de una fila individual (misma estructura que antes)
+    function filaHtml(p) {
+      const est = ESTADOS[p.estado] || {};
+      const fecha = new Date(p.creado_en).toLocaleDateString("es-AR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "2-digit",
+      });
+      return `
         <tr onclick="location.href='/prospectos/${p.id}'" class="row-link">
 <td>
             <div class="prospect-contact">${esc(p.contacto || "—")}</div>
@@ -251,25 +236,36 @@ router.get("/panel", requireAuth, async (req, res) => {
           </td>
         </tr>
       `;
-          })
-          .join("");
+    }
 
-    // Controles de paginado
-    const paginacionHtml = totalPaginas > 1 ? `
-      <div class="pagination">
-        <a href="${buildUrl(req, { pagina: paginaActual - 1 })}" 
-           class="btn-icon ${paginaActual <= 1 ? 'disabled' : ''}" 
-           ${paginaActual <= 1 ? 'aria-disabled="true"' : ''}>
-          <i class="ti ti-chevron-left"></i>
-        </a>
-        <span class="pagination-info">Página ${paginaActual} de ${totalPaginas} (${totalFiltrado} resultados)</span>
-        <a href="${buildUrl(req, { pagina: paginaActual + 1 })}" 
-           class="btn-icon ${paginaActual >= totalPaginas ? 'disabled' : ''}"
-           ${paginaActual >= totalPaginas ? 'aria-disabled="true"' : ''}>
-          <i class="ti ti-chevron-right"></i>
-        </a>
-      </div>
-    ` : '';
+    // Tabla de prospectos, agrupada por estado (respetando el orden de ESTADOS)
+    // y mostrando solo los grupos que tienen filas.
+    const filasHtml =
+      rows.length === 0
+        ? `
+      <tr><td colspan="9" class="empty-row">
+        <i class="ti ti-users-group"></i>
+        <span>No hay prospectos${buscar ? " con esa búsqueda" : ""}</span>
+      </td></tr>
+    `
+        : Object.keys(ESTADOS)
+            .filter((estadoKey) => gruposPorEstado[estadoKey] && gruposPorEstado[estadoKey].length)
+            .map((estadoKey) => {
+              const meta = ESTADOS[estadoKey];
+              const grupo = gruposPorEstado[estadoKey];
+              const headerRow = `
+        <tr class="group-header-row">
+          <td colspan="9">
+            <div class="group-header">
+              <span class="badge-estado ${meta.color}">${meta.label}</span>
+              <span class="group-count">${grupo.length}</span>
+            </div>
+          </td>
+        </tr>
+      `;
+              return headerRow + grupo.map(filaHtml).join("");
+            })
+            .join("");
 
     res.send(
       layout(
@@ -372,7 +368,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           <tbody>${filasHtml}</tbody>
         </table>
       </div>
-      ${paginacionHtml}
+      <p class="results-count">${totalFiltrado} resultado${totalFiltrado === 1 ? '' : 's'}</p>
 
       <div id="modal-confirmar" class="modal-overlay">
         <div class="modal-box">
@@ -467,6 +463,24 @@ router.get("/panel", requireAuth, async (req, res) => {
           background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 600;
         }
 
+        .group-header-row td {
+          background: #f8fafc;
+          border-top: 1px solid #e2e8f0;
+          border-bottom: 1px solid #e2e8f0;
+          padding: 8px 12px;
+          cursor: default;
+        }
+        .group-header-row:hover td { background: #f8fafc; }
+        .group-header {
+          display: flex; align-items: center; gap: 8px;
+        }
+        .group-count {
+          color: #64748b; font-size: 0.82em; font-weight: 600;
+        }
+        .results-count {
+          color: #64748b; font-size: 0.85em; margin-top: 8px;
+        }
+
         @media (max-width: 720px) {
           .filter-row-search { flex-direction: column; align-items: stretch; }
         }
@@ -502,22 +516,6 @@ router.get("/panel", requireAuth, async (req, res) => {
     res.status(500).send("Error interno");
   }
 });
-
-function buildUrl(req, overrides) {
-  const params = new URLSearchParams();
-  Object.entries(req.query).forEach(([k, v]) => {
-    if (Array.isArray(v)) {
-      v.forEach((val) => params.append(k, val));
-    } else if (v !== undefined) {
-      params.append(k, v);
-    }
-  });
-  Object.entries(overrides).forEach(([k, v]) => {
-    params.delete(k);
-    params.append(k, v);
-  });
-  return `/panel?${params.toString()}`;
-}
 
 function esc(str) {
   return String(str || "")
