@@ -54,6 +54,12 @@ function normalizarTelefono(tel) {
   return variantes;
 }
 
+        const NUMERO_AVISOS = '+5491132780621';
+
+        async function enviarAvisoInterno(mensaje) {
+          return enviarPorChatwoot(NUMERO_AVISOS, mensaje, null);
+        }
+
 async function enviarMensajePorConversationId(conversationId, mensaje) {
   await axios.post(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
@@ -73,11 +79,7 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
           return false;
         }
 
-  const NUMERO_AVISOS = '+5491132780621';
 
-async function enviarAvisoInterno(mensaje) {
-  return enviarPorChatwoot(NUMERO_AVISOS, mensaje, null);
-}
 
   const variantes = normalizarTelefono(telefono);
   let contacto = null;
