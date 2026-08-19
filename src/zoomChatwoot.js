@@ -62,15 +62,22 @@ async function enviarMensajePorConversationId(conversationId, mensaje) {
   );
 }
 
+const BOT_INBOX_ID = process.env.BOT_INBOX_ID; // ID del inbox del canal del bot en Chatwoot
+
 async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
 
-  const inboxId = AGENTE_INBOX[usuarioId];
+      const inboxId = BOT_INBOX_ID;
 
-  // Si no tiene canal asignado no se envía
-  if (!inboxId) {
-    console.log(`Usuario ${usuarioId} no tiene inbox Chatwoot configurado`);
-    return false;
-  }
+        if (!inboxId) {
+          console.log('BOT_INBOX_ID no configurado');
+          return false;
+        }
+
+  const NUMERO_AVISOS = '+5491132780621';
+
+async function enviarAvisoInterno(mensaje) {
+  return enviarPorChatwoot(NUMERO_AVISOS, mensaje, null);
+}
 
   const variantes = normalizarTelefono(telefono);
   let contacto = null;
@@ -171,4 +178,4 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
 
 
 
-module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId, normalizarTelefono };
+module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId, normalizarTelefono, enviarAvisoInterno };

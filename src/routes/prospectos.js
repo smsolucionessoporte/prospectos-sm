@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('../zoomAgentes');
-const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId, normalizarTelefono } = require('../zoomChatwoot');
+const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, normalizarTelefono, enviarAvisoInterno } = require('../zoomChatwoot');
 
 function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -738,13 +738,10 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       }
 
       // ─── Enviar datos del relevamiento al grupo ───
-        const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
-        const nombreParaGrupo = p.nombre_negocio || p.contacto || 'Sin nombre';
-      if (grupoConvId) {
-        const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
-        const mensajeGrupo = `📋 Demo realizada: *${nombreParaGrupo}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n\n👉 Cerrar cliente: ${link}`;
-        await enviarMensajePorConversationId(grupoConvId, mensajeGrupo);
-      }
+
+      const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
+      const mensajeGrupo = `📋 Demo realizada: *${nombreParaGrupo}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n\n👉 Cerrar cliente: ${link}`;
+      await enviarAvisoInterno(mensajeGrupo);
     } catch (msgErr) {
       console.error('ERROR enviando mensajes post-relevamiento:', msgErr.response?.data || msgErr.message);
     }
@@ -803,16 +800,10 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
 
       // ─── Aviso al grupo con los datos del cliente confirmado ───
           try {
-            const grupoConvId = process.env.CHATWOOT_GRUPO_CONVERSATION_ID;
-            if (grupoConvId) {
-              const { rows: fullRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
-              const full = fullRows[0];
-              const nombreParaGrupo = full.nombre_negocio || full.contacto || 'Sin nombre';
-              const linkProspecto = `${process.env.APP_URL}/prospectos/${req.params.id}`;
-              const linkSmAdmin = process.env.SM_ADMIN_URL;
-              const mensajeAlta = `🆕 Nuevo cliente confirmado: *${nombreParaGrupo}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
-              await enviarMensajePorConversationId(grupoConvId, mensajeAlta);
-            }
+            const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
+            const mensajeAlta = `🆕 Nuevo cliente confirmado: *${nombreParaGrupo}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
+            await enviarAvisoInterno(mensajeAlta);
+            
           } catch (msgErr) {
             console.error('ERROR enviando aviso al grupo:', msgErr.response?.data || msgErr.message);
           }
