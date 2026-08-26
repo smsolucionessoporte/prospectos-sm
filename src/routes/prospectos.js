@@ -64,12 +64,7 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
       return res.status(200).json({ ok: true, duplicado: true, id: existe[0].id });
     }
 
-    let creadoPor;
-    if (origen === 'prospecto-redes') {
-      creadoPor = Number(process.env.RAFAEL_USUARIO_ID);
-    } else {
-      creadoPor = AGENTE_CHATWOOT_ID[chatwoot_agent_id] || null;
-    }
+    const creadoPor = AGENTE_CHATWOOT_ID[chatwoot_agent_id] || null;
 
     const result = await pool.query(`
       INSERT INTO prospectos (nombre_negocio, contacto, telefono, rubro, nota_prospecto, creado_por, origen)
