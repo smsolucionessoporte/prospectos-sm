@@ -49,46 +49,177 @@ function responsableCierre(p) {
 // ─── ALTA AUTOMÁTICA DESDE AUTOMATIZACIÓN EXTERNA (Chatwoot) ─────────────────
 router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
   const apiKey = req.headers['x-api-key'];
+
   if (apiKey !== process.env.AUTOMATION_API_KEY) {
     return res.status(401).json({ error: 'No autorizado' });
   }
 
-  const { nombre_contacto, telefono, origen, chatwoot_agent_id } = req.body;
-  if (!telefono) return res.status(400).json({ error: 'Falta teléfono' });
+  const {
+    nombre_contacto,
+    telefono,
+    origen,
+    chatwoot_agent_id,
+    chatwoot_conversation_id
+  } = req.body;
+
+  if (!telefono) {
+    return res.status(400).json({ error: 'Falta teléfono' });
+  }
 
   try {
-    const variantes = normalizarTelefono(telefono);
-    const { rows: existe } = await pool.query('SELECT id FROM prospectos WHERE telefono = ANY($1)', [variantes]);
-    if (existe.length) {
-      console.log('DEBUG auto-crear: ya existe prospecto con ese teléfono, id', existe[0].id);
-      return res.status(200).json({ ok: true, duplicado: true, id: existe[0].id });
-    }
-
     const creadoPor = AGENTE_CHATWOOT_ID[chatwoot_agent_id] || null;
 
-    const result = await pool.query(`
-      INSERT INTO prospectos (nombre_negocio, contacto, telefono, rubro, nota_prospecto, creado_por, origen)
-      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
-    `, [
-      null,
-      nombre_contacto || null,
-      telefono,
-      'Otro',
-      `Cargado automáticamente desde Chatwoot (${origen || 'etiqueta'})`,
+    // 1. Buscar primero por conversación de Chatwoot.
+    if (chatwoot_conversation_id) {
+      const { rows: porConversacion } = await pool.query(
+        `SELECT id
+         FROM prospectos
+         WHERE chatwoot_conversation_id = $1
+         LIMIT 1`,
+        [chatwoot_conversation_id]
+      );
+
+      if (porConversacion.length) {
+        const prospectoId = porConversacion[0].id;
+
+        // Si vuelve a llegar el webhook, actualizamos los datos
+        // disponibles en lugar de crear otro prospecto.
+        await pool.query(
+          `UPDATE prospectos
+           SET contacto = COALESCE($2, contacto),
+               telefono = COALESCE($3, telefono),
+               creado_por = COALESCE($4, creado_por),
+               actualizado_en = NOW()
+           WHERE id = $1`,
+          [
+            prospectoId,
+            nombre_contacto || null,
+            telefono || null,
+            creadoPor
+          ]
+        );
+
+        console.log(
+          'DEBUG auto-crear: prospecto ya existente por conversación',
+          chatwoot_conversation_id,
+          'id',
+          prospectoId
+        );
+
+        return res.status(200).json({
+          ok: true,
+          duplicado: true,
+          actualizado: true,
+          id: prospectoId
+        });
+      }
+    }
+
+    // 2. Protección adicional por teléfono.
+    const variantes = normalizarTelefono(telefono);
+
+    const { rows: porTelefono } = await pool.query(
+      `SELECT id, chatwoot_conversation_id
+       FROM prospectos
+       WHERE telefono = ANY($1)
+       LIMIT 1`,
+      [variantes]
+    );
+
+    if (porTelefono.length) {
+      const prospectoId = porTelefono[0].id;
+
+      await pool.query(
+        `UPDATE prospectos
+         SET contacto = COALESCE($2, contacto),
+             creado_por = COALESCE($3, creado_por),
+             chatwoot_conversation_id =
+               COALESCE(chatwoot_conversation_id, $4),
+             actualizado_en = NOW()
+         WHERE id = $1`,
+        [
+          prospectoId,
+          nombre_contacto || null,
+          creadoPor,
+          chatwoot_conversation_id || null
+        ]
+      );
+
+      console.log(
+        'DEBUG auto-crear: prospecto ya existente por teléfono, id',
+        prospectoId
+      );
+
+      return res.status(200).json({
+        ok: true,
+        duplicado: true,
+        actualizado: true,
+        id: prospectoId
+      });
+    }
+
+    // 3. No existe: crear prospecto.
+    const result = await pool.query(
+      `INSERT INTO prospectos (
+         nombre_negocio,
+         contacto,
+         telefono,
+         rubro,
+         nota_prospecto,
+         creado_por,
+         origen,
+         chatwoot_conversation_id
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [
+        null,
+        nombre_contacto || null,
+        telefono,
+        'Otro',
+        `Cargado automáticamente desde Chatwoot (${origen || 'etiqueta'})`,
+        creadoPor,
+        origen || 'manual',
+        chatwoot_conversation_id || null
+      ]
+    );
+
+    const prospectoId = result.rows[0].id;
+
+    await pool.query(
+      `INSERT INTO historial_estados (
+         prospecto_id,
+         estado_anterior,
+         estado_nuevo,
+         usuario_id,
+         nota
+       )
+       VALUES ($1, NULL, 'prospecto', $2, 'Alta automática desde Chatwoot')`,
+      [prospectoId, creadoPor]
+    );
+
+    console.log(
+      'DEBUG auto-crear: prospecto creado, id',
+      prospectoId,
+      'conversation_id',
+      chatwoot_conversation_id,
+      'creado_por',
       creadoPor,
-      origen || 'manual'
-    ]);
+      'origen',
+      origen
+    );
 
-    await pool.query(`
-      INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
-      VALUES ($1, null, 'prospecto', $2, 'Alta automática desde Chatwoot')
-    `, [result.rows[0].id, creadoPor]);
+    return res.status(201).json({
+      ok: true,
+      id: prospectoId
+    });
 
-    console.log('DEBUG auto-crear: prospecto creado, id', result.rows[0].id, 'creado_por', creadoPor, 'origen', origen);
-    res.status(201).json({ ok: true, id: result.rows[0].id });
   } catch (err) {
     console.error('Error creando prospecto automático:', err);
-    res.status(500).json({ error: 'Error interno' });
+
+    return res.status(500).json({
+      error: 'Error interno'
+    });
   }
 });
 
