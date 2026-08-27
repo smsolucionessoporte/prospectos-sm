@@ -57,6 +57,7 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
   const {
     nombre_contacto,
     telefono,
+    rubro,
     origen,
     chatwoot_agent_id,
     chatwoot_conversation_id
@@ -176,7 +177,7 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
         null,
         nombre_contacto || null,
         telefono,
-        'Otro',
+        rubro || 'Otro',
         `Cargado automáticamente desde Chatwoot (${origen || 'etiqueta'})`,
         creadoPor,
         origen || 'manual',
