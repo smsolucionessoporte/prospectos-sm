@@ -1030,11 +1030,28 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         await enviarPorChatwoot(telefono, mensajePostDemo, demoResponsable);
       }
 
-      // ─── Enviar datos del relevamiento al grupo ───
+        // ─── Enviar datos del relevamiento al grupo ───
 
-      const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
-      const mensajeGrupo = `📋 Demo realizada: *${nombreParaGrupo}*\n\n📞 Tel: ${p.telefono}\n🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ' ('+p.rubro_otro+')' : ''}\n⭐ Módulos: ${(p.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(p.equipamiento||[]).join(', ') || '—'}${p.equip_observaciones ? ' — '+p.equip_observaciones : ''}\n🔥 Interés: ${{alto:'Alto',medio:'Medio',bajo:'Bajo'}[p.nivel_interes] || '—'}\n\n👉 Cerrar cliente: ${link}`;
-      await enviarAvisoInterno(mensajeGrupo);
+        const nombreParaGrupo =
+          p.nombre_negocio ||
+          p.contacto ||
+          `Prospecto #${req.params.id}`;
+
+        const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
+
+        const mensajeGrupo =
+          `📋 Demo realizada: *${nombreParaGrupo}*\n\n` +
+          `📞 Tel: ${p.telefono}\n` +
+          `🏬 Rubro: ${p.rubro || '—'}${p.rubro_otro ? ` (${p.rubro_otro})` : ''}\n` +
+          `⭐ Módulos: ${(p.modulos || []).join(', ') || '—'}\n` +
+          `🛠️ Equipamiento: ${(p.equipamiento || []).join(', ') || '—'}${p.equip_observaciones ? ` — ${p.equip_observaciones}` : ''}\n` +
+          `🔥 Interés: ${{ alto:'Alto', medio:'Medio', bajo:'Bajo' }[p.nivel_interes] || '—'}\n\n` +
+          `👉 Cerrar cliente: ${link}`;
+
+        await enviarAvisoInterno(mensajeGrupo);
+
+        console.log(`✅ Aviso de demo realizada enviado al grupo: ${req.params.id}`);
+
     } catch (msgErr) {
       console.error('ERROR enviando mensajes post-relevamiento:', msgErr.response?.data || msgErr.message);
     }

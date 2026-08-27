@@ -77,31 +77,59 @@ function iniciarRecordatorios() {
         SELECT p.*, u.nombre as demo_resp_nombre
         FROM prospectos p
         LEFT JOIN usuarios u ON p.demo_responsable = u.id
-        WHERE p.recordatorio_enviado = false AND p.zoom_join_url IS NOT NULL
-        AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') > now()
-        AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') <= now() + interval '2 hours'
+        WHERE COALESCE(p.recordatorio_enviado, false) = false
+          AND p.demo_fecha IS NOT NULL
+          AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') > now()
+          AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') <= now() + interval '2 hours'
       `);
+
       for (const p of rows) {
-        const nombreAgente = p.demo_resp_nombre || 'nuestro equipo';
-        const fechaFormateada = formatearFechaAR(p.demo_fecha.toISOString().slice(0, 16));
-        const telefonoAgente = AGENTE_TELEFONO[p.demo_responsable];
+        const fechaFormateada = formatearFechaAR(
+          p.demo_fecha.toISOString().slice(0, 16)
+        );
+
+        const linkZoom = p.zoom_join_url
+          ? `\n🔗 ${p.zoom_join_url}`
+          : '';
 
         const mensaje = `*Msj automático*
 
-        ¡Hola! 👋 Te recordamos que en 2 horas tenés programada la demostración de nuestro sistema de gestión. 🎥
+¡Hola! 👋 Te recordamos que en 2 horas tenés programada la demostración de nuestro sistema de gestión. 🎥
 
-        📅 ${fechaFormateada}
-        🔗 ${p.zoom_join_url}
+📅 ${fechaFormateada}${linkZoom}
 
-        💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
-        
-        
+💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
 
-        await enviarPorChatwoot(p.telefono, mensaje, p.demo_responsable);
-        await pool.query('UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1', [p.id]);
+        const enviado = await enviarPorChatwoot(
+          p.telefono,
+          mensaje,
+          p.demo_responsable
+        );
+
+        if (enviado) {
+          await pool.query(
+            'UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1',
+            [p.id]
+          );
+
+          console.log(
+            '✓ Recordatorio de demo enviado:',
+            p.id,
+            '| zoom:',
+            Boolean(p.zoom_join_url)
+          );
+        } else {
+          console.error(
+            'No se pudo enviar recordatorio de demo:',
+            p.id
+          );
+        }
       }
     } catch (err) {
-      console.error('Error en recordatorios:', err);
+      console.error(
+        'Error en recordatorios:',
+        err.response?.data || err.message || err
+      );
     }
   }, 5 * 60 * 1000);
 }
