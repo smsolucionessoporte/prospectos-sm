@@ -224,6 +224,99 @@ router.post('/api/prospectos/auto-crear', express.json(), async (req, res) => {
   }
 });
 
+// ─── SINCRONIZAR ESTADO DESDE CHATWOOT ───────────────────────────────────────
+router.post('/api/prospectos/estado-chatwoot', express.json(), async (req, res) => {
+  const apiKey = req.headers['x-api-key'];
+
+  if (apiKey !== process.env.AUTOMATION_API_KEY) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+
+  const {
+    chatwoot_conversation_id,
+    estado
+  } = req.body;
+
+  if (!chatwoot_conversation_id) {
+    return res.status(400).json({ error: 'Falta chatwoot_conversation_id' });
+  }
+
+  if (!['prospecto', 'sin_respuesta'].includes(estado)) {
+    return res.status(400).json({ error: 'Estado no permitido' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, estado
+       FROM prospectos
+       WHERE chatwoot_conversation_id = $1
+       LIMIT 1`,
+      [chatwoot_conversation_id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Prospecto no encontrado' });
+    }
+
+    const prospecto = rows[0];
+
+    if (prospecto.estado === estado) {
+      return res.json({
+        ok: true,
+        actualizado: false,
+        id: prospecto.id,
+        estado
+      });
+    }
+
+    await pool.query(
+      `UPDATE prospectos
+       SET estado = $2,
+           actualizado_en = NOW()
+       WHERE id = $1`,
+      [prospecto.id, estado]
+    );
+
+    await pool.query(
+      `INSERT INTO historial_estados (
+         prospecto_id,
+         estado_anterior,
+         estado_nuevo,
+         usuario_id,
+         nota
+       )
+       VALUES ($1, $2, $3, NULL, $4)`,
+      [
+        prospecto.id,
+        prospecto.estado,
+        estado,
+        estado === 'sin_respuesta'
+          ? 'Marcado automáticamente por Chatwoot después de 3 intentos sin respuesta'
+          : 'Reactivado automáticamente porque el prospecto volvió a escribir'
+      ]
+    );
+
+    console.log(
+      'DEBUG estado-chatwoot:',
+      chatwoot_conversation_id,
+      prospecto.estado,
+      '->',
+      estado
+    );
+
+    return res.json({
+      ok: true,
+      actualizado: true,
+      id: prospecto.id,
+      estado
+    });
+
+  } catch (err) {
+    console.error('ERROR estado-chatwoot:', err);
+    return res.status(500).json({ error: 'Error actualizando prospecto' });
+  }
+});
+
 // ─── NUEVO PROSPECTO (Manual) ─────────────────────────────────────────
 router.get('/prospectos/nuevo', requireAuth, (req, res) => {
   res.send(layout('Nuevo prospecto', `
