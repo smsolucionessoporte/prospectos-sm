@@ -582,15 +582,19 @@ router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
               <label for="demo_fecha">Fecha y hora <span class="req">*</span></label>
               <input type="datetime-local" id="demo_fecha" name="demo_fecha" required>
             </div>
-            <div class="field">
-              <label for="demo_responsable_id">Responsable de la demo <span class="req">*</span></label>
-              <select id="demo_responsable_id" name="demo_responsable_id" required>
-                <option value="">Seleccioná un responsable</option>
-                ${(await pool.query("SELECT id, nombre FROM usuarios WHERE activo=true AND rol IN ('soporte','admin')")).rows.map(u =>
-                  `<option value="${u.id}">${esc(u.nombre)}</option>`
-                ).join('')}
-              </select>
-            </div>
+          <div class="field">
+            <label>Responsable de la demo</label>
+            <input
+              type="text"
+              value="${esc((await pool.query('SELECT nombre FROM usuarios WHERE id=$1', [p.creado_por])).rows[0]?.nombre || 'Sin responsable')}"
+              disabled
+            >
+            <input
+              type="hidden"
+              name="demo_responsable_id"
+              value="${p.creado_por || ''}"
+            >
+          </div>
           </div>
           <div class="field">
             <label for="nota_demo">Nota para el equipo</label>
@@ -607,10 +611,25 @@ router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
 });
 
 router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
-  const { demo_fecha, demo_responsable_id, nota_demo } = req.body;
-  try {
+const { demo_fecha, nota_demo } = req.body;
+
+try {
     const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
     const prospecto = rows[0];
+
+    if (!prospecto) {
+      return res.status(404).send('Prospecto no encontrado');
+    }
+
+    const demo_responsable_id = prospecto.creado_por;
+
+    if (!demo_responsable_id) {
+      return res.status(400).send('El prospecto no tiene un responsable asignado');
+    }
+
+    if (!AGENTE_ZOOM[demo_responsable_id]) {
+      return res.status(400).send('El responsable no tiene una cuenta de Zoom configurada');
+    }
 
     await pool.query(`
       UPDATE prospectos SET estado='demo_coordinada', demo_fecha=$1, demo_responsable=$2, actualizado_en=NOW()
@@ -639,13 +658,17 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
         const fechaFormateada = formatearFechaAR(demo_fecha);
         const telefonoAgente = AGENTE_TELEFONO[demo_responsable_id];
         const demoResponsable = demo_responsable_id; 
-        const mensaje = `¡Todo listo! 😊
 
-Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
+        const mensaje = `*Msj automático*
 
-🔗 ${joinUrl}
+          ¡Todo listo! 😊
 
-💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;         
+          Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
+
+          🔗 ${joinUrl}
+
+          💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;  
+
       const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje, demoResponsable);
         console.log('DEBUG mensaje enviado:', enviado);
       } catch (zoomErr) {
@@ -824,6 +847,17 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
   OBJECIONES.forEach((obj, idx) => { objeciones[obj] = b[`obj_${idx}`] === 'si'; });
 
   try {
+        const { rows: estadoRows } = await pool.query(
+          'SELECT estado FROM prospectos WHERE id=$1',
+          [req.params.id]
+        );
+
+        const estadoAnterior = estadoRows[0]?.estado;
+
+        if (!estadoAnterior) {
+          return res.status(404).send('Prospecto no encontrado');
+        }
+
     await pool.query(`
       UPDATE prospectos SET
         estado = 'demo_realizada',
@@ -846,9 +880,14 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       req.session.usuario.id, req.params.id
     ]);
     await pool.query(`
-      INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
-      VALUES ($1,'demo_coordinada','demo_realizada',$2,'Relevamiento completado')
-    `, [req.params.id, req.session.usuario.id]);
+      INSERT INTO historial_estados
+        (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+      VALUES ($1,$2,'demo_realizada',$3,'Relevamiento completado')
+    `, [
+      req.params.id,
+      estadoAnterior,
+      req.session.usuario.id
+    ]);
 
     // ─── Enviar mensaje post-demo con documentación (al cliente) ───
     let telefono;
@@ -858,8 +897,22 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
       const demoResponsable = p.demo_responsable;
       
       telefono = p.telefono;
-      if (telefono) {
-        const mensajePostDemo = `Gracias por asistir a la demostración. A continuación te compartimos los documentos con las normas generales y requisitos del sistema, para que puedas revisar toda la información necesaria:\n\n📄 Normas generales: https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/\n⚙️ Requisitos y recomendaciones de equipo: https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/\n\nLa información comercial y de alta será enviada por Administración.\n\nQuedo a disposición para cualquier consulta y, en caso de avanzar, para coordinar la implementación.`;
+        if (telefono && estadoAnterior !== 'demo_realizada') {
+          const mensajePostDemo = `*Msj automático*
+
+        Gracias por asistir a la demostración. 😊
+
+        Te compartimos la documentación para que puedas revisar las normas generales y los requisitos del sistema:
+
+        📄 Normas generales:
+        https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/
+
+        ⚙️ Requisitos y recomendaciones de equipo:
+        https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/
+
+        La información comercial y de alta será enviada por Administración.
+
+        Quedamos a disposición ante cualquier consulta.`;
         await enviarPorChatwoot(telefono, mensajePostDemo, demoResponsable);
       }
 
@@ -915,25 +968,81 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
       VALUES ($1,$2,$3,$4,$5)
     `, [req.params.id, estadoAnterior, estado, req.session.usuario.id, nota || null]);
 
- // ─── Mensaje de bienvenida al confirmar ───
-    if (estado === 'confirmado' && telefono) {
-      try {
-        const mensajeBienvenida = `¡Gracias por elegirnos! 🎉 Te damos la bienvenida a SM Soluciones.\n\nTe compartimos las guías paso a paso para que vayas conociendo el sistema, según el producto contratado:\n\n👉 vPlus: https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/\n👉 Professional Plus: https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/`;
-      await enviarPorChatwoot(telefono, mensajeBienvenida, demoResponsable);
-      } catch (msgErr) {
-        console.error('ERROR enviando mensaje de bienvenida:', msgErr.response?.data || msgErr.message);
-      }
+      // ─── Mensaje de bienvenida + aviso al confirmar ───
+      if (estado === 'confirmado' && telefono && estadoAnterior !== 'confirmado') {
+        try {
+          const mensajeBienvenida = `*Msj automático*
 
-      // ─── Aviso al grupo con los datos del cliente confirmado ───
-          try {
-            const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
-            const mensajeAlta = `🆕 Nuevo cliente confirmado: *${nombreParaGrupo}*\n\n👤 Contacto: ${full.contacto || '—'}\n📞 Tel: ${full.telefono}\n📧 Email: ${full.email || '—'}\n🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ' ('+full.rubro_otro+')' : ''}\n\n⭐ Módulos de interés: ${(full.modulos||[]).join(', ') || '—'}\n🛠️ Equipamiento: ${(full.equipamiento||[]).join(', ') || '—'}${full.equip_observaciones ? ' — '+full.equip_observaciones : ''}\n\n👉 Ver prospecto: ${linkProspecto}\n👉 Cargar en SM Admin: ${linkSmAdmin}`;
+      ¡Gracias por elegirnos! 🎉
+      Te damos la bienvenida a SM Soluciones.
+
+      Te compartimos nuestras guías paso a paso para que puedas ir conociendo el sistema:
+
+      👉 vPlus:
+      https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/
+
+      👉 Professional Plus:
+      https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/
+
+      Nuestro equipo de Soporte continuará con la instalación, configuración y capacitación.`;
+
+          await enviarPorChatwoot(
+            telefono,
+            mensajeBienvenida,
+            demoResponsable
+          );
+
+          console.log(
+            `✅ Bienvenida enviada al prospecto ${req.params.id}`
+          );
+        } catch (msgErr) {
+          console.error(
+            'ERROR enviando mensaje de bienvenida:',
+            msgErr.response?.data || msgErr.message
+          );
+        }
+
+        // ─── Aviso interno de nuevo cliente confirmado ───
+        try {
+          const { rows: prospectoRows } = await pool.query(
+            'SELECT * FROM prospectos WHERE id=$1',
+            [req.params.id]
+          );
+
+          const full = prospectoRows[0];
+
+          if (full) {
+            const nombreParaGrupo =
+              full.nombre_negocio ||
+              full.contacto ||
+              `Prospecto #${req.params.id}`;
+
+            const linkProspecto =
+              `${process.env.APP_URL}/prospectos/${req.params.id}`;
+
+            const mensajeAlta =
+              `🆕 Nuevo cliente confirmado: *${nombreParaGrupo}*\n\n` +
+              `👤 Contacto: ${full.contacto || '—'}\n` +
+              `📞 Tel: ${full.telefono || '—'}\n` +
+              `📧 Email: ${full.email || '—'}\n` +
+              `🏬 Rubro: ${full.rubro || '—'}${full.rubro_otro ? ` (${full.rubro_otro})` : ''}\n\n` +
+              `⭐ Módulos contratados: ${(full.modulos_contratados || []).join(', ') || '—'}\n` +
+              `🛠️ Equipamiento: ${(full.equipamiento || []).join(', ') || '—'}${full.equip_observaciones ? ` — ${full.equip_observaciones}` : ''}\n\n` +
+              `👉 Ver prospecto: ${linkProspecto}`;
+
             await enviarAvisoInterno(mensajeAlta);
-            
-          } catch (msgErr) {
-            console.error('ERROR enviando aviso al grupo:', msgErr.response?.data || msgErr.message);
+
+            console.log(
+              `✅ Aviso interno de cliente confirmado enviado: ${req.params.id}`
+            );
           }
-    }
+        } catch (msgErr) {
+          console.error(
+            'ERROR enviando aviso de cliente confirmado:',
+            msgErr.response?.data || msgErr.message
+          );
+        }
+      }
 
     res.redirect('/prospectos/' + req.params.id);
   } catch (err) {

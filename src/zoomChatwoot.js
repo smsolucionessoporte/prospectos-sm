@@ -68,7 +68,7 @@ async function enviarMensajePorConversationId(conversationId, mensaje) {
   );
 }
 
-const BOT_INBOX_ID = process.env.BOT_INBOX_ID; // ID del inbox del canal del bot en Chatwoot
+const BOT_INBOX_ID = Number(process.env.BOT_INBOX_ID);
 
 async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
 
@@ -117,7 +117,7 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
 
 
   let conversation = convData.payload?.find(
-    c => c.inbox_id === inboxId
+    c => Number(c.inbox_id) === Number(inboxId)
   );
 
 
@@ -139,14 +139,60 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
   }
 
 
-  // Si no existe conversación, crearla
-  if (!conversation) {
+// Si no existe conversación en Bot Ventas, asegurar que el contacto
+// esté vinculado a ese inbox y crear la conversación.
+if (!conversation) {
 
+  let sourceId;
+
+  try {
+    const { data: contactInbox } = await axios.post(
+      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/${contacto.id}/contact_inboxes`,
+      {
+        inbox_id: inboxId,
+        source_id: telefono
+      },
+      {
+        headers: {
+          api_access_token: process.env.CHATWOOT_API_TOKEN
+        }
+      }
+    );
+
+    sourceId = contactInbox.source_id;
+
+  } catch (error) {
+
+    // Si el vínculo contacto/inbox ya existe, volvemos a consultar
+    // las conversaciones por si Chatwoot ya creó/reconoce una.
+    const { data: retryConvData } = await axios.get(
+      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/${contacto.id}/conversations`,
+      {
+        headers: {
+          api_access_token: process.env.CHATWOOT_API_TOKEN
+        }
+      }
+    );
+
+    conversation = retryConvData.payload?.find(
+      c => Number(c.inbox_id) === Number(inboxId)
+    );
+
+    if (!conversation) {
+      console.error(
+        "No se pudo vincular el contacto al inbox Bot Ventas:",
+        error.response?.data || error.message
+      );
+      return false;
+    }
+  }
+
+  if (!conversation && sourceId) {
     const { data } = await axios.post(
       `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations`,
       {
-        source_id: contacto.source_id,
-        inbox_id: inboxId,
+        source_id: sourceId,
+        inbox_id: Number(inboxId),
         contact_id: contacto.id,
         status: "open"
       },
@@ -159,7 +205,7 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
 
     conversation = data;
   }
-
+}
 
   await axios.post(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/messages`,

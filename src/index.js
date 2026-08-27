@@ -78,15 +78,24 @@ function iniciarRecordatorios() {
         FROM prospectos p
         LEFT JOIN usuarios u ON p.demo_responsable = u.id
         WHERE p.recordatorio_enviado = false AND p.zoom_join_url IS NOT NULL
-        AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') - now() 
-            BETWEEN interval '115 min' AND interval '125 min'
+        AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') > now()
+        AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') <= now() + interval '2 hours'
       `);
       for (const p of rows) {
         const nombreAgente = p.demo_resp_nombre || 'nuestro equipo';
         const fechaFormateada = formatearFechaAR(p.demo_fecha.toISOString().slice(0, 16));
         const telefonoAgente = AGENTE_TELEFONO[p.demo_responsable];
 
-        const mensaje = `¡Hola! Te recordamos que en 2 hs tenés programada la demostración de nuestro sistema de gestión 🎥\n\n📅 ${fechaFormateada}\n🔗 ${p.zoom_join_url}\n\nTe recomendamos conectarte idealmente desde la computadora, con audio y micrófono habilitados.`;
+        const mensaje = `*Msj automático*
+
+        ¡Hola! 👋 Te recordamos que en 2 horas tenés programada la demostración de nuestro sistema de gestión. 🎥
+
+        📅 ${fechaFormateada}
+        🔗 ${p.zoom_join_url}
+
+        💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
+        
+        
 
         await enviarPorChatwoot(p.telefono, mensaje, p.demo_responsable);
         await pool.query('UPDATE prospectos SET recordatorio_enviado = true WHERE id = $1', [p.id]);
