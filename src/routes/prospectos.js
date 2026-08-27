@@ -1026,8 +1026,6 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
         ⚙️ Requisitos y recomendaciones de equipo:
         https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/
 
-        La información comercial y de alta será enviada por Administración.
-
         Quedamos a disposición ante cualquier consulta.`;
         await enviarPorChatwoot(telefono, mensajePostDemo, demoResponsable);
       }
