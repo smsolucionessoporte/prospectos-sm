@@ -338,39 +338,50 @@ router.get("/panel", requireAuth, async (req, res) => {
         <form method="GET" action="/panel" class="filter-form">
           <input type="hidden" name="filtrado" value="1">
 
-          <div class="filter-row-search">
-            <div class="search-wrap">
-          <div class="periodo-visible">
+          <div class="filter-periodo-row">
             <span class="periodo-title">
               <i class="ti ti-calendar"></i> Período
             </span>
 
             <button
               type="button"
-              class="btn btn-secondary"
+              class="periodo-siempre ${!desdeFiltro ? 'active' : ''}"
               onclick="this.form.desde.value=''; this.form.hasta.value='${hoyStr}'; this.form.submit();">
               Siempre
             </button>
 
             <label class="periodo-field">
-              Desde
+              <span>Desde</span>
               <input type="date" name="desde" value="${esc(desdeFiltro || "")}">
             </label>
 
             <label class="periodo-field">
-              Hasta
+              <span>Hasta</span>
               <input type="date" name="hasta" value="${esc(hastaFiltro || "")}">
             </label>
           </div>
-              <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
-                value="${esc(buscar || "")}" class="search-input">
+
+          <div class="filter-row-search">
+            <div class="search-wrap">
+              <input
+                type="text"
+                name="buscar"
+                placeholder="Buscar por nombre, contacto o teléfono..."
+                value="${esc(buscar || "")}"
+                class="search-input">
             </div>
+
             <button type="button" class="btn btn-secondary" onclick="abrirModalFiltros()">
-              <i class="ti ti-filter"></i> Filtros${filtrosActivosCount > 0 ? ` <span class="filtros-badge">${filtrosActivosCount}</span>` : ''}
+              <i class="ti ti-filter"></i>
+              Filtros${filtrosActivosCount > 0 ? ` <span class="filtros-badge">${filtrosActivosCount}</span>` : ''}
             </button>
-            <button type="submit" class="btn btn-secondary">Buscar</button>
+
+            <button type="submit" class="btn btn-primary">
+              <i class="ti ti-search"></i> Buscar
+            </button>
           </div>
 
+         
           <div id="modal-filtros" class="modal-overlay">
             <div class="modal-box">
               <h3><i class="ti ti-filter"></i> Filtros</h3>
@@ -539,15 +550,6 @@ router.get("/panel", requireAuth, async (req, res) => {
         .modal-box .field label { display: block; font-size: 0.82em; color: #64748b; font-weight: 600; margin-bottom: 6px; }
         .modal-box .filter-select { width: 100%; }
 
-        .periodo-group { display: flex; gap: 10px; flex-wrap: wrap; }
-        .periodo-field {
-          display: flex; align-items: center; gap: 6px;
-          font-size: 0.82em; color: #475569; white-space: nowrap;
-        }
-        .periodo-field input[type="date"] {
-          padding: 5px 6px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9em;
-        }
-
         .filter-row-estados { display: flex; flex-wrap: wrap; gap: 8px; }
         .estado-check {
           display: flex; align-items: center; gap: 5px;
@@ -555,6 +557,7 @@ router.get("/panel", requireAuth, async (req, res) => {
           background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px;
           padding: 5px 10px; cursor: pointer;
         }
+
         .estado-check:has(input:checked) {
           background: #eef2ff; border-color: #c7d2fe; color: #4338ca; font-weight: 600;
         }
@@ -622,23 +625,72 @@ router.get("/panel", requireAuth, async (req, res) => {
           padding: 0 3px;
         }
 
-        .periodo-visible {
+        .filter-periodo-row {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 6px 10px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
+          gap: 10px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid #eef2f7;
         }
 
         .periodo-title {
+          display: flex;
+          align-items: center;
+          gap: 5px;
           font-size: 0.82em;
           font-weight: 600;
           color: #475569;
-          white-space: nowrap;
+          margin-right: 2px;
         }
 
+        .periodo-siempre {
+          height: 34px;
+          padding: 0 14px;
+          border: 1px solid #d1d5db;
+          border-radius: 7px;
+          background: #fff;
+          color: #475569;
+          cursor: pointer;
+          font-size: 0.82em;
+        }
+
+        .periodo-siempre.active {
+          background: #eef2ff;
+          border-color: #6366f1;
+          color: #4338ca;
+          font-weight: 600;
+        }
+
+        .periodo-field {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.8em;
+          color: #64748b;
+        }
+
+        .periodo-field input[type="date"] {
+          height: 34px;
+          padding: 0 8px;
+          border: 1px solid #d1d5db;
+          border-radius: 7px;
+          background: #fff;
+          font-size: 0.9em;
+        }
+
+        .filter-row-search {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .filter-row-search .search-wrap {
+          flex: 1;
+        }
+
+        .search-input {
+          width: 100%;
+        }
         .pagination {
           display: flex;
           justify-content: center;
@@ -652,10 +704,6 @@ router.get("/panel", requireAuth, async (req, res) => {
           color: #64748b;
         }
 
-        @media (max-width: 900px) {
-          .periodo-visible {
-            flex-wrap: wrap;
-          }
         }
         @media (max-width: 720px) {
           .filter-row-search { flex-direction: column; align-items: stretch; }
