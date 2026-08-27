@@ -35,9 +35,7 @@ const JEFE_USUARIO_ID = Number(process.env.JEFE_USUARIO_ID) || 1;
 // Determina si el usuario logueado puede ejecutar acciones de cierre
 // (confirmar / marcar perdido) sobre un prospecto puntual.
 function puedeCerrar(usuarioSesion, prospecto) {
-  if (usuarioSesion.rol === 'admin' || usuarioSesion.rol === 'administrativa') return true;
-  if (usuarioSesion.rol === 'vendedor') return prospecto.creado_por === usuarioSesion.id;
-  return false;
+  return true;
 }
 
 const ORIGEN_LABEL = {
@@ -50,6 +48,9 @@ router.get("/panel", requireAuth, async (req, res) => {
   try {
     const { buscar, desde, hasta, filtrado } = req.query;
 
+    const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
+    const porPagina = 20;
+    const offset = (pagina - 1) * porPagina;
     // soporte y vendedor solo ven sus propios prospectos (donde son demo_responsable,
     // o creado_por si nunca hubo demo) y no pueden filtrar por otro responsable
     const usuarioSesion = req.session.usuario;
@@ -65,13 +66,13 @@ router.get("/panel", requireAuth, async (req, res) => {
           : [])
       : ESTADOS_DEFAULT;
 
-    const hoy = new Date();
-    const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
-      .toISOString()
-      .slice(0, 10);
-    const hoyStr = hoy.toISOString().slice(0, 10);
-    const desdeFiltro = filtrado ? (desde || null) : primerDiaMes;
-    const hastaFiltro = filtrado ? (hasta || null) : hoyStr;
+      const hoy = new Date();
+      const hoyStr = hoy.toISOString().slice(0, 10);
+
+      // Por defecto: SIEMPRE
+      // Sin fecha "desde" = desde el primer registro existente.
+      const desdeFiltro = desde || null;
+      const hastaFiltro = hasta || hoyStr;
 
     // Conteos por estado para las cards — respetan el período seleccionado
     // (no el filtro de estados, para que las cards sigan mostrando el desglose completo)
@@ -140,23 +141,54 @@ router.get("/panel", requireAuth, async (req, res) => {
     // Traigo todos los prospectos que matchean el filtro (sin paginado, ya que
     // el filtro por período acota el volumen). Ordeno por fecha de actualización
     // y después agrupo por estado en JS respetando el orden de ESTADOS.
+    const totalResult = await pool.query(
+      `SELECT COUNT(*) AS total
+      FROM prospectos p
+      ${whereClause}`,
+      params
+    );
+
+    const totalFiltrado = parseInt(totalResult.rows[0].total);
+    const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / porPagina));
+
+    function crearUrlPagina(nuevaPagina) {
+        const qs = new URLSearchParams();
+
+        qs.set("filtrado", "1");
+        qs.set("pagina", String(nuevaPagina));
+
+        if (buscar) qs.set("buscar", buscar);
+        if (responsable && !vistaRestringida) {
+          qs.set("responsable", responsable);
+        }
+
+        if (desdeFiltro) qs.set("desde", desdeFiltro);
+        if (hastaFiltro) qs.set("hasta", hastaFiltro);
+
+        estadosSeleccionados.forEach(estado => {
+          qs.append("estados", estado);
+        });
+
+        return "/panel?" + qs.toString();
+      }
+
     const prospectos = await pool.query(
       `
-      SELECT p.*, 
-        uc.nombre as creado_por_nombre,
-        uc.rol as creado_por_rol,
-        ud.nombre as demo_responsable_nombre
-      FROM prospectos p
-      LEFT JOIN usuarios uc ON p.creado_por = uc.id
-      LEFT JOIN usuarios ud ON p.demo_responsable = ud.id
-      ${whereClause}
-      ORDER BY p.actualizado_en DESC
-    `,
-      params,
+        SELECT p.*, 
+          uc.nombre as creado_por_nombre,
+          uc.rol as creado_por_rol,
+          ud.nombre as demo_responsable_nombre
+        FROM prospectos p
+        LEFT JOIN usuarios uc ON p.creado_por = uc.id
+        LEFT JOIN usuarios ud ON p.demo_responsable = ud.id
+        ${whereClause}
+        ORDER BY p.actualizado_en DESC
+        LIMIT $${i} OFFSET $${i + 1}
+      `,
+      [...params, porPagina, offset]
     );
 
     const rows = prospectos.rows;
-    const totalFiltrado = rows.length;
 
     // Agrupo las filas por estado, respetando el orden definido en ESTADOS
     const gruposPorEstado = {};
@@ -188,8 +220,6 @@ router.get("/panel", requireAuth, async (req, res) => {
     // Cantidad de filtros "no default" activos, para el badge del botón Filtros
     let filtrosActivosCount = 0;
     if (responsable && !vistaRestringida) filtrosActivosCount++;
-    if (desdeFiltro !== primerDiaMes) filtrosActivosCount++;
-    if (hastaFiltro !== hoyStr) filtrosActivosCount++;
     if (
       estadosSeleccionados.length !== ESTADOS_DEFAULT.length ||
       !ESTADOS_DEFAULT.every((e) => estadosSeleccionados.includes(e))
@@ -221,14 +251,29 @@ router.get("/panel", requireAuth, async (req, res) => {
           <div class="row-actions" onclick="event.stopPropagation()">
             <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle"><i class="ti ti-eye"></i></a>
             ${p.estado === 'prospecto' ? `<a href="/prospectos/${p.id}/demo" class="btn-icon" title="Cargar demo"><i class="ti ti-presentation"></i></a>` : ''}
+            ${p.estado === 'prospecto' ? `
+              <form method="POST"
+                    action="/prospectos/${p.id}/estado"
+                    style="display:inline"
+                    onsubmit="return confirm('¿Marcar este prospecto como sin respuesta?')">
+                <input type="hidden" name="estado" value="sin_respuesta">
+                <input type="hidden" name="nota" value="Se le escribió 3 veces y no respondió.">
+                <button type="submit"
+                        class="btn-icon"
+                        title="Marcar sin respuesta">
+                  <i class="ti ti-message-off"></i>
+                </button>
+              </form>
+            ` : ''}
             ${p.estado === 'demo_coordinada' && p.zoom_join_url ? `<a href="${p.zoom_join_url}" target="_blank" class="btn-icon" title="Entrar a la reunión" onclick="event.stopPropagation()"><i class="ti ti-video"></i></a>` : ''}
-            ${p.estado === 'demo_realizada' && puedeCerrar(req.session.usuario, p) ? `
-              <button type="button" class="btn-icon" title="Confirmar cliente" style="color:#16a34a" onclick="abrirModalConfirmar(${p.id})"><i class="ti ti-check"></i></button>
+            ${p.estado === 'demo_realizada' ? `
+                <button type="button" class="btn-icon" title="Confirmar cliente" style="color:#16a34a" onclick="abrirModalConfirmar(${p.id})"><i class="ti ti-check"></i></button>
               <button type="button" class="btn-icon" title="Marcar como perdido" style="color:#dc2626" onclick="abrirModalPerdido(${p.id})"><i class="ti ti-x"></i></button>
             ` : ''}
-                        ${req.session.usuario.rol === 'admin' ? `<a href="/prospectos/${p.id}/editar" class="btn-icon" title="Editar"><i class="ti ti-pencil"></i></a>` : ''}
-            ${req.session.usuario.id === 6 ? `
-              <form method="POST" action="/prospectos/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar este prospecto? Esta acción no se puede deshacer.')">
+              <a href="/prospectos/${p.id}/editar" class="btn-icon" title="Editar"><i class="ti ti-pencil"></i></a>            
+              ${req.session.usuario.id === 6 ? `
+              
+                <form method="POST" action="/prospectos/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar este prospecto? Esta acción no se puede deshacer.')">
                 <button type="submit" class="btn-icon" title="Eliminar" style="color:#dc2626"><i class="ti ti-trash"></i></button>
               </form>
             ` : ''}
@@ -295,6 +340,28 @@ router.get("/panel", requireAuth, async (req, res) => {
 
           <div class="filter-row-search">
             <div class="search-wrap">
+          <div class="periodo-visible">
+            <span class="periodo-title">
+              <i class="ti ti-calendar"></i> Período
+            </span>
+
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="this.form.desde.value=''; this.form.hasta.value='${hoyStr}'; this.form.submit();">
+              Siempre
+            </button>
+
+            <label class="periodo-field">
+              Desde
+              <input type="date" name="desde" value="${esc(desdeFiltro || "")}">
+            </label>
+
+            <label class="periodo-field">
+              Hasta
+              <input type="date" name="hasta" value="${esc(hastaFiltro || "")}">
+            </label>
+          </div>
               <input type="text" name="buscar" placeholder="Buscar por nombre, contacto o teléfono..." 
                 value="${esc(buscar || "")}" class="search-input">
             </div>
@@ -320,14 +387,7 @@ router.get("/panel", requireAuth, async (req, res) => {
               </div>
               `}
 
-              <div class="field">
-                <label>Período</label>
-                <div class="periodo-group">
-                  <label class="periodo-field">Desde <input type="date" name="desde" value="${esc(desdeFiltro || "")}"></label>
-                  <label class="periodo-field">Hasta <input type="date" name="hasta" value="${esc(hastaFiltro || "")}"></label>
-                </div>
-              </div>
-
+  
               <div class="field">
                 <label>Estados</label>
                 <div class="filter-row-estados">
@@ -368,6 +428,42 @@ router.get("/panel", requireAuth, async (req, res) => {
         </table>
       </div>
       <p class="results-count">${totalFiltrado} resultado${totalFiltrado === 1 ? '' : 's'}</p>
+
+        ${totalPaginas > 1 ? `
+          <div class="pagination">
+
+            ${pagina > 1 ? `
+              <a class="btn btn-secondary" href="${crearUrlPagina(pagina - 1)}">
+                <i class="ti ti-chevron-left"></i> Anterior
+              </a>
+            ` : ''}
+
+            <div class="pagination-pages">
+              ${Array.from({ length: totalPaginas }, (_, idx) => idx + 1)
+                .filter(n => n === 1 || n === totalPaginas || Math.abs(n - pagina) <= 2)
+                .map((n, idx, arr) => {
+                  const anterior = arr[idx - 1];
+                  const puntos = anterior && n - anterior > 1
+                    ? `<span class="pagination-dots">…</span>`
+                    : '';
+
+                  return puntos + `
+                    <a href="${crearUrlPagina(n)}"
+                      class="pagination-page ${n === pagina ? 'active' : ''}">
+                      ${n}
+                    </a>
+                  `;
+                }).join('')}
+            </div>
+
+            ${pagina < totalPaginas ? `
+              <a class="btn btn-secondary" href="${crearUrlPagina(pagina + 1)}">
+                Siguiente <i class="ti ti-chevron-right"></i>
+              </a>
+            ` : ''}
+
+          </div>
+        ` : ''}
 
       <div id="modal-confirmar" class="modal-overlay">
         <div class="modal-box">
@@ -433,6 +529,7 @@ router.get("/panel", requireAuth, async (req, res) => {
         .filter-row-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
         .filter-row-search .search-wrap { flex: 1 1 240px; }
 
+
         .filtros-badge {
           background: #4338ca; color: #fff; border-radius: 999px;
           font-size: 0.72em; padding: 1px 7px; margin-left: 4px;
@@ -480,9 +577,91 @@ router.get("/panel", requireAuth, async (req, res) => {
           color: #64748b; font-size: 0.85em; margin-top: 8px;
         }
 
+        .pagination {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          margin: 18px 0 8px;
+        }
+
+        .pagination-pages {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        .pagination-page {
+          min-width: 34px;
+          height: 34px;
+          padding: 0 8px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid #e2e8f0;
+          border-radius: 7px;
+          background: #fff;
+          color: #475569;
+          text-decoration: none;
+          font-size: 0.85em;
+        }
+
+        .pagination-page:hover {
+          background: #f8fafc;
+        }
+
+        .pagination-page.active {
+          background: #4338ca;
+          border-color: #4338ca;
+          color: #fff;
+          font-weight: 600;
+        }
+
+        .pagination-dots {
+          color: #94a3b8;
+          padding: 0 3px;
+        }
+
+        .periodo-visible {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+        }
+
+        .periodo-title {
+          font-size: 0.82em;
+          font-weight: 600;
+          color: #475569;
+          white-space: nowrap;
+        }
+
+        .pagination {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 14px;
+          margin: 18px 0;
+        }
+
+        .pagination-info {
+          font-size: 0.85em;
+          color: #64748b;
+        }
+
+        @media (max-width: 900px) {
+          .periodo-visible {
+            flex-wrap: wrap;
+          }
+        }
         @media (max-width: 720px) {
           .filter-row-search { flex-direction: column; align-items: stretch; }
         }
+
+      
       </style>
 
       <script>
@@ -515,6 +694,24 @@ router.get("/panel", requireAuth, async (req, res) => {
     res.status(500).send("Error interno");
   }
 });
+
+function crearUrlPagina(nuevaPagina) {
+  const qs = new URLSearchParams();
+
+  qs.set("filtrado", "1");
+  qs.set("pagina", String(nuevaPagina));
+
+  if (buscar) qs.set("buscar", buscar);
+  if (desdeFiltro) qs.set("desde", desdeFiltro);
+  if (hastaFiltro) qs.set("hasta", hastaFiltro);
+  if (responsable && !vistaRestringida) qs.set("responsable", responsable);
+
+  estadosSeleccionados.forEach(estado => {
+    qs.append("estados", estado);
+  });
+
+  return "/panel?" + qs.toString();
+}
 
 function esc(str) {
   return String(str || "")

@@ -2,7 +2,8 @@
 const AGENTE_ZOOM = {
   6: 'smsoluciones.soporte@gmail.com',
   10: 'romanfontanetcasas@gmail.com', 
-  8: 'rafaelaltadonna@gmail.com'
+  8: 'rafaelaltadonna@gmail.com',
+  12: 'giuliano69carabajal@gmail.com'
 };
 
 const AGENTE_TELEFONO = {

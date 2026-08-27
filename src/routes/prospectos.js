@@ -410,8 +410,8 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
 
     // Acciones disponibles según estado y rol
     const acciones = [];
-    if (p.estado === 'prospecto' && (u.rol === 'soporte' || u.rol === 'admin')) {
-      acciones.push(`<a href="/prospectos/${p.id}/demo" class="btn btn-primary"><i class="ti ti-calendar-event"></i> Coordinar demo</a>`);
+    if (p.estado === 'prospecto') {
+        acciones.push(`<a href="/prospectos/${p.id}/demo" class="btn btn-primary"><i class="ti ti-calendar-event"></i> Coordinar demo</a>`);
       acciones.push(`
         <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline" onsubmit="return confirm('¿Marcar este prospecto como sin respuesta?')">
           <input type="hidden" name="estado" value="sin_respuesta">
@@ -420,12 +420,12 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
         </form>
       `);
     }
-    if (p.estado === 'demo_coordinada' && (u.rol === 'soporte' || u.rol === 'admin')) {
-      acciones.push(`<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary"><i class="ti ti-clipboard-list"></i> Completar relevamiento</a>`);
+    if (p.estado === 'demo_coordinada') {
+        acciones.push(`<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary"><i class="ti ti-clipboard-list"></i> Completar relevamiento</a>`);
     }
 
-    if (p.estado === 'demo_realizada' && puedeCerrar(u, p)) {
-      acciones.push(`
+    if (p.estado === 'demo_realizada') {
+        acciones.push(`
         <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
           <input type="hidden" name="estado" value="confirmado">
           <button class="btn btn-success"><i class="ti ti-check"></i> Confirmar cliente</button>
@@ -436,9 +436,7 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
         </form>
       `);
     }
-    if (u.rol === 'admin') {
-      acciones.push(`<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`);
-    }
+    acciones.push(`<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`);
 
     // Sección de relevamiento (si existe)
     const relHtml = p.relevamiento_fecha ? `
@@ -466,7 +464,7 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
       <div class="detail-section empty-section">
         <i class="ti ti-clipboard"></i>
         <span>El relevamiento post-demo aún no fue cargado.</span>
-        ${(u.rol === 'soporte' || u.rol === 'admin') ? `<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary btn-SM"><i class="ti ti-plus"></i> Cargar ahora</a>` : ''}
+        <a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary btn-SM"><i class="ti ti-plus"></i> Cargar ahora</a>
       </div>
     ` : '');
 
@@ -1052,8 +1050,8 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
 });
 
 // ─── EDITAR PROSPECTO (Admin) ─────────────────────────────────────────────────
-router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+  router.get('/prospectos/:id/editar', requireAuth, async (req, res) => {
+    const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).send('No encontrado');
   const p = rows[0];
   const demoCoordinada = p.estado !== 'prospecto' && p.estado !== 'sin_respuesta';
@@ -1283,8 +1281,8 @@ router.get('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
   `, req));
 });
 
-router.post('/prospectos/:id/editar', requireRol('admin'), async (req, res) => {
-  const b = req.body;
+router.post('/prospectos/:id/editar', requireAuth, async (req, res) => {
+    const b = req.body;
   try {
     const { rows: curRows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
     if (!curRows.length) return res.status(404).send('No encontrado');

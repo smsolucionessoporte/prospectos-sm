@@ -54,11 +54,21 @@ function normalizarTelefono(tel) {
   return variantes;
 }
 
-        const NUMERO_AVISOS = '+5491132780621';
+const CONVERSACION_AVISOS_ID = Number(process.env.CONVERSACION_AVISOS_ID);
 
-        async function enviarAvisoInterno(mensaje) {
-          return enviarPorChatwoot(NUMERO_AVISOS, mensaje, null);
-        }
+async function enviarAvisoInterno(mensaje) {
+  if (!CONVERSACION_AVISOS_ID) {
+    console.log('CONVERSACION_AVISOS_ID no configurado');
+    return false;
+  }
+
+  await enviarMensajePorConversationId(
+    CONVERSACION_AVISOS_ID,
+    mensaje
+  );
+
+  return true;
+}
 
 async function enviarMensajePorConversationId(conversationId, mensaje) {
   await axios.post(
