@@ -560,9 +560,22 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
 
 // ─── COORDINAR DEMO ───────────────────────────────────────────────────────────
 router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+  const { rows } = await pool.query(
+    'SELECT * FROM prospectos WHERE id=$1',
+    [req.params.id]
+  );
+
   if (!rows.length) return res.status(404).send('No encontrado');
+
   const p = rows[0];
+
+  const { rows: responsablesDemo } = await pool.query(`
+    SELECT id, nombre
+    FROM usuarios
+    WHERE activo = true
+      AND rol IN ('soporte','admin','vendedor')
+    ORDER BY nombre
+  `);
 
   res.send(layout('Coordinar demo', `
     <div class="page-header">
@@ -581,19 +594,26 @@ router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
               <label for="demo_fecha">Fecha y hora <span class="req">*</span></label>
               <input type="datetime-local" id="demo_fecha" name="demo_fecha" required>
             </div>
-          <div class="field">
-            <label>Responsable de la demo</label>
-            <input
-              type="text"
-              value="${esc((await pool.query('SELECT nombre FROM usuarios WHERE id=$1', [p.creado_por])).rows[0]?.nombre || 'Sin responsable')}"
-              disabled
-            >
-            <input
-              type="hidden"
-              name="demo_responsable_id"
-              value="${p.creado_por || ''}"
-            >
-          </div>
+            <div class="field">
+              <label for="demo_responsable_id">
+                Responsable de la demo <span class="req">*</span>
+              </label>
+
+              <select
+                id="demo_responsable_id"
+                name="demo_responsable_id"
+                required
+              >
+                ${responsablesDemo.map(u => `
+                  <option
+                    value="${u.id}"
+                    ${Number(u.id) === Number(p.creado_por) ? 'selected' : ''}
+                  >
+                    ${esc(u.nombre)}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
           </div>
           <div class="field">
             <label for="nota_demo">Nota para el equipo</label>
