@@ -630,76 +630,173 @@ router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
 });
 
 router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
-const { demo_fecha, nota_demo } = req.body;
+  const { demo_fecha, nota_demo, demo_responsable_id } = req.body;
 
-try {
-    const { rows } = await pool.query('SELECT * FROM prospectos WHERE id=$1', [req.params.id]);
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM prospectos WHERE id=$1',
+      [req.params.id]
+    );
+
     const prospecto = rows[0];
 
     if (!prospecto) {
       return res.status(404).send('Prospecto no encontrado');
     }
 
-    const demo_responsable_id = prospecto.creado_por;
+    const responsableId = Number(demo_responsable_id);
 
-    if (!demo_responsable_id) {
-      return res.status(400).send('El prospecto no tiene un responsable asignado');
+    if (!responsableId) {
+      return res.status(400).send(
+        'Debe seleccionar un responsable para la demo'
+      );
     }
 
-    if (!AGENTE_ZOOM[demo_responsable_id]) {
-      return res.status(400).send('El responsable no tiene una cuenta de Zoom configurada');
+    const { rows: responsableRows } = await pool.query(
+      'SELECT id, nombre FROM usuarios WHERE id=$1 AND activo=true',
+      [responsableId]
+    );
+
+    if (!responsableRows.length) {
+      return res.status(400).send('Responsable no válido');
     }
 
+    const nombreResponsable = responsableRows[0].nombre;
+
+    // Guardar la demo SIEMPRE, independientemente de Zoom
     await pool.query(`
-      UPDATE prospectos SET estado='demo_coordinada', demo_fecha=$1, demo_responsable=$2, actualizado_en=NOW()
+      UPDATE prospectos
+      SET estado='demo_coordinada',
+          demo_fecha=$1,
+          demo_responsable=$2,
+          zoom_join_url=NULL,
+          actualizado_en=NOW()
       WHERE id=$3
-    `, [demo_fecha, demo_responsable_id, req.params.id]);
-    await pool.query(`
-      INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
-      VALUES ($1,'prospecto','demo_coordinada',$2,$3)
-    `, [req.params.id, req.session.usuario.id, nota_demo || 'Demo coordinada']);
+    `, [
+      demo_fecha,
+      responsableId,
+      req.params.id
+    ]);
 
- // ─── NUEVO: crear reunión Zoom y avisar por Chatwoot ───
-    console.log('DEBUG demo_fecha:', demo_fecha, '| demo_responsable_id:', demo_responsable_id);
-    const zoomEmail = AGENTE_ZOOM[demo_responsable_id];
-    console.log('DEBUG zoomEmail encontrado:', zoomEmail);
+    await pool.query(`
+      INSERT INTO historial_estados
+        (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+      VALUES ($1,'prospecto','demo_coordinada',$2,$3)
+    `, [
+      req.params.id,
+      req.session.usuario.id,
+      nota_demo || 'Demo coordinada'
+    ]);
+
+    console.log(
+      'DEBUG demo_fecha:',
+      demo_fecha,
+      '| responsableId:',
+      responsableId,
+      '| responsable:',
+      nombreResponsable
+    );
+
+    // ---------------------------------------------------------
+    // 1. Intentar crear Zoom
+    // Si falla, NO interrumpir el resto del proceso.
+    // ---------------------------------------------------------
+
+    let joinUrl = null;
+
+    const zoomEmail = AGENTE_ZOOM[responsableId];
+
     if (zoomEmail) {
       try {
-        const nombreParaZoom = prospecto.nombre_negocio || prospecto.contacto || 'Prospecto';
-        const joinUrl = await crearReunionZoom(zoomEmail, `Demo ${nombreParaZoom}`, demo_fecha);
-        console.log('DEBUG reunión creada:', joinUrl);
-        await pool.query('UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2', [joinUrl, req.params.id]);
+        const nombreParaZoom =
+          prospecto.nombre_negocio ||
+          prospecto.contacto ||
+          'Prospecto';
 
-        // Traer el nombre del responsable
-        const { rows: agenteRows } = await pool.query('SELECT nombre FROM usuarios WHERE id=$1', [demo_responsable_id]);
-        const nombreAgente = agenteRows[0]?.nombre || 'nuestro equipo';
+        joinUrl = await crearReunionZoom(
+          zoomEmail,
+          `Demo ${nombreParaZoom}`,
+          demo_fecha
+        );
 
-        const fechaFormateada = formatearFechaAR(demo_fecha);
-        const telefonoAgente = AGENTE_TELEFONO[demo_responsable_id];
-        const demoResponsable = demo_responsable_id; 
+        console.log('DEBUG reunión Zoom creada:', joinUrl);
 
-        const mensaje = `*Msj automático*
+        await pool.query(
+          'UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2',
+          [joinUrl, req.params.id]
+        );
 
-          ¡Todo listo! 😊
-
-          Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
-
-          🔗 ${joinUrl}
-
-          💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;  
-
-      const enviado = await enviarPorChatwoot(prospecto.telefono, mensaje, demoResponsable);
-        console.log('DEBUG mensaje enviado:', enviado);
       } catch (zoomErr) {
-        console.error('ERROR creando reunión o enviando mensaje:', zoomErr.response?.data || zoomErr.message);
+        console.error(
+          'ERROR creando reunión Zoom. Se continuará sin link:',
+          zoomErr.response?.data || zoomErr.message
+        );
+
+        joinUrl = null;
       }
     } else {
-      console.log('DEBUG: no se encontró email de Zoom para el responsable', demo_responsable_id);
+      console.log(
+        'DEBUG: responsable sin cuenta Zoom configurada:',
+        responsableId
+      );
+    }
+
+    // ---------------------------------------------------------
+    // 2. Enviar mensaje al cliente SIEMPRE
+    // Con link si Zoom funcionó; sin link si falló.
+    // ---------------------------------------------------------
+
+    try {
+      const fechaFormateada = formatearFechaAR(demo_fecha);
+
+      let mensaje;
+
+      if (joinUrl) {
+        mensaje = `*Msj automático*
+
+¡Todo listo! 😊
+
+Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
+
+🔗 ${joinUrl}
+
+💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
+      } else {
+        mensaje = `*Msj automático*
+
+¡Todo listo! 😊
+
+Tu demostración quedó agendada para el día ${fechaFormateada}. 🎥
+
+El equipo se pondrá en contacto con vos para realizar la demostración.
+
+💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
+      }
+
+      const enviado = await enviarPorChatwoot(
+        prospecto.telefono,
+        mensaje,
+        responsableId
+      );
+
+      console.log(
+        'DEBUG mensaje de demo enviado:',
+        enviado,
+        '| conZoom:',
+        Boolean(joinUrl)
+      );
+
+    } catch (msgErr) {
+      console.error(
+        'ERROR enviando mensaje de demo por Chatwoot:',
+        msgErr.response?.data || msgErr.message
+      );
     }
 
     res.redirect('/prospectos/' + req.params.id);
+
   } catch (err) {
-    console.error(err);
+    console.error('ERROR coordinando demo:', err);
     res.status(500).send('Error al guardar');
   }
 });
