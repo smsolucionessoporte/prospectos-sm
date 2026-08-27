@@ -16,8 +16,11 @@ const ESTADOS = {
 // Estados tildados por defecto la primera vez que se entra al panel
 // (todos menos perdido y sin_respuesta)
 const ESTADOS_DEFAULT = Object.keys(ESTADOS).filter(
-  (k) => k !== "perdido" && k !== "sin_respuesta",
-);
+  (k) =>
+    k !== "perdido" &&
+    k !== "sin_respuesta" &&
+    k !== "confirmado"
+  );
 
 const PROXIMA_ACCION = {
   prospecto: "Coordinar demo",
@@ -352,12 +355,16 @@ router.get("/panel", requireAuth, async (req, res) => {
 
             <label class="periodo-field">
               <span>Desde</span>
-              <input type="date" name="desde" value="${esc(desdeFiltro || "")}">
+              <input type="date" name="desde"
+                class="${desdeFiltro ? 'periodo-activo' : ''}"
+                value="${esc(desdeFiltro || "")}">
             </label>
 
             <label class="periodo-field">
               <span>Hasta</span>
-              <input type="date" name="hasta" value="${esc(hastaFiltro || "")}">
+              <input type="date" name="hasta"
+                class="${desdeFiltro ? 'periodo-activo' : ''}"
+                value="${esc(hastaFiltro || "")}">            
             </label>
           </div>
 
@@ -676,6 +683,13 @@ router.get("/panel", requireAuth, async (req, res) => {
           border-radius: 7px;
           background: #fff;
           font-size: 0.9em;
+        }
+
+        .periodo-field input.periodo-activo {
+        border-color: #8b5cf6;
+        background: #f5f3ff;
+        color: #6d28d9;
+        font-weight: 600;
         }
 
         .filter-row-search {
