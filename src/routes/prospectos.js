@@ -4,6 +4,7 @@ const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('../zoomAgentes');
 const { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, normalizarTelefono, enviarAvisoInterno } = require('../zoomChatwoot');
+const { GIULIANO_USUARIO_ID, crearReunionZoomGiuliano } = require('../zoomGiuliano');
 
 function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -806,11 +807,18 @@ router.post('/prospectos/:id/demo', requireAuth, async (req, res) => {
           prospecto.contacto ||
           'Prospecto';
 
-        joinUrl = await crearReunionZoom(
-          zoomEmail,
-          `Demo ${nombreParaZoom}`,
-          demo_fecha
-        );
+        if (responsableId === GIULIANO_USUARIO_ID) {
+          joinUrl = await crearReunionZoomGiuliano(
+            `Demo ${nombreParaZoom}`,
+            demo_fecha
+          );
+        } else {
+          joinUrl = await crearReunionZoom(
+            zoomEmail,
+            `Demo ${nombreParaZoom}`,
+            demo_fecha
+          );
+        }
 
         console.log('DEBUG reunión Zoom creada:', joinUrl);
 

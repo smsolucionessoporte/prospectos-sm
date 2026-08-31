@@ -10,6 +10,7 @@ const prospectosRoutes = require('./routes/prospectos');
 const { enviarPorChatwoot, enviarAvisoInterno, formatearFechaAR } = require('./zoomChatwoot');
 const { responsableCierre } = require('./routes/prospectos');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
+const { registrarRutasZoomGiuliano } = require('./zoomGiuliano');
 
 
 const app = express();
@@ -18,6 +19,9 @@ app.set('trust proxy', 1); //
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('public'));
+
+// Callback OAuth de la cuenta Zoom independiente de Giuliano
+registrarRutasZoomGiuliano(app);
 
 app.use(session({
   store: new pgSession({ pool, tableName: 'session' }),

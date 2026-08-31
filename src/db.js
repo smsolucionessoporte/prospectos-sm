@@ -78,6 +78,14 @@ ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS origen VARCHAR(100);
 ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS chatwoot_conversation_id BIGINT;
 CREATE INDEX IF NOT EXISTS idx_prospectos_chatwoot_conversation_id
   ON prospectos(chatwoot_conversation_id);
+
+CREATE TABLE IF NOT EXISTS zoom_oauth_tokens (
+  usuario_id INTEGER PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 async function runMigrations() {
