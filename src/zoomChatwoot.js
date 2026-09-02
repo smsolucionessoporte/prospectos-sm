@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { AGENTE_INBOX } = require('./zoomAgentes'); 
+const { AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
 
 async function getZoomToken() {
   const auth = Buffer.from(`${process.env.ZOOM_CLIENT_ID}:${process.env.ZOOM_CLIENT_SECRET}`).toString('base64');
@@ -80,7 +80,7 @@ async function enviarMensajePorConversationId(conversationId, mensaje) {
 
 const BOT_INBOX_ID = Number(process.env.BOT_INBOX_ID);
 
-async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
+async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
 
       const inboxId = BOT_INBOX_ID;
 
@@ -131,22 +131,23 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId) {
   );
 
 
-  // Si existe pero está cerrada, abrirla
-  if (conversation && conversation.status !== 'open') {
+    // Reabrir únicamente conversaciones realmente resueltas.
+    // Si está pendiente, respetar el estado elegido por el agente.
+    if (conversation && conversation.status === 'resolved') {
 
-    await axios.post(
-      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/toggle_status`,
-      {
-        status: "open"
-      },
-      {
-        headers: {
-          api_access_token: process.env.CHATWOOT_API_TOKEN
+      await axios.post(
+        `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/toggle_status`,
+        {
+          status: "open"
+        },
+        {
+          headers: {
+            api_access_token: process.env.CHATWOOT_API_TOKEN
+          }
         }
-      }
-    );
+      );
 
-  }
+    }
 
 
 // Si no existe conversación en Bot Ventas, asegurar que el contacto
@@ -216,6 +217,65 @@ if (!conversation) {
     conversation = data;
   }
 }
+
+// Buscar el ID de Chatwoot correspondiente al usuario responsable de Prospectos
+const chatwootAgentId = Number(
+  Object.keys(AGENTE_CHATWOOT_ID).find(
+    id => Number(AGENTE_CHATWOOT_ID[id]) === Number(usuarioId)
+  )
+);
+
+      // Asignar la conversación al responsable
+      if (chatwootAgentId) {
+        await axios.post(
+          `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/assignments`,
+          {
+            assignee_id: chatwootAgentId
+          },
+          {
+            headers: {
+              api_access_token: process.env.CHATWOOT_API_TOKEN
+            }
+          }
+        );
+      }
+
+            // Marcar como atención humana y evitar que intervenga Bot Ventas
+      try {
+        const { data: labelsData } = await axios.get(
+          `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/labels`,
+          {
+            headers: {
+              api_access_token: process.env.CHATWOOT_API_TOKEN
+            }
+          }
+        );
+
+        const labelsActuales = labelsData.payload || [];
+
+        const nuevasLabels = [
+          ...labelsActuales.filter(label => label !== 'bot-activo'),
+          'derivar-ventas'
+        ];
+
+        await axios.post(
+          `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/labels`,
+          {
+            labels: [...new Set(nuevasLabels)]
+          },
+          {
+            headers: {
+              api_access_token: process.env.CHATWOOT_API_TOKEN
+            }
+          }
+        );
+
+      } catch (error) {
+        console.error(
+          'ERROR actualizando etiquetas de Chatwoot:',
+          error.response?.data || error.message
+        );
+      }
 
   await axios.post(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/messages`,
