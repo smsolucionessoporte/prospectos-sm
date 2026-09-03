@@ -6,7 +6,6 @@ const { responsableCierre } = require('./prospectos');
 
 const ESTADOS = {
   prospecto: { label: "Prospecto", color: "gray" },
-  sin_respuesta: { label: "Sin respuesta", color: "yellow" },
   demo_coordinada: { label: "Demo coordinada", color: "blue" },
   demo_realizada: { label: "Demo realizada", color: "purple" },
   confirmado: { label: "Confirmado ✓", color: "green" },

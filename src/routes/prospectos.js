@@ -12,7 +12,6 @@ function esc(str) {
 
 const ESTADOS_LABEL = {
   prospecto: 'Prospecto',
-  sin_respuesta: 'Sin respuesta',
   demo_coordinada: 'Demo coordinada',
   demo_realizada: 'Demo realizada',
   confirmado: 'Confirmado',
@@ -631,12 +630,6 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
               </div>
             </div>
             ` : ''}
-
-          ${p.estado === 'sin_respuesta' ? `
-          <div class="detail-section" style="border-left:4px solid #eab308; background:#fefce8;">
-            <div class="section-title-row"><i class="ti ti-message-off"></i><span>Sin respuesta</span></div>
-            <p style="margin:0;">Se le escribió 3 veces y no respondió.</p>
-          </div>` : ''}
 
           ${relHtml}
 
