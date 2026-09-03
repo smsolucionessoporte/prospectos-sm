@@ -508,10 +508,18 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
     if (p.estado === 'prospecto') {
         acciones.push(`<a href="/prospectos/${p.id}/demo" class="btn btn-primary"><i class="ti ti-calendar-event"></i> Coordinar demo</a>`);
       acciones.push(`
-        <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline" onsubmit="return confirm('¿Marcar este prospecto como sin respuesta?')">
-          <input type="hidden" name="estado" value="sin_respuesta">
-          <input type="hidden" name="nota" value="Se le escribió 3 veces y no respondió.">
-          <button class="btn btn-secondary"><i class="ti ti-message-off"></i> Marcar sin respuesta</button>
+        <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline-flex;gap:6px;align-items:center">
+          <input type="hidden" name="estado" value="perdido">
+          <select name="motivo_perdida" required>
+            <option value="">Motivo de pérdida...</option>
+            <option value="Sin respuesta">Sin respuesta</option>
+            <option value="Económico">Económico</option>
+            <option value="Eligió otro sistema">Eligió otro sistema</option>
+            <option value="Falta de tiempo">Falta de tiempo</option>
+            <option value="Otro">Otro</option>
+          </select>
+          <input type="text" name="motivo_perdida_otro" placeholder="Aclarar si es Otro">
+          <button class="btn btn-danger"><i class="ti ti-x"></i> Marcar como perdido</button>
         </form>
       `);
     }
@@ -525,8 +533,17 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
           <input type="hidden" name="estado" value="confirmado">
           <button class="btn btn-success"><i class="ti ti-check"></i> Confirmar cliente</button>
         </form>
-        <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline">
+        <form method="POST" action="/prospectos/${p.id}/estado" style="display:inline-flex;gap:6px;align-items:center">
           <input type="hidden" name="estado" value="perdido">
+          <select name="motivo_perdida" required>
+            <option value="">Motivo de pérdida...</option>
+            <option value="Sin respuesta">Sin respuesta</option>
+            <option value="Económico">Económico</option>
+            <option value="Eligió otro sistema">Eligió otro sistema</option>
+            <option value="Falta de tiempo">Falta de tiempo</option>
+            <option value="Otro">Otro</option>
+          </select>
+          <input type="text" name="motivo_perdida_otro" placeholder="Aclarar si es Otro">
           <button class="btn btn-danger"><i class="ti ti-x"></i> Marcar como perdido</button>
         </form>
       `);
@@ -1167,7 +1184,7 @@ router.post('/prospectos/:id/relevamiento', requireAuth, async (req, res) => {
 
 // ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
 router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
-  const { estado, nota, modulos_contratados, condiciones_comerciales, motivo_perdida } = req.body;
+  const { estado, nota, modulos_contratados, condiciones_comerciales, motivo_perdida, motivo_perdida_otro } = req.body;
   try {
     const { rows } = await pool.query('SELECT estado, telefono, demo_responsable FROM prospectos WHERE id=$1', [req.params.id]);
     const estadoAnterior = rows[0]?.estado;
@@ -1182,7 +1199,18 @@ router.post('/prospectos/:id/estado', requireAuth, async (req, res) => {
       extra.condiciones_comerciales = condiciones_comerciales;
       extra.fecha_confirmacion = new Date();
     }
-    if (estado === 'perdido') extra.motivo_perdida = motivo_perdida;
+    if (estado === 'perdido') {
+      const motivosValidos = ['Sin respuesta', 'Económico', 'Eligió otro sistema', 'Falta de tiempo', 'Otro'];
+      if (!motivosValidos.includes(motivo_perdida)) {
+        return res.status(400).send('Seleccioná un motivo de pérdida válido');
+      }
+      if (motivo_perdida === 'Otro' && !String(motivo_perdida_otro || '').trim()) {
+        return res.status(400).send('Aclarar el motivo es obligatorio cuando seleccionás Otro');
+      }
+      extra.motivo_perdida = motivo_perdida === 'Otro'
+        ? `Otro: ${String(motivo_perdida_otro).trim()}`
+        : motivo_perdida;
+    }
 
     await pool.query(`
       UPDATE prospectos SET estado=$1, actualizado_en=NOW()

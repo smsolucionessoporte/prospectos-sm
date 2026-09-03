@@ -255,18 +255,7 @@ router.get("/panel", requireAuth, async (req, res) => {
             <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle"><i class="ti ti-eye"></i></a>
             ${p.estado === 'prospecto' ? `<a href="/prospectos/${p.id}/demo" class="btn-icon" title="Cargar demo"><i class="ti ti-presentation"></i></a>` : ''}
             ${p.estado === 'prospecto' ? `
-              <form method="POST"
-                    action="/prospectos/${p.id}/estado"
-                    style="display:inline"
-                    onsubmit="return confirm('¿Marcar este prospecto como sin respuesta?')">
-                <input type="hidden" name="estado" value="sin_respuesta">
-                <input type="hidden" name="nota" value="Se le escribió 3 veces y no respondió.">
-                <button type="submit"
-                        class="btn-icon"
-                        title="Marcar sin respuesta">
-                  <i class="ti ti-message-off"></i>
-                </button>
-              </form>
+              <button type="button" class="btn-icon" title="Marcar como perdido" style="color:#dc2626" onclick="abrirModalPerdido(${p.id})"><i class="ti ti-x"></i></button>
             ` : ''}
             ${p.estado === 'demo_coordinada' && p.zoom_join_url ? `<a href="${p.zoom_join_url}" target="_blank" class="btn-icon" title="Entrar a la reunión" onclick="event.stopPropagation()"><i class="ti ti-video"></i></a>` : ''}
             ${p.estado === 'demo_realizada' ? `
@@ -510,8 +499,19 @@ router.get("/panel", requireAuth, async (req, res) => {
           <form method="POST" id="form-perdido">
             <input type="hidden" name="estado" value="perdido">
             <div class="field">
-              <label>Motivo <span class="opc">(opcional)</span></label>
-              <input type="text" name="motivo_perdida" placeholder="Ej: eligió otro sistema, precio, no responde...">
+              <label>Motivo</label>
+              <select name="motivo_perdida" id="motivo-perdida" required onchange="toggleOtroPerdida()">
+                <option value="">Seleccionar motivo...</option>
+                <option value="Sin respuesta">Sin respuesta</option>
+                <option value="Económico">Económico</option>
+                <option value="Eligió otro sistema">Eligió otro sistema</option>
+                <option value="Falta de tiempo">Falta de tiempo</option>
+                <option value="Otro">Otro</option>
+              </select>
+            </div>
+            <div class="field" id="otro-perdida-wrap" style="display:none">
+              <label>Aclarar motivo</label>
+              <input type="text" name="motivo_perdida_otro" id="motivo-perdida-otro" placeholder="Aclarar el motivo...">
             </div>
             <div class="modal-actions">
               <button type="button" class="btn btn-ghost" onclick="cerrarModal('modal-perdido')">Cancelar</button>
@@ -736,7 +736,18 @@ router.get("/panel", requireAuth, async (req, res) => {
         }
         function abrirModalPerdido(id) {
           document.getElementById('form-perdido').action = '/prospectos/' + id + '/estado';
+          document.getElementById('motivo-perdida').value = '';
+          document.getElementById('motivo-perdida-otro').value = '';
+          toggleOtroPerdida();
           document.getElementById('modal-perdido').classList.add('open');
+        }
+        function toggleOtroPerdida() {
+          const motivo = document.getElementById('motivo-perdida');
+          const wrap = document.getElementById('otro-perdida-wrap');
+          const otro = document.getElementById('motivo-perdida-otro');
+          const esOtro = motivo && motivo.value === 'Otro';
+          if (wrap) wrap.style.display = esOtro ? 'block' : 'none';
+          if (otro) otro.required = esOtro;
         }
         function cerrarModal(id) {
           document.getElementById(id).classList.remove('open');
