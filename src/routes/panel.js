@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, layout } = require("../middleware/auth");
-const { responsableCierre } = require('./prospectos');
+const { responsableCierre } = require("./prospectos");
 
 const ESTADOS = {
   prospecto: { label: "Prospecto", color: "gray" },
@@ -15,11 +15,8 @@ const ESTADOS = {
 // Estados tildados por defecto la primera vez que se entra al panel
 // (todos menos perdido y sin_respuesta)
 const ESTADOS_DEFAULT = Object.keys(ESTADOS).filter(
-  (k) =>
-    k !== "perdido" &&
-    k !== "sin_respuesta" &&
-    k !== "confirmado"
-  );
+  (k) => k !== "perdido" && k !== "sin_respuesta" && k !== "confirmado",
+);
 
 const PROXIMA_ACCION = {
   prospecto: "Coordinar demo",
@@ -41,9 +38,9 @@ function puedeCerrar(usuarioSesion, prospecto) {
 }
 
 const ORIGEN_LABEL = {
-  'manual': 'Manual',
-  'prospecto-redes': '📱 Redes',
-  'prospecto-interno': '💬 Interno',
+  manual: "Manual",
+  "prospecto-redes": "📱 Redes",
+  "prospecto-interno": "💬 Interno",
 };
 
 router.get("/panel", requireAuth, async (req, res) => {
@@ -56,25 +53,30 @@ router.get("/panel", requireAuth, async (req, res) => {
     // soporte y vendedor solo ven sus propios prospectos (donde son demo_responsable,
     // o creado_por si nunca hubo demo) y no pueden filtrar por otro responsable
     const usuarioSesion = req.session.usuario;
-    const vistaRestringida = usuarioSesion.rol === "soporte" || usuarioSesion.rol === "vendedor";
-    const responsable = vistaRestringida ? String(usuarioSesion.id) : req.query.responsable;
+    const vistaRestringida =
+      usuarioSesion.rol === "soporte" || usuarioSesion.rol === "vendedor";
+    const responsable = vistaRestringida
+      ? String(usuarioSesion.id)
+      : req.query.responsable;
 
     // Si el form ya fue enviado (filtrado=1), respeto lo que vino, aunque sea vacío
     // (ej: el usuario destildó todos los estados a propósito).
     // Si es la primera carga del panel, aplico los defaults.
     const estadosSeleccionados = filtrado
-      ? (req.query.estados
-          ? (Array.isArray(req.query.estados) ? req.query.estados : [req.query.estados])
-          : [])
+      ? req.query.estados
+        ? Array.isArray(req.query.estados)
+          ? req.query.estados
+          : [req.query.estados]
+        : []
       : ESTADOS_DEFAULT;
 
-      const hoy = new Date();
-      const hoyStr = hoy.toISOString().slice(0, 10);
+    const hoy = new Date();
+    const hoyStr = hoy.toISOString().slice(0, 10);
 
-      // Por defecto: SIEMPRE
-      // Sin fecha "desde" = desde el primer registro existente.
-      const desdeFiltro = desde || null;
-      const hastaFiltro = hasta || hoyStr;
+    // Por defecto: SIEMPRE
+    // Sin fecha "desde" = desde el primer registro existente.
+    const desdeFiltro = desde || null;
+    const hastaFiltro = hasta || hoyStr;
 
     // Conteos por estado para las cards — respetan el período seleccionado
     // (no el filtro de estados, para que las cards sigan mostrando el desglose completo)
@@ -89,10 +91,12 @@ router.get("/panel", requireAuth, async (req, res) => {
       conteosWhere.push(`creado_en < $${ci++}::date + interval '1 day'`);
       conteosParams.push(hastaFiltro);
     }
-    const conteosWhereClause = conteosWhere.length ? "WHERE " + conteosWhere.join(" AND ") : "";
+    const conteosWhereClause = conteosWhere.length
+      ? "WHERE " + conteosWhere.join(" AND ")
+      : "";
     const conteos = await pool.query(
       `SELECT estado, COUNT(*) as total FROM prospectos ${conteosWhereClause} GROUP BY estado`,
-      conteosParams
+      conteosParams,
     );
     const totales = {};
     conteos.rows.forEach((r) => (totales[r.estado] = parseInt(r.total)));
@@ -103,7 +107,7 @@ router.get("/panel", requireAuth, async (req, res) => {
     const responsables = vistaRestringida
       ? { rows: [] }
       : await pool.query(
-          `SELECT id, nombre FROM usuarios WHERE activo = true AND rol IN ('soporte','admin','vendedor') ORDER BY nombre`
+          `SELECT id, nombre FROM usuarios WHERE activo = true AND rol IN ('soporte','admin','vendedor') ORDER BY nombre`,
         );
 
     // Filtros
@@ -147,32 +151,32 @@ router.get("/panel", requireAuth, async (req, res) => {
       `SELECT COUNT(*) AS total
       FROM prospectos p
       ${whereClause}`,
-      params
+      params,
     );
 
     const totalFiltrado = parseInt(totalResult.rows[0].total);
     const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / porPagina));
 
     function crearUrlPagina(nuevaPagina) {
-        const qs = new URLSearchParams();
+      const qs = new URLSearchParams();
 
-        qs.set("filtrado", "1");
-        qs.set("pagina", String(nuevaPagina));
+      qs.set("filtrado", "1");
+      qs.set("pagina", String(nuevaPagina));
 
-        if (buscar) qs.set("buscar", buscar);
-        if (responsable && !vistaRestringida) {
-          qs.set("responsable", responsable);
-        }
-
-        if (desdeFiltro) qs.set("desde", desdeFiltro);
-        if (hastaFiltro) qs.set("hasta", hastaFiltro);
-
-        estadosSeleccionados.forEach(estado => {
-          qs.append("estados", estado);
-        });
-
-        return "/panel?" + qs.toString();
+      if (buscar) qs.set("buscar", buscar);
+      if (responsable && !vistaRestringida) {
+        qs.set("responsable", responsable);
       }
+
+      if (desdeFiltro) qs.set("desde", desdeFiltro);
+      if (hastaFiltro) qs.set("hasta", hastaFiltro);
+
+      estadosSeleccionados.forEach((estado) => {
+        qs.append("estados", estado);
+      });
+
+      return "/panel?" + qs.toString();
+    }
 
     const prospectos = await pool.query(
       `
@@ -187,7 +191,7 @@ router.get("/panel", requireAuth, async (req, res) => {
         ORDER BY p.actualizado_en DESC
         LIMIT $${i} OFFSET $${i + 1}
       `,
-      [...params, porPagina, offset]
+      [...params, porPagina, offset],
     );
 
     const rows = prospectos.rows;
@@ -246,28 +250,14 @@ router.get("/panel", requireAuth, async (req, res) => {
           <td>${esc(p.telefono || "—")}</td>
           <td>${esc(p.rubro || "—")}</td>
           <td><span class="badge-estado ${est.color}">${est.label}</span></td>
-          <td class="text-muted">${PROXIMA_ACCION[p.estado] || '—'}${p.estado === 'demo_realizada' ? ' (' + esc(responsableCierre(p)) + ')' : ''}</td>          <td class="text-muted">${ORIGEN_LABEL[p.origen] || '—'}</td>
+          <td class="text-muted">${PROXIMA_ACCION[p.estado] || "—"}${p.estado === "demo_realizada" ? " (" + esc(responsableCierre(p)) + ")" : ""}</td>          <td class="text-muted">${ORIGEN_LABEL[p.origen] || "—"}</td>
           <td class="text-muted">${esc(p.demo_responsable_nombre || p.creado_por_nombre || "—")}</td>
           <td class="text-muted">${fecha}</td>
           <td>
           <div class="row-actions" onclick="event.stopPropagation()">
-            <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle"><i class="ti ti-eye"></i></a>
-            ${p.estado === 'prospecto' ? `<a href="/prospectos/${p.id}/demo" class="btn-icon" title="Cargar demo"><i class="ti ti-presentation"></i></a>` : ''}
-            ${p.estado === 'prospecto' ? `
-              <button type="button" class="btn-icon" title="Marcar como perdido" style="color:#dc2626" onclick="abrirModalPerdido(${p.id})"><i class="ti ti-x"></i></button>
-            ` : ''}
-            ${p.estado === 'demo_coordinada' && p.zoom_join_url ? `<a href="${p.zoom_join_url}" target="_blank" class="btn-icon" title="Entrar a la reunión" onclick="event.stopPropagation()"><i class="ti ti-video"></i></a>` : ''}
-            ${p.estado === 'demo_realizada' ? `
-                <button type="button" class="btn-icon" title="Confirmar cliente" style="color:#16a34a" onclick="abrirModalConfirmar(${p.id})"><i class="ti ti-check"></i></button>
-              <button type="button" class="btn-icon" title="Marcar como perdido" style="color:#dc2626" onclick="abrirModalPerdido(${p.id})"><i class="ti ti-x"></i></button>
-            ` : ''}
-              <a href="/prospectos/${p.id}/editar" class="btn-icon" title="Editar"><i class="ti ti-pencil"></i></a>            
-              ${req.session.usuario.id === 6 ? `
-              
-                <form method="POST" action="/prospectos/${p.id}/eliminar" style="display:inline" onsubmit="return confirm('¿Eliminar este prospecto? Esta acción no se puede deshacer.')">
-                <button type="submit" class="btn-icon" title="Eliminar" style="color:#dc2626"><i class="ti ti-trash"></i></button>
-              </form>
-            ` : ''}
+            <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle">
+              <i class="ti ti-eye"></i>
+            </a>
           </div>
           </td>
         </tr>
@@ -285,7 +275,10 @@ router.get("/panel", requireAuth, async (req, res) => {
       </td></tr>
     `
         : Object.keys(ESTADOS)
-            .filter((estadoKey) => gruposPorEstado[estadoKey] && gruposPorEstado[estadoKey].length)
+            .filter(
+              (estadoKey) =>
+                gruposPorEstado[estadoKey] && gruposPorEstado[estadoKey].length,
+            )
             .map((estadoKey) => {
               const meta = ESTADOS[estadoKey];
               const grupo = gruposPorEstado[estadoKey];
@@ -336,7 +329,7 @@ router.get("/panel", requireAuth, async (req, res) => {
 
             <button
               type="button"
-              class="periodo-siempre ${!desdeFiltro ? 'active' : ''}"
+              class="periodo-siempre ${!desdeFiltro ? "active" : ""}"
               onclick="this.form.desde.value=''; this.form.hasta.value='${hoyStr}'; this.form.submit();">
               Siempre
             </button>
@@ -344,14 +337,14 @@ router.get("/panel", requireAuth, async (req, res) => {
             <label class="periodo-field">
               <span>Desde</span>
               <input type="date" name="desde"
-                class="${desdeFiltro ? 'periodo-activo' : ''}"
+                class="${desdeFiltro ? "periodo-activo" : ""}"
                 value="${esc(desdeFiltro || "")}">
             </label>
 
             <label class="periodo-field">
               <span>Hasta</span>
               <input type="date" name="hasta"
-                class="${desdeFiltro ? 'periodo-activo' : ''}"
+                class="${desdeFiltro ? "periodo-activo" : ""}"
                 value="${esc(hastaFiltro || "")}">            
             </label>
           </div>
@@ -368,7 +361,7 @@ router.get("/panel", requireAuth, async (req, res) => {
 
             <button type="button" class="btn btn-secondary" onclick="abrirModalFiltros()">
               <i class="ti ti-filter"></i>
-              Filtros${filtrosActivosCount > 0 ? ` <span class="filtros-badge">${filtrosActivosCount}</span>` : ''}
+              Filtros${filtrosActivosCount > 0 ? ` <span class="filtros-badge">${filtrosActivosCount}</span>` : ""}
             </button>
 
             <button type="submit" class="btn btn-primary">
@@ -381,28 +374,39 @@ router.get("/panel", requireAuth, async (req, res) => {
             <div class="modal-box">
               <h3><i class="ti ti-filter"></i> Filtros</h3>
 
-              ${vistaRestringida ? '' : `
+              ${
+                vistaRestringida
+                  ? ""
+                  : `
               <div class="field">
                 <label>Responsable</label>
                 <select name="responsable" class="filter-select">
                   <option value="">Todos los responsables</option>
-                  ${responsables.rows.map(u =>
-                    `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`
-                  ).join("")}
+                  ${responsables.rows
+                    .map(
+                      (u) =>
+                        `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`,
+                    )
+                    .join("")}
                 </select>
               </div>
-              `}
+              `
+              }
 
   
               <div class="field">
                 <label>Estados</label>
                 <div class="filter-row-estados">
-                  ${Object.entries(ESTADOS).map(([key, meta]) => `
+                  ${Object.entries(ESTADOS)
+                    .map(
+                      ([key, meta]) => `
                     <label class="estado-check">
                       <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
                       ${meta.label}
                     </label>
-                  `).join("")}
+                  `,
+                    )
+                    .join("")}
                 </div>
               </div>
 
@@ -433,43 +437,63 @@ router.get("/panel", requireAuth, async (req, res) => {
           <tbody>${filasHtml}</tbody>
         </table>
       </div>
-      <p class="results-count">${totalFiltrado} resultado${totalFiltrado === 1 ? '' : 's'}</p>
+      <p class="results-count">${totalFiltrado} resultado${totalFiltrado === 1 ? "" : "s"}</p>
 
-        ${totalPaginas > 1 ? `
+        ${
+          totalPaginas > 1
+            ? `
           <div class="pagination">
 
-            ${pagina > 1 ? `
+            ${
+              pagina > 1
+                ? `
               <a class="btn btn-secondary" href="${crearUrlPagina(pagina - 1)}">
                 <i class="ti ti-chevron-left"></i> Anterior
               </a>
-            ` : ''}
+            `
+                : ""
+            }
 
             <div class="pagination-pages">
               ${Array.from({ length: totalPaginas }, (_, idx) => idx + 1)
-                .filter(n => n === 1 || n === totalPaginas || Math.abs(n - pagina) <= 2)
+                .filter(
+                  (n) =>
+                    n === 1 || n === totalPaginas || Math.abs(n - pagina) <= 2,
+                )
                 .map((n, idx, arr) => {
                   const anterior = arr[idx - 1];
-                  const puntos = anterior && n - anterior > 1
-                    ? `<span class="pagination-dots">…</span>`
-                    : '';
+                  const puntos =
+                    anterior && n - anterior > 1
+                      ? `<span class="pagination-dots">…</span>`
+                      : "";
 
-                  return puntos + `
+                  return (
+                    puntos +
+                    `
                     <a href="${crearUrlPagina(n)}"
-                      class="pagination-page ${n === pagina ? 'active' : ''}">
+                      class="pagination-page ${n === pagina ? "active" : ""}">
                       ${n}
                     </a>
-                  `;
-                }).join('')}
+                  `
+                  );
+                })
+                .join("")}
             </div>
 
-            ${pagina < totalPaginas ? `
+            ${
+              pagina < totalPaginas
+                ? `
               <a class="btn btn-secondary" href="${crearUrlPagina(pagina + 1)}">
                 Siguiente <i class="ti ti-chevron-right"></i>
               </a>
-            ` : ''}
+            `
+                : ""
+            }
 
           </div>
-        ` : ''}
+        `
+            : ""
+        }
 
       <div id="modal-confirmar" class="modal-overlay">
         <div class="modal-box">
@@ -778,7 +802,7 @@ function crearUrlPagina(nuevaPagina) {
   if (hastaFiltro) qs.set("hasta", hastaFiltro);
   if (responsable && !vistaRestringida) qs.set("responsable", responsable);
 
-  estadosSeleccionados.forEach(estado => {
+  estadosSeleccionados.forEach((estado) => {
     qs.append("estados", estado);
   });
 
