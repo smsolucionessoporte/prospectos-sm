@@ -502,6 +502,26 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
     const estadoLabel = ESTADOS_LABEL[p.estado] || p.estado;
     const u = req.session.usuario;
 
+    let responsablesAdmin = [];
+
+    if (u.rol === 'admin') {
+      const { rows: usuariosActivos } = await pool.query(`
+        SELECT id, nombre, rol
+        FROM usuarios
+        WHERE activo = true
+          AND rol IN ('soporte', 'admin', 'vendedor')
+        ORDER BY nombre
+      `);
+
+      responsablesAdmin = usuariosActivos;
+    }
+
+    const responsableActualId =
+      p.demo_responsable || p.creado_por || null;
+
+    const responsableActualNombre =
+      p.demo_resp_nombre || p.creado_por_nombre || '—';
+
     // Acciones disponibles según estado y rol
     const acciones = [];
     if (p.estado === 'prospecto') {
@@ -618,7 +638,57 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${{'manual':'Manual','prospecto-redes':'📱 Redes','prospecto-interno':'💬 Interno'}[p.origen] || '—'}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ''}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})} — ${esc(p.demo_resp_nombre||'—')}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ''}</span></div>` : ''}
               ${p.estado === 'demo_realizada' ? `<div class="detail-item"><span class="detail-label">Próxima acción</span><span class="detail-val">Cerrar cliente (${esc(responsableCierre(p))})</span></div>` : ''}
+              <div class="detail-item">
+                <span class="detail-label">Responsable</span>
+                <span class="detail-val">${esc(responsableActualNombre)}</span>
+              </div>
             </div>
+
+            ${u.rol === 'admin' ? `
+            <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border, #e5e7eb)">
+              <div class="section-title-row">
+                <i class="ti ti-user-cog"></i>
+                <span>Cambiar responsable</span>
+                <span class="section-meta">Solo administradores</span>
+              </div>
+
+              <form
+                method="POST"
+                action="/prospectos/${p.id}/responsable"
+                style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:10px"
+              >
+                <div class="field" style="min-width:260px;margin:0">
+                  <label for="responsable_id">Nuevo responsable</label>
+
+                  <select
+                    id="responsable_id"
+                    name="responsable_id"
+                    required
+                  >
+                    <option value="">Seleccionar...</option>
+
+                    ${responsablesAdmin.map(r => `
+                      <option
+                        value="${r.id}"
+                        ${Number(responsableActualId) === Number(r.id) ? 'selected' : ''}
+                      >
+                        ${esc(r.nombre)} (${esc(r.rol)})
+                      </option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  onclick="return confirm('¿Confirmás el cambio de responsable de este prospecto?')"
+                >
+                  <i class="ti ti-user-cog"></i>
+                  Cambiar responsable
+                </button>
+              </form>
+            </div>
+          ` : ''}
 
             ${(p.propuesta_monto_inicial || p.propuesta_cuotas || p.propuesta_monto_mantenimiento) ? `
             <div class="detail-section">
@@ -661,6 +731,152 @@ router.get('/prospectos/:id', requireAuth, async (req, res) => {
     res.status(500).send('Error interno');
   }
 });
+
+// ─── CAMBIAR RESPONSABLE (SOLO ADMIN) ────────────────────────────────────────
+
+router.post(
+  '/prospectos/:id/responsable',
+  requireAuth,
+  requireRol('admin'),
+  async (req, res) => {
+    const prospectoId = Number(req.params.id);
+    const responsableId = Number(req.body.responsable_id);
+
+    if (!Number.isInteger(prospectoId) || prospectoId <= 0) {
+      return res.status(400).send('Prospecto no válido');
+    }
+
+    if (!Number.isInteger(responsableId) || responsableId <= 0) {
+      return res.status(400).send('Responsable no válido');
+    }
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const { rows: prospectos } = await client.query(`
+        SELECT
+          p.id,
+          p.estado,
+          p.creado_por,
+          p.demo_responsable,
+          uc.nombre AS creado_por_nombre,
+          ud.nombre AS demo_responsable_nombre
+        FROM prospectos p
+        LEFT JOIN usuarios uc
+          ON uc.id = p.creado_por
+        LEFT JOIN usuarios ud
+          ON ud.id = p.demo_responsable
+        WHERE p.id = $1
+        FOR UPDATE OF p
+      `, [prospectoId]);
+
+      if (!prospectos.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).send('Prospecto no encontrado');
+      }
+
+      const actual = prospectos[0];
+
+      const { rows: responsables } = await client.query(`
+        SELECT id, nombre, rol
+        FROM usuarios
+        WHERE id = $1
+          AND activo = true
+          AND rol IN ('soporte', 'admin', 'vendedor')
+        LIMIT 1
+      `, [responsableId]);
+
+      if (!responsables.length) {
+        await client.query('ROLLBACK');
+
+        return res
+          .status(400)
+          .send('El responsable seleccionado no es válido o está inactivo');
+      }
+
+      const nuevoResponsable = responsables[0];
+
+      const tieneResponsableDemo =
+        actual.demo_responsable !== null;
+
+      const responsableAnteriorId =
+        tieneResponsableDemo
+          ? actual.demo_responsable
+          : actual.creado_por;
+
+      const responsableAnteriorNombre =
+        tieneResponsableDemo
+          ? actual.demo_responsable_nombre
+          : actual.creado_por_nombre;
+
+      if (Number(responsableAnteriorId) === responsableId) {
+        await client.query('ROLLBACK');
+        return res.redirect('/prospectos/' + prospectoId);
+      }
+
+      if (tieneResponsableDemo) {
+        await client.query(`
+          UPDATE prospectos
+          SET
+            demo_responsable = $1,
+            actualizado_en = NOW()
+          WHERE id = $2
+        `, [responsableId, prospectoId]);
+      } else {
+        await client.query(`
+          UPDATE prospectos
+          SET
+            creado_por = $1,
+            actualizado_en = NOW()
+          WHERE id = $2
+        `, [responsableId, prospectoId]);
+      }
+
+      const nota =
+        `Responsable cambiado de ${
+          responsableAnteriorNombre || 'Sin asignar'
+        } a ${nuevoResponsable.nombre}`;
+
+      await client.query(`
+        INSERT INTO historial_estados
+          (
+            prospecto_id,
+            estado_anterior,
+            estado_nuevo,
+            usuario_id,
+            nota
+          )
+        VALUES ($1, $2, $2, $3, $4)
+      `, [
+        prospectoId,
+        actual.estado,
+        req.session.usuario.id,
+        nota
+      ]);
+
+      await client.query('COMMIT');
+
+      return res.redirect('/prospectos/' + prospectoId);
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+
+      console.error(
+        'Error al cambiar responsable:',
+        err
+      );
+
+      return res
+        .status(500)
+        .send('Error al cambiar responsable');
+
+    } finally {
+      client.release();
+    }
+  }
+);
 
 // ─── COORDINAR DEMO ───────────────────────────────────────────────────────────
 router.get('/prospectos/:id/demo', requireAuth, async (req, res) => {
