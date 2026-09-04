@@ -28,6 +28,53 @@ function esc(str) {
     .replace(/"/g, "&quot;");
 }
 
+function guardarResultadoAccion(req, titulo, resultados) {
+  req.session.resultadoAccion = {
+    titulo,
+    resultados,
+  };
+}
+
+function renderResultadoAccion(resultado) {
+  if (!resultado) return "";
+
+  const tieneError = resultado.resultados.some((r) => !r.ok);
+
+  return `
+    <div style="
+      margin-bottom:18px;
+      padding:16px 18px;
+      border-radius:10px;
+      border:1px solid ${tieneError ? "#f59e0b" : "#22c55e"};
+      background:${tieneError ? "#fffbeb" : "#f0fdf4"};
+    ">
+      <div style="font-weight:700; margin-bottom:8px;">
+        ${tieneError ? "⚠️" : "✅"} ${esc(resultado.titulo)}
+      </div>
+
+      ${resultado.resultados
+        .map(
+          (r) => `
+            <div style="margin:4px 0;">
+              ${r.ok ? "✅" : "❌"} ${esc(r.texto)}
+            </div>
+          `,
+        )
+        .join("")}
+
+      ${
+        tieneError
+          ? `
+            <div style="margin-top:10px; font-size:13px;">
+              La acción principal quedó guardada, pero revisá los puntos indicados con ❌.
+            </div>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 const ESTADOS_LABEL = {
   prospecto: "Prospecto",
   demo_coordinada: "Demo coordinada",
@@ -699,11 +746,16 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
       )
       .join("");
 
+    const resultadoAccion = req.session.resultadoAccion || null;
+    delete req.session.resultadoAccion;
+
     res.send(
       layout(
         p.contacto || p.nombre_negocio || "Prospecto",
         `
-      <div class="page-header">
+        ${renderResultadoAccion(resultadoAccion)}
+
+        <div class="page-header">
         <div>
           <a href="/panel" class="back-link"><i class="ti ti-arrow-left"></i> Volver al panel</a>
           <h1 class="page-title">${esc(p.contacto || "Sin nombre")}</h1>
@@ -1330,14 +1382,28 @@ router.post("/prospectos/:id/demo", requireAuth, async (req, res) => {
     // Si falla, NO interrumpir el resto del proceso.
     // ---------------------------------------------------------
 
+const resultados = [
+  {
+    ok: true,
+    texto: "La demo quedó registrada como coordinada.",
+  },
+];
+
     let joinUrl = null;
+    let zoomError = null;
 
     const zoomEmail = AGENTE_ZOOM[responsableId];
+
+    // ---------------------------------------------------------
+    // 1. CREAR REUNIÓN DE ZOOM
+    // ---------------------------------------------------------
 
     if (zoomEmail) {
       try {
         const nombreParaZoom =
-          prospecto.nombre_negocio || prospecto.contacto || "Prospecto";
+          prospecto.nombre_negocio ||
+          prospecto.contacto ||
+          "Prospecto";
 
         if (responsableId === GIULIANO_USUARIO_ID) {
           joinUrl = await crearReunionZoomGiuliano(
@@ -1352,58 +1418,72 @@ router.post("/prospectos/:id/demo", requireAuth, async (req, res) => {
           );
         }
 
+        await pool.query(
+          "UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2",
+          [joinUrl, req.params.id],
+        );
+
         console.log("DEBUG reunión Zoom creada:", joinUrl);
 
-        await pool.query("UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2", [
-          joinUrl,
-          req.params.id,
-        ]);
+        resultados.push({
+          ok: true,
+          texto: "La reunión de Zoom fue creada correctamente.",
+        });
       } catch (zoomErr) {
+        zoomError =
+          zoomErr.response?.data?.message ||
+          zoomErr.response?.data?.reason ||
+          zoomErr.message ||
+          "Error desconocido";
+
         console.error(
           "ERROR creando reunión Zoom. Se continuará sin link:",
           zoomErr.response?.data || zoomErr.message,
         );
 
-        joinUrl = null;
+        resultados.push({
+          ok: false,
+          texto: `No se pudo crear la reunión de Zoom: ${zoomError}`,
+        });
       }
     } else {
-      console.log(
-        "DEBUG: responsable sin cuenta Zoom configurada:",
-        responsableId,
-      );
+      zoomError =
+        `El responsable ${nombreResponsable} no tiene una cuenta de Zoom configurada`;
+
+      console.error("ERROR:", zoomError);
+
+      resultados.push({
+        ok: false,
+        texto: zoomError,
+      });
     }
 
+    const fechaFormateada = formatearFechaAR(demo_fecha);
+
     // ---------------------------------------------------------
-    // 2. Enviar mensaje al cliente SIEMPRE
-    // Con link si Zoom funcionó; sin link si falló.
+    // 2. MENSAJE AUTOMÁTICO AL CLIENTE
     // ---------------------------------------------------------
 
     try {
-      const fechaFormateada = formatearFechaAR(demo_fecha);
+      const mensaje = joinUrl
+        ? `*Msj automático*
 
-      let mensaje;
+    ¡Todo listo! 😊
 
-      if (joinUrl) {
-        mensaje = `*Msj automático*
+    Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
 
-¡Todo listo! 😊
+    🔗 ${joinUrl}
 
-Te dejamos el link para unirte a la demostración agendada para el día ${fechaFormateada}. 🎥
+    💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`
+        : `*Msj automático*
 
-🔗 ${joinUrl}
+    ¡Todo listo! 😊
 
-💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
-      } else {
-        mensaje = `*Msj automático*
+    Tu demostración quedó agendada para el día ${fechaFormateada}. 🎥
 
-¡Todo listo! 😊
+    El equipo se pondrá en contacto con vos para realizar la demostración.
 
-Tu demostración quedó agendada para el día ${fechaFormateada}. 🎥
-
-El equipo se pondrá en contacto con vos para realizar la demostración.
-
-💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
-      }
+    💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
 
       const enviado = await enviarPorChatwoot(
         prospecto.telefono,
@@ -1417,12 +1497,107 @@ El equipo se pondrá en contacto con vos para realizar la demostración.
         "| conZoom:",
         Boolean(joinUrl),
       );
+
+      if (enviado) {
+        resultados.push({
+          ok: true,
+          texto: joinUrl
+            ? "Se envió al cliente la confirmación con el link de Zoom."
+            : "Se envió al cliente la confirmación de la demo sin link de Zoom.",
+        });
+      } else {
+        resultados.push({
+          ok: false,
+          texto: "No se pudo enviar el mensaje automático al cliente.",
+        });
+      }
     } catch (msgErr) {
       console.error(
         "ERROR enviando mensaje de demo por Chatwoot:",
         msgErr.response?.data || msgErr.message,
       );
+
+      resultados.push({
+        ok: false,
+        texto:
+          `No se pudo enviar el mensaje automático al cliente: ` +
+          `${
+            msgErr.response?.data?.message ||
+            msgErr.message ||
+            "Error de Chatwoot"
+          }`,
+      });
     }
+
+    // ---------------------------------------------------------
+    // 3. AVISO AL GRUPO
+    // ---------------------------------------------------------
+
+    try {
+      const nombreParaGrupo =
+        prospecto.nombre_negocio ||
+        prospecto.contacto ||
+        `Prospecto #${req.params.id}`;
+
+      const linkProspecto =
+        `${process.env.APP_URL}/prospectos/${req.params.id}`;
+
+      let mensajeGrupo =
+        `📅 Nueva demo coordinada: *${nombreParaGrupo}*\n\n` +
+        `📆 ${fechaFormateada}\n` +
+        `👤 Responsable: ${nombreResponsable}\n` +
+        `📞 Tel: ${prospecto.telefono || "—"}\n`;
+
+      if (joinUrl) {
+        mensajeGrupo += `🎥 Zoom: ${joinUrl}\n`;
+      } else {
+        mensajeGrupo +=
+          `⚠️ Zoom: NO SE PUDO CREAR` +
+          `${zoomError ? ` — ${zoomError}` : ""}\n`;
+      }
+
+      mensajeGrupo +=
+        `\n👉 Ver prospecto: ${linkProspecto}`;
+
+      const avisoEnviado =
+        await enviarAvisoInterno(mensajeGrupo);
+
+      if (avisoEnviado) {
+        resultados.push({
+          ok: true,
+          texto: "Se envió el aviso de la demo al grupo.",
+        });
+      } else {
+        resultados.push({
+          ok: false,
+          texto: "No se pudo enviar el aviso de la demo al grupo.",
+        });
+      }
+    } catch (avisoErr) {
+      console.error(
+        "ERROR enviando aviso de demo al grupo:",
+        avisoErr.response?.data || avisoErr.message,
+      );
+
+      resultados.push({
+        ok: false,
+        texto:
+          `No se pudo enviar el aviso al grupo: ` +
+          `${
+            avisoErr.response?.data?.message ||
+            avisoErr.message ||
+            "Error de Chatwoot"
+          }`,
+      });
+    }
+
+    guardarResultadoAccion(
+      req,
+      resultados.some((r) => !r.ok)
+        ? "Demo coordinada con observaciones"
+        : "Demo coordinada correctamente",
+      resultados,
+    );
 
     res.redirect("/prospectos/" + req.params.id);
   } catch (err) {
@@ -1735,60 +1910,156 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
     );
 
     // ─── Enviar mensaje post-demo con documentación (al cliente) ───
-    let telefono;
-    try {
-      const { rows: prospRows } = await pool.query(
-        "SELECT * FROM prospectos WHERE id=$1",
-        [req.params.id],
-      );
-      const p = prospRows[0];
-      const demoResponsable = p.demo_responsable;
+    const resultados = [
+      {
+        ok: true,
+        texto: "El relevamiento quedó guardado y la demo pasó a realizada.",
+      },
+    ];
 
-      telefono = p.telefono;
-      if (telefono && estadoAnterior !== "demo_realizada") {
+    const { rows: prospRows } = await pool.query(
+      "SELECT * FROM prospectos WHERE id=$1",
+      [req.params.id],
+    );
+
+    const p = prospRows[0];
+    const demoResponsable = p.demo_responsable;
+
+    // ---------------------------------------------------------
+    // 1. MENSAJE POST-DEMO AL CLIENTE
+    // ---------------------------------------------------------
+
+    if (p.telefono) {
+      try {
         const mensajePostDemo = `*Msj automático*
 
-        Gracias por asistir a la demostración. 😊
+    Gracias por asistir a la demostración. 😊
 
-        Te compartimos la documentación para que puedas revisar las normas generales y los requisitos del sistema:
+    Te compartimos la documentación para que puedas revisar las normas generales y los requisitos del sistema:
 
-        📄 Normas generales:
-        https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/
+    📄 Normas generales:
+    https://sm-soluciones.com/ayuda/docs/temas-comunes/normas-generales/
 
-        ⚙️ Requisitos y recomendaciones de equipo:
-        https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/
+    ⚙️ Requisitos y recomendaciones de equipo:
+    https://sm-soluciones.com/ayuda/docs/temas-comunes/requisitos-y-recomendaciones-para-la-instalacion-%f0%9f%9b%a0%ef%b8%8f/
 
-        Quedamos a disposición ante cualquier consulta.`;
-        await enviarPorChatwoot(telefono, mensajePostDemo, demoResponsable);
+    Quedamos a disposición ante cualquier consulta.`;
+
+        const enviado = await enviarPorChatwoot(
+          p.telefono,
+          mensajePostDemo,
+          demoResponsable,
+        );
+
+        if (enviado) {
+          resultados.push({
+            ok: true,
+            texto:
+              "Se envió al cliente el mensaje post-demo con la documentación.",
+          });
+        } else {
+          resultados.push({
+            ok: false,
+            texto:
+              "No se pudo enviar al cliente el mensaje post-demo.",
+          });
+        }
+      } catch (msgErr) {
+        console.error(
+          "ERROR enviando mensaje post-demo:",
+          msgErr.response?.data || msgErr.message,
+        );
+
+        resultados.push({
+          ok: false,
+          texto:
+            `No se pudo enviar el mensaje post-demo al cliente: ` +
+            `${
+              msgErr.response?.data?.message ||
+              msgErr.message ||
+              "Error de Chatwoot"
+            }`,
+        });
       }
+    } else {
+      resultados.push({
+        ok: false,
+        texto:
+          "No se envió el mensaje post-demo porque el prospecto no tiene teléfono.",
+      });
+    }
 
-      // ─── Enviar datos del relevamiento al grupo ───
+    // ---------------------------------------------------------
+    // 2. AVISO AL GRUPO
+    // ---------------------------------------------------------
 
+    try {
       const nombreParaGrupo =
-        p.nombre_negocio || p.contacto || `Prospecto #${req.params.id}`;
+        p.nombre_negocio ||
+        p.contacto ||
+        `Prospecto #${req.params.id}`;
 
-      const link = `${process.env.APP_URL}/prospectos/${req.params.id}`;
+      const link =
+        `${process.env.APP_URL}/prospectos/${req.params.id}`;
 
       const mensajeGrupo =
         `📋 Demo realizada: *${nombreParaGrupo}*\n\n` +
-        `📞 Tel: ${p.telefono}\n` +
+        `📞 Tel: ${p.telefono || "—"}\n` +
         `🏬 Rubro: ${p.rubro || "—"}${p.rubro_otro ? ` (${p.rubro_otro})` : ""}\n` +
         `⭐ Módulos: ${(p.modulos || []).join(", ") || "—"}\n` +
         `🛠️ Equipamiento: ${(p.equipamiento || []).join(", ") || "—"}${p.equip_observaciones ? ` — ${p.equip_observaciones}` : ""}\n` +
-        `🔥 Interés: ${{ alto: "Alto", medio: "Medio", bajo: "Bajo" }[p.nivel_interes] || "—"}\n\n` +
+        `🔥 Interés: ${
+          {
+            alto: "Alto",
+            medio: "Medio",
+            bajo: "Bajo",
+          }[p.nivel_interes] || "—"
+        }\n\n` +
         `👉 Cerrar cliente: ${link}`;
 
-      await enviarAvisoInterno(mensajeGrupo);
+      const avisoEnviado =
+        await enviarAvisoInterno(mensajeGrupo);
 
-      console.log(
-        `✅ Aviso de demo realizada enviado al grupo: ${req.params.id}`,
-      );
+      if (avisoEnviado) {
+        console.log(
+          `✅ Aviso de demo realizada enviado al grupo: ${req.params.id}`,
+        );
+
+        resultados.push({
+          ok: true,
+          texto: "Se envió el relevamiento al grupo.",
+        });
+      } else {
+        resultados.push({
+          ok: false,
+          texto: "No se pudo enviar el relevamiento al grupo.",
+        });
+      }
     } catch (msgErr) {
       console.error(
-        "ERROR enviando mensajes post-relevamiento:",
+        "ERROR enviando aviso post-relevamiento:",
         msgErr.response?.data || msgErr.message,
       );
+
+      resultados.push({
+        ok: false,
+        texto:
+          `No se pudo enviar el relevamiento al grupo: ` +
+          `${
+            msgErr.response?.data?.message ||
+            msgErr.message ||
+            "Error de Chatwoot"
+          }`,
+      });
     }
+
+    guardarResultadoAccion(
+      req,
+      resultados.some((r) => !r.ok)
+        ? "Relevamiento guardado con observaciones"
+        : "Relevamiento completado correctamente",
+      resultados,
+    );
 
     res.redirect("/prospectos/" + req.params.id);
   } catch (err) {
@@ -1797,127 +2068,180 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
   }
 });
 
-// ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
-router.post("/prospectos/:id/estado", requireAuth, async (req, res) => {
-  const {
-    estado,
-    nota,
-    modulos_contratados,
-    condiciones_comerciales,
-    motivo_perdida,
-    motivo_perdida_otro,
-  } = req.body;
-  try {
-    const { rows } = await pool.query(
-      "SELECT estado, telefono, demo_responsable FROM prospectos WHERE id=$1",
-      [req.params.id],
-    );
-    const estadoAnterior = rows[0]?.estado;
-    const telefono = rows[0]?.telefono;
-    const demoResponsable = rows[0]?.demo_responsable;
-    const extra = {};
-    if (estado === "confirmado") {
-      // Separamos los módulos contratados por coma, igual que en el relevamiento (array de strings)
-      extra.modulos_contratados = modulos_contratados
-        ? modulos_contratados
-            .split(",")
-            .map((m) => m.trim())
-            .filter((m) => m.length > 0)
-        : null;
-      extra.condiciones_comerciales = condiciones_comerciales;
-      extra.fecha_confirmacion = new Date();
-    }
-    if (estado === "perdido") {
-      const motivosValidos = [
-        "Sin respuesta",
-        "Económico",
-        "Eligió otro sistema",
-        "Falta de tiempo",
-        "Otro",
-      ];
-      if (!motivosValidos.includes(motivo_perdida)) {
-        return res.status(400).send("Seleccioná un motivo de pérdida válido");
-      }
-      if (
-        motivo_perdida === "Otro" &&
-        !String(motivo_perdida_otro || "").trim()
-      ) {
-        return res
-          .status(400)
-          .send("Aclarar el motivo es obligatorio cuando seleccionás Otro");
-      }
-      extra.motivo_perdida =
-        motivo_perdida === "Otro"
-          ? `Otro: ${String(motivo_perdida_otro).trim()}`
-          : motivo_perdida;
-    }
-
-    await pool.query(
-      `
-      UPDATE prospectos SET estado=$1, actualizado_en=NOW()
-      ${estado === "confirmado" ? ", modulos_contratados=$3, condiciones_comerciales=$4, fecha_confirmacion=$5" : ""}
-      ${estado === "perdido" ? ", motivo_perdida=$3" : ""}
-      WHERE id=$2
-    `,
-      estado === "confirmado"
-        ? [
-            estado,
-            req.params.id,
-            extra.modulos_contratados,
-            extra.condiciones_comerciales,
-            extra.fecha_confirmacion,
-          ]
-        : estado === "perdido"
-          ? [estado, req.params.id, extra.motivo_perdida]
-          : [estado, req.params.id],
-    );
-    await pool.query(
-      `
-      INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
-      VALUES ($1,$2,$3,$4,$5)
-    `,
-      [
-        req.params.id,
-        estadoAnterior,
+    // ─── CAMBIAR ESTADO DEL PROSPECTO ─────────────────────────────────────────────
+    router.post("/prospectos/:id/estado", requireAuth, async (req, res) => {
+      const {
         estado,
-        req.session.usuario.id,
-        nota || null,
-      ],
-    );
+        nota,
+        modulos_contratados,
+        condiciones_comerciales,
+        motivo_perdida,
+        motivo_perdida_otro,
+      } = req.body;
+      try {
+        const { rows } = await pool.query(
+          "SELECT estado, telefono, demo_responsable FROM prospectos WHERE id=$1",
+          [req.params.id],
+        );
+        const estadoAnterior = rows[0]?.estado;
+        const telefono = rows[0]?.telefono;
+        const demoResponsable = rows[0]?.demo_responsable;
+        const extra = {};
+        if (estado === "confirmado") {
+          // Separamos los módulos contratados por coma, igual que en el relevamiento (array de strings)
+          extra.modulos_contratados = modulos_contratados
+            ? modulos_contratados
+                .split(",")
+                .map((m) => m.trim())
+                .filter((m) => m.length > 0)
+            : null;
+          extra.condiciones_comerciales = condiciones_comerciales;
+          extra.fecha_confirmacion = new Date();
+        }
+        if (estado === "perdido") {
+          const motivosValidos = [
+            "Sin respuesta",
+            "Económico",
+            "Eligió otro sistema",
+            "Falta de tiempo",
+            "Otro",
+          ];
+          if (!motivosValidos.includes(motivo_perdida)) {
+            return res.status(400).send("Seleccioná un motivo de pérdida válido");
+          }
+          if (
+            motivo_perdida === "Otro" &&
+            !String(motivo_perdida_otro || "").trim()
+          ) {
+            return res
+              .status(400)
+              .send("Aclarar el motivo es obligatorio cuando seleccionás Otro");
+          }
+          extra.motivo_perdida =
+            motivo_perdida === "Otro"
+              ? `Otro: ${String(motivo_perdida_otro).trim()}`
+              : motivo_perdida;
+        }
 
-    // ─── Mensaje de bienvenida + aviso al confirmar ───
+        await pool.query(
+          `
+          UPDATE prospectos SET estado=$1, actualizado_en=NOW()
+          ${estado === "confirmado" ? ", modulos_contratados=$3, condiciones_comerciales=$4, fecha_confirmacion=$5" : ""}
+          ${estado === "perdido" ? ", motivo_perdida=$3" : ""}
+          WHERE id=$2
+        `,
+          estado === "confirmado"
+            ? [
+                estado,
+                req.params.id,
+                extra.modulos_contratados,
+                extra.condiciones_comerciales,
+                extra.fecha_confirmacion,
+              ]
+            : estado === "perdido"
+              ? [estado, req.params.id, extra.motivo_perdida]
+              : [estado, req.params.id],
+        );
+        await pool.query(
+          `
+          INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+          VALUES ($1,$2,$3,$4,$5)
+        `,
+          [
+            req.params.id,
+            estadoAnterior,
+            estado,
+            req.session.usuario.id,
+            nota || null,
+          ],
+        );
+
+        // ─── Mensaje de bienvenida + aviso al confirmar ───
+
     if (
       estado === "confirmado" &&
-      telefono &&
       estadoAnterior !== "confirmado"
     ) {
-      try {
-        const mensajeBienvenida = `*Msj automático*
+      const resultados = [
+        {
+          ok: true,
+          texto: "El prospecto quedó confirmado como cliente.",
+        },
+      ];
 
-      ¡Gracias por elegirnos! 🎉
-      Te damos la bienvenida a SM Soluciones.
+      // ---------------------------------------------------------
+      // 1. BIENVENIDA AL CLIENTE
+      // ---------------------------------------------------------
 
-      Te compartimos nuestras guías paso a paso para que puedas ir conociendo el sistema:
+      if (telefono) {
+        try {
+          const mensajeBienvenida = `*Msj automático*
 
-      👉 vPlus:
-      https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/
+    ¡Gracias por elegirnos! 🎉
+    Te damos la bienvenida a SM Soluciones.
 
-      👉 Professional Plus:
-      https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/
+    Te compartimos nuestras guías paso a paso para que puedas ir conociendo el sistema:
 
-      Nuestro equipo de Soporte continuará con la instalación, configuración y capacitación.`;
+    👉 vPlus:
+    https://sm-soluciones.com/ayuda/docs/vplus/guia-paso-a-paso-vplus/
 
-        await enviarPorChatwoot(telefono, mensajeBienvenida, demoResponsable);
+    👉 Professional Plus:
+    https://sm-soluciones.com/ayuda/docs/professional-plus/guia-paso-a-paso-professional-plus/
 
-        console.log(`✅ Bienvenida enviada al prospecto ${req.params.id}`);
-      } catch (msgErr) {
-        console.error(
-          "ERROR enviando mensaje de bienvenida:",
-          msgErr.response?.data || msgErr.message,
-        );
+    Nuestro equipo de Soporte continuará con la instalación, configuración y capacitación.`;
+
+          const enviado = await enviarPorChatwoot(
+            telefono,
+            mensajeBienvenida,
+            demoResponsable,
+          );
+
+          if (enviado) {
+            console.log(
+              `✅ Bienvenida enviada al prospecto ${req.params.id}`,
+            );
+
+            resultados.push({
+              ok: true,
+              texto:
+                "Se envió el mensaje de bienvenida al cliente.",
+            });
+          } else {
+            resultados.push({
+              ok: false,
+              texto:
+                "No se pudo enviar el mensaje de bienvenida al cliente.",
+            });
+          }
+        } catch (msgErr) {
+          console.error(
+            "ERROR enviando mensaje de bienvenida:",
+            msgErr.response?.data || msgErr.message,
+          );
+
+          resultados.push({
+            ok: false,
+            texto:
+              `No se pudo enviar el mensaje de bienvenida: ` +
+              `${
+                msgErr.response?.data?.message ||
+                msgErr.message ||
+                "Error de Chatwoot"
+              }`,
+          });
+        }
+      } else {
+        resultados.push({
+          ok: false,
+          texto:
+            "No se envió la bienvenida porque el prospecto no tiene teléfono.",
+        });
       }
 
-      // ─── Aviso interno de nuevo cliente confirmado ───
+      // ---------------------------------------------------------
+      // 2. AVISO AL GRUPO
+      // ---------------------------------------------------------
+
       try {
         const { rows: prospectoRows } = await pool.query(
           "SELECT * FROM prospectos WHERE id=$1",
@@ -1926,36 +2250,98 @@ router.post("/prospectos/:id/estado", requireAuth, async (req, res) => {
 
         const full = prospectoRows[0];
 
-        if (full) {
-          const nombreParaGrupo =
-            full.nombre_negocio ||
-            full.contacto ||
-            `Prospecto #${req.params.id}`;
+        if (!full) {
+          throw new Error(
+            "No se pudo recuperar el prospecto confirmado",
+          );
+        }
 
-          const linkProspecto = `${process.env.APP_URL}/prospectos/${req.params.id}`;
+        const nombreParaGrupo =
+          full.nombre_negocio ||
+          full.contacto ||
+          `Prospecto #${req.params.id}`;
 
-          const mensajeAlta =
-            `🆕 Nuevo cliente confirmado: *${nombreParaGrupo}*\n\n` +
-            `👤 Contacto: ${full.contacto || "—"}\n` +
-            `📞 Tel: ${full.telefono || "—"}\n` +
-            `📧 Email: ${full.email || "—"}\n` +
-            `🏬 Rubro: ${full.rubro || "—"}${full.rubro_otro ? ` (${full.rubro_otro})` : ""}\n\n` +
-            `⭐ Módulos contratados: ${(full.modulos_contratados || []).join(", ") || "—"}\n` +
-            `🛠️ Equipamiento: ${(full.equipamiento || []).join(", ") || "—"}${full.equip_observaciones ? ` — ${full.equip_observaciones}` : ""}\n\n` +
-            `👉 Ver prospecto: ${linkProspecto}`;
+        const linkProspecto =
+          `${process.env.APP_URL}/prospectos/${req.params.id}`;
 
+        const mensajeAlta =
+          `🆕 Nuevo cliente confirmado: *${nombreParaGrupo}*\n\n` +
+          `👤 Contacto: ${full.contacto || "—"}\n` +
+          `📞 Tel: ${full.telefono || "—"}\n` +
+          `📧 Email: ${full.email || "—"}\n` +
+          `🏬 Rubro: ${full.rubro || "—"}${full.rubro_otro ? ` (${full.rubro_otro})` : ""}\n\n` +
+          `⭐ Módulos contratados: ${(full.modulos_contratados || []).join(", ") || "—"}\n` +
+          `🛠️ Equipamiento: ${(full.equipamiento || []).join(", ") || "—"}${full.equip_observaciones ? ` — ${full.equip_observaciones}` : ""}\n\n` +
+          `👉 Ver prospecto: ${linkProspecto}`;
+
+        const avisoEnviado =
           await enviarAvisoInterno(mensajeAlta);
 
+        if (avisoEnviado) {
           console.log(
             `✅ Aviso interno de cliente confirmado enviado: ${req.params.id}`,
           );
+
+          resultados.push({
+            ok: true,
+            texto:
+              "Se envió el aviso de nuevo cliente al grupo.",
+          });
+        } else {
+          resultados.push({
+            ok: false,
+            texto:
+              "No se pudo enviar el aviso de nuevo cliente al grupo.",
+          });
         }
       } catch (msgErr) {
         console.error(
           "ERROR enviando aviso de cliente confirmado:",
           msgErr.response?.data || msgErr.message,
         );
+
+        resultados.push({
+          ok: false,
+          texto:
+            `No se pudo enviar el aviso al grupo: ` +
+            `${
+              msgErr.response?.data?.message ||
+              msgErr.message ||
+              "Error de Chatwoot"
+            }`,
+        });
       }
+
+      guardarResultadoAccion(
+        req,
+        resultados.some((r) => !r.ok)
+          ? "Cliente confirmado con observaciones"
+          : "Cliente confirmado correctamente",
+        resultados,
+      );
+    }
+
+    // ---------------------------------------------------------
+    // PERDIDO
+    // ---------------------------------------------------------
+
+    if (estado === "perdido") {
+      guardarResultadoAccion(
+        req,
+        "Prospecto marcado como perdido",
+        [
+          {
+            ok: true,
+            texto:
+              "El prospecto quedó marcado como perdido y se guardó el motivo.",
+          },
+          {
+            ok: true,
+            texto:
+              "No se envió ningún mensaje automático al cliente.",
+          },
+        ],
+      );
     }
 
     res.redirect("/prospectos/" + req.params.id);
