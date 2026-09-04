@@ -15,10 +15,6 @@ const {
   normalizarTelefono,
   enviarAvisoInterno,
 } = require("../zoomChatwoot");
-const {
-  GIULIANO_USUARIO_ID,
-  crearReunionZoomGiuliano,
-} = require("../zoomGiuliano");
 
 function esc(str) {
   return String(str || "")
@@ -662,35 +658,53 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
     }
     if (p.estado === "demo_coordinada") {
       acciones.push(
-        `<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary"><i class="ti ti-clipboard-list"></i> Completar relevamiento</a>`,
+        `<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary">
+          <i class="ti ti-clipboard-list"></i> Completar relevamiento
+        </a>`,
       );
+
+      acciones.push(`
+        <button
+          type="button"
+          class="btn btn-danger"
+          onclick="abrirModalPerdido()"
+        >
+          <i class="ti ti-x"></i> Marcar como perdido
+        </button>
+      `);
     }
 
     if (p.estado === "demo_realizada") {
       acciones.push(`
-      <form
-        method="POST"
-        action="/prospectos/${p.id}/estado"
-        style="display:inline"
-        onsubmit="return confirm(
-          '¿Confirmás que este prospecto YA ACEPTÓ avanzar como cliente?\\n\\n' +
-          'Al continuar:\\n' +
-          '• El prospecto pasará a estado CONFIRMADO.\\n' +
-          '• Se enviará automáticamente al cliente el mensaje de bienvenida a SM Soluciones.\\n' +
-          '• Se enviará al grupo interno el aviso de nuevo cliente confirmado.\\n' +
-          '• La próxima etapa será el alta e implementación.\\n\\n' +
-          'Esta acción debe realizarse solamente cuando el cliente haya confirmado la contratación.'
-        )"
-      >
+        <form
+          method="POST"
+          action="/prospectos/${p.id}/estado"
+          style="display:inline"
+          onsubmit="return confirm(
+            '¿Confirmás que este prospecto YA ACEPTÓ avanzar como cliente?\\n\\n' +
+            'Al continuar:\\n' +
+            '• El prospecto pasará a estado CONFIRMADO.\\n' +
+            '• Se enviará automáticamente al cliente el mensaje de bienvenida a SM Soluciones.\\n' +
+            '• Se enviará al grupo interno el aviso de nuevo cliente confirmado.\\n' +
+            '• La próxima etapa será el alta e implementación.\\n\\n' +
+            'Esta acción debe realizarse solamente cuando el cliente haya confirmado la contratación.'
+          )"
+        >
+          <input type="hidden" name="estado" value="confirmado">
 
-          <button
-            type="button"
-            class="btn btn-danger"
-            onclick="abrirModalPerdido()"
-          >
-            <i class="ti ti-x"></i> Marcar como perdido
+          <button type="submit" class="btn btn-success">
+            <i class="ti ti-check"></i> Confirmar cliente
           </button>
-        `);
+        </form>
+
+        <button
+          type="button"
+          class="btn btn-danger"
+          onclick="abrirModalPerdido()"
+        >
+          <i class="ti ti-x"></i> Marcar como perdido
+        </button>
+      `);
     }
     acciones.push(
       `<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`,
@@ -1405,18 +1419,11 @@ const resultados = [
           prospecto.contacto ||
           "Prospecto";
 
-        if (responsableId === GIULIANO_USUARIO_ID) {
-          joinUrl = await crearReunionZoomGiuliano(
-            `Demo ${nombreParaZoom}`,
-            demo_fecha,
-          );
-        } else {
-          joinUrl = await crearReunionZoom(
-            zoomEmail,
-            `Demo ${nombreParaZoom}`,
-            demo_fecha,
-          );
-        }
+        joinUrl = await crearReunionZoom(
+          zoomEmail,
+          `Demo ${nombreParaZoom}`,
+          demo_fecha,
+        );
 
         await pool.query(
           "UPDATE prospectos SET zoom_join_url=$1 WHERE id=$2",

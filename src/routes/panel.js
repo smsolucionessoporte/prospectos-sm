@@ -243,22 +243,103 @@ router.get("/panel", requireAuth, async (req, res) => {
       });
       return `
         <tr onclick="location.href='/prospectos/${p.id}'" class="row-link">
-<td>
-            <div class="prospect-contact">${esc(p.contacto || "—")}</div>
-            ${p.propuesta_texto ? `<div class="prospect-next"><i class="ti ti-message-check"></i> Propuesta cargada</div>` : ""}
-          </td>
-          <td>${esc(p.telefono || "—")}</td>
-          <td>${esc(p.rubro || "—")}</td>
-          <td><span class="badge-estado ${est.color}">${est.label}</span></td>
-          <td class="text-muted">${PROXIMA_ACCION[p.estado] || "—"}${p.estado === "demo_realizada" ? " (" + esc(responsableCierre(p)) + ")" : ""}</td>          <td class="text-muted">${ORIGEN_LABEL[p.origen] || "—"}</td>
-          <td class="text-muted">${esc(p.demo_responsable_nombre || p.creado_por_nombre || "—")}</td>
-          <td class="text-muted">${fecha}</td>
           <td>
-          <div class="row-actions" onclick="event.stopPropagation()">
-            <a href="/prospectos/${p.id}" class="btn-icon" title="Ver detalle">
-              <i class="ti ti-eye"></i>
-            </a>
-          </div>
+                      <div class="prospect-contact">${esc(p.contacto || "—")}</div>
+                      ${p.propuesta_texto ? `<div class="prospect-next"><i class="ti ti-message-check"></i> Propuesta cargada</div>` : ""}
+                    </td>
+                    <td>${esc(p.telefono || "—")}</td>
+                    <td>${esc(p.rubro || "—")}</td>
+                    <td><span class="badge-estado ${est.color}">${est.label}</span></td>
+                    <td class="text-muted">${PROXIMA_ACCION[p.estado] || "—"}${p.estado === "demo_realizada" ? " (" + esc(responsableCierre(p)) + ")" : ""}</td>          <td class="text-muted">${ORIGEN_LABEL[p.origen] || "—"}</td>
+                    <td class="text-muted">${esc(p.demo_responsable_nombre || p.creado_por_nombre || "—")}</td>
+                    <td class="text-muted">${fecha}</td>
+                    <td>
+            <div class="row-actions" onclick="event.stopPropagation()">
+
+              <!-- VER DETALLE: siempre -->
+              <a
+                href="/prospectos/${p.id}"
+                class="btn-icon"
+                title="Ver detalle"
+              >
+                <i class="ti ti-eye"></i>
+              </a>
+
+              <!-- PROSPECTO: coordinar demo -->
+              ${
+                p.estado === "prospecto"
+                  ? `
+                    <a
+                      href="/prospectos/${p.id}/demo"
+                      class="btn-icon"
+                      title="Coordinar demo"
+                    >
+                      <i class="ti ti-calendar-event"></i>
+                    </a>
+                  `
+                  : ""
+              }
+
+              <!-- DEMO COORDINADA: ver/entrar a la demo -->
+              ${
+                p.estado === "demo_coordinada"
+                  ? p.zoom_join_url
+                    ? `
+                      <a
+                        href="${esc(p.zoom_join_url)}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="btn-icon"
+                        title="Ver demo"
+                      >
+                        <i class="ti ti-video"></i>
+                      </a>
+                    `
+                    : `
+                      <a
+                        href="/prospectos/${p.id}"
+                        class="btn-icon"
+                        title="Ver demo"
+                      >
+                        <i class="ti ti-video"></i>
+                      </a>
+                    `
+                  : ""
+              }
+
+              <!-- DEMO REALIZADA: confirmar cliente -->
+              ${
+                p.estado === "demo_realizada"
+                  ? `
+                    <button
+                      type="button"
+                      class="btn-icon"
+                      title="Confirmar cliente"
+                      onclick="abrirModalConfirmar(${p.id})"
+                    >
+                      <i class="ti ti-check"></i>
+                    </button>
+                  `
+                  : ""
+              }
+
+              <!-- MARCAR PERDIDO: todos excepto los que ya están perdidos -->
+              ${
+                p.estado !== "perdido"
+                  ? `
+                    <button
+                      type="button"
+                      class="btn-icon"
+                      title="Marcar como perdido"
+                      onclick="abrirModalPerdido(${p.id})"
+                    >
+                      <i class="ti ti-x"></i>
+                    </button>
+                  `
+                  : ""
+              }
+
+            </div>
           </td>
         </tr>
       `;
