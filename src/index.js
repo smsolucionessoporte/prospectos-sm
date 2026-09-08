@@ -245,11 +245,16 @@ Acordate de cargar el resultado de la demo en Prospectos.`;
   }, 5 * 60 * 1000);
 }
 
-// ─── RESUMEN DIARIO AL GRUPO ───────────────────────────────────────────────
+
+// ─── RESUMEN DIARIO INDIVIDUAL POR RESPONSABLE ────────────────────────────
 function iniciarResumenDiario() {
-  cron.schedule('0 9 * * 1-5', () => {
-    enviarResumenDiario();
-  }, { timezone: 'America/Argentina/Buenos_Aires' });
+  cron.schedule(
+    '0 9 * * 1-5',
+    () => {
+      enviarResumenDiario();
+    },
+    { timezone: 'America/Argentina/Buenos_Aires' }
+  );
 }
 
 async function enviarResumenDiario() {
@@ -267,7 +272,7 @@ async function enviarResumenDiario() {
         'demo_realizada'
       )
       ORDER BY
-        u.nombre NULLS LAST,
+        COALESCE(p.demo_responsable, p.creado_por),
         CASE p.estado
           WHEN 'prospecto' THEN 1
           WHEN 'demo_coordinada' THEN 2
@@ -282,75 +287,133 @@ async function enviarResumenDiario() {
 
     const porResponsable = {};
 
-    rows.forEach((p) => {
-      const responsable = p.responsable_nombre || "Sin responsable";
+    for (const p of rows) {
+      const responsableId =
+        p.demo_responsable || p.creado_por;
 
-      if (!porResponsable[responsable]) {
-        porResponsable[responsable] = {
+      if (!responsableId) continue;
+
+      if (!porResponsable[responsableId]) {
+        porResponsable[responsableId] = {
+          nombre: p.responsable_nombre || 'Responsable',
           prospectos: [],
           demos: [],
           cierres: [],
         };
       }
 
-      if (p.estado === "prospecto") {
-        porResponsable[responsable].prospectos.push(p);
-      } else if (p.estado === "demo_coordinada") {
-        porResponsable[responsable].demos.push(p);
-      } else if (p.estado === "demo_realizada") {
-        porResponsable[responsable].cierres.push(p);
+      if (p.estado === 'prospecto') {
+        porResponsable[responsableId].prospectos.push(p);
+      } else if (p.estado === 'demo_coordinada') {
+        porResponsable[responsableId].demos.push(p);
+      } else if (p.estado === 'demo_realizada') {
+        porResponsable[responsableId].cierres.push(p);
       }
-    });
+    }
 
-    let mensaje = `☀️ *Resumen diario de casos pendientes*\n`;
+    for (const [responsableIdTexto, grupos] of Object.entries(
+      porResponsable
+    )) {
+      const responsableId = Number(responsableIdTexto);
+      const telefonoResponsable =
+        AGENTE_TELEFONO[responsableId];
 
-    for (const [responsable, grupos] of Object.entries(porResponsable)) {
-      mensaje += `\n👤 *${responsable}*\n`;
+      if (!telefonoResponsable) {
+        console.error(
+          'No hay teléfono configurado para resumen diario:',
+          responsableId
+        );
+        continue;
+      }
+
+      let mensaje =
+        `☀️ *Resumen diario de pendientes*\n\n` +
+        `Hola ${grupos.nombre} 👋\n` +
+        `Estos son tus casos pendientes para hoy:\n`;
 
       if (grupos.prospectos.length) {
-        mensaje += `\n📋 Pendientes de coordinar demo (${grupos.prospectos.length}):\n`;
+        mensaje +=
+          `\n📋 *Para contactar / coordinar demo (${grupos.prospectos.length})*\n`;
 
-        grupos.prospectos.forEach((p) => {
-          mensaje += `• ${p.nombre_negocio || p.contacto || "Sin nombre"} — ${p.telefono || "—"}\n`;
+        for (const p of grupos.prospectos) {
+          mensaje +=
+            `• ${p.nombre_negocio || p.contacto || 'Sin nombre'}` +
+            `${p.telefono ? ` — ${p.telefono}` : ''}\n`;
 
           if (p.nota_prospecto) {
-            mensaje += `   📝 ${p.nota_prospecto}\n`;
+            mensaje += `  📝 ${p.nota_prospecto}\n`;
           }
-        });
+        }
       }
 
       if (grupos.demos.length) {
-        mensaje += `\n📅 Demos coordinadas (${grupos.demos.length}):\n`;
+        mensaje +=
+          `\n📅 *Demos coordinadas (${grupos.demos.length})*\n`;
 
-        grupos.demos.forEach((p) => {
+        for (const p of grupos.demos) {
           const fecha = p.demo_fecha
-            ? new Date(p.demo_fecha).toLocaleString("es-AR", {
-                day: "2-digit",
-                month: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                timeZone: "America/Argentina/Buenos_Aires",
-              })
-            : "Sin fecha";
+            ? new Date(p.demo_fecha).toLocaleString(
+                'es-AR',
+                {
+                  day: '2-digit',
+                  month: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  timeZone:
+                    'America/Argentina/Buenos_Aires',
+                }
+              )
+            : 'Sin fecha';
 
-          mensaje += `• ${p.nombre_negocio || p.contacto || "Sin nombre"} — ${fecha}\n`;
-        });
+          mensaje +=
+            `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${fecha}\n`;
+        }
       }
 
       if (grupos.cierres.length) {
-        mensaje += `\n✅ Demos realizadas, a definir (${grupos.cierres.length}):\n`;
+        mensaje +=
+          `\n✅ *Demos realizadas pendientes de cierre (${grupos.cierres.length})*\n`;
 
-        grupos.cierres.forEach((p) => {
-          mensaje += `• ${p.nombre_negocio || p.contacto || "Sin nombre"} — ${p.telefono || "—"}\n`;
-        });
+        for (const p of grupos.cierres) {
+          mensaje +=
+            `• ${p.nombre_negocio || p.contacto || 'Sin nombre'}` +
+            `${p.telefono ? ` — ${p.telefono}` : ''}\n`;
+        }
       }
 
-      mensaje += `\n`;
-    }
+      try {
+        const enviado = await enviarPorChatwoot(
+          telefonoResponsable,
+          mensaje.trim(),
+          responsableId
+        );
 
-    await enviarAvisoInterno(mensaje.trim());
+        if (enviado) {
+          console.log(
+            '✓ Resumen diario enviado a:',
+            grupos.nombre,
+            '| responsable:',
+            responsableId
+          );
+        } else {
+          console.error(
+            'No se pudo enviar resumen diario a:',
+            grupos.nombre
+          );
+        }
+      } catch (err) {
+        console.error(
+          'Error enviando resumen diario a:',
+          grupos.nombre,
+          err.response?.data || err.message || err
+        );
+      }
+    }
   } catch (err) {
-    console.error("Error en resumen diario:", err);
+    console.error(
+      'Error generando resumen diario:',
+      err.response?.data || err.message || err
+    );
   }
 }
 
