@@ -220,31 +220,87 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
       });
     }
 
-    // 3. No existe: crear prospecto.
-    const result = await pool.query(
-      `INSERT INTO prospectos (
-         nombre_negocio,
-         contacto,
-         telefono,
-         rubro,
-         nota_prospecto,
-         creado_por,
-         origen,
-         chatwoot_conversation_id
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id`,
-      [
-        null,
-        nombre_contacto || null,
-        telefono,
-        rubro || "Otro",
-        `Cargado automáticamente desde Chatwoot (${origen || "etiqueta"})`,
-        creadoPor,
-        origen || "manual",
-        chatwoot_conversation_id || null,
-      ],
-    );
+        // 3. No existe: intentar crear prospecto.
+        // ON CONFLICT protege contra dos webhooks concurrentes de la misma
+        // conversación. La BD tiene un índice UNIQUE sobre
+        // chatwoot_conversation_id.
+        const result = await pool.query(
+          `INSERT INTO prospectos (
+            nombre_negocio,
+            contacto,
+            telefono,
+            rubro,
+            nota_prospecto,
+            creado_por,
+            origen,
+            chatwoot_conversation_id
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (chatwoot_conversation_id)
+            WHERE chatwoot_conversation_id IS NOT NULL
+          DO NOTHING
+          RETURNING id`,
+          [
+            null,
+            nombre_contacto || null,
+            telefono,
+            rubro || "Otro",
+            `Cargado automáticamente desde Chatwoot (${origen || "etiqueta"})`,
+            creadoPor,
+            origen || "manual",
+            chatwoot_conversation_id || null,
+          ],
+        );
+
+        // Si otro request creó la misma conversación entre nuestro SELECT
+        // y el INSERT, PostgreSQL evita el duplicado. Recuperamos ese registro
+        // y respondemos como actualización/duplicado.
+        if (result.rows.length === 0) {
+          const { rows: existente } = await pool.query(
+            `SELECT id
+            FROM prospectos
+            WHERE chatwoot_conversation_id = $1
+            LIMIT 1`,
+            [chatwoot_conversation_id],
+          );
+
+          if (existente.length) {
+            const prospectoId = existente[0].id;
+
+            await pool.query(
+              `UPDATE prospectos
+              SET contacto = COALESCE($2, contacto),
+                  telefono = COALESCE($3, telefono),
+                  creado_por = COALESCE($4, creado_por),
+                  actualizado_en = NOW()
+              WHERE id = $1`,
+              [
+                prospectoId,
+                nombre_contacto || null,
+                telefono || null,
+                creadoPor,
+              ],
+            );
+
+            console.log(
+              "DEBUG auto-crear: alta concurrente detectada; se reutiliza prospecto",
+              prospectoId,
+              "conversation_id",
+              chatwoot_conversation_id,
+            );
+
+            return res.status(200).json({
+              ok: true,
+              duplicado: true,
+              actualizado: true,
+              id: prospectoId,
+            });
+          }
+
+          throw new Error(
+            "Conflicto al crear prospecto pero no se encontró el registro existente",
+          );
+        }
 
     const prospectoId = result.rows[0].id;
 
