@@ -50,7 +50,8 @@ async function start() {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
     iniciarRecordatorios();
-    iniciarResumenDiario(); 
+    iniciarRecordatoriosRelevamiento();
+    iniciarResumenDiario();
   } catch (err) {
     console.error('Error al iniciar:', err);
     process.exit(1);
@@ -132,6 +133,112 @@ function iniciarRecordatorios() {
     } catch (err) {
       console.error(
         'Error en recordatorios:',
+        err.response?.data || err.message || err
+      );
+    }
+  }, 5 * 60 * 1000);
+}
+
+// ─── RECORDATORIO POST-DEMO AL RESPONSABLE ────────────────────────────────
+// Revisa cada 5 minutos las demos que terminaron hace al menos 1 hora.
+// Si todavía no se cargó el relevamiento, avisa una sola vez al responsable.
+function iniciarRecordatoriosRelevamiento() {
+  setInterval(async () => {
+    try {
+      const { rows } = await pool.query(`
+        SELECT
+          p.*,
+          u.nombre AS responsable_nombre
+        FROM prospectos p
+        LEFT JOIN usuarios u
+          ON u.id = COALESCE(p.demo_responsable, p.creado_por)
+        WHERE p.estado = 'demo_coordinada'
+          AND p.demo_fecha IS NOT NULL
+          AND p.relevamiento_fecha IS NULL
+          AND COALESCE(p.recordatorio_relevamiento_enviado, false) = false
+          AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires')
+              <= now() - interval '1 hour'
+      `);
+
+      for (const p of rows) {
+        const responsableId =
+          p.demo_responsable || p.creado_por;
+
+        const telefonoResponsable =
+          AGENTE_TELEFONO[responsableId];
+
+        if (!telefonoResponsable) {
+          console.error(
+            'No hay teléfono configurado para recordatorio post-demo:',
+            responsableId,
+            '| prospecto:',
+            p.id
+          );
+          continue;
+        }
+
+        const nombreProspecto =
+          p.nombre_negocio ||
+          p.contacto ||
+          `Prospecto #${p.id}`;
+
+        const fechaDemo = new Date(p.demo_fecha).toLocaleString(
+          'es-AR',
+          {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'America/Argentina/Buenos_Aires',
+          }
+        );
+
+        const mensaje = `📋 *Recordatorio de relevamiento*
+
+La demostración de *${nombreProspecto}* estaba programada para ${fechaDemo} y todavía figura pendiente de relevamiento.
+
+Acordate de cargar el resultado de la demo en Prospectos.`;
+
+        try {
+          const enviado = await enviarPorChatwoot(
+            telefonoResponsable,
+            mensaje,
+            responsableId
+          );
+
+          if (enviado) {
+            await pool.query(
+              `
+              UPDATE prospectos
+              SET recordatorio_relevamiento_enviado = true
+              WHERE id = $1
+              `,
+              [p.id]
+            );
+
+            console.log(
+              '✓ Recordatorio post-demo enviado:',
+              p.id,
+              '| responsable:',
+              responsableId
+            );
+          } else {
+            console.error(
+              'No se pudo enviar recordatorio post-demo:',
+              p.id
+            );
+          }
+        } catch (err) {
+          console.error(
+            'Error enviando recordatorio post-demo:',
+            p.id,
+            err.response?.data || err.message || err
+          );
+        }
+      }
+    } catch (err) {
+      console.error(
+        'Error buscando demos pendientes de relevamiento:',
         err.response?.data || err.message || err
       );
     }

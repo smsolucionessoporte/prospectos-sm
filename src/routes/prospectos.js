@@ -3306,6 +3306,7 @@ if (cambioFechaDemo) {
         demo_fecha = $1,
         zoom_join_url = $2,
         recordatorio_enviado = false,
+        recordatorio_relevamiento_enviado = false,
         actualizado_en = NOW()
       WHERE id = $3
       `,
