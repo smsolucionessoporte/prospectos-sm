@@ -46,6 +46,48 @@ function formatearDateTimeLocalAR(fecha) {
 }
 
 
+async function alertarResponsableError(
+  responsableId,
+  titulo,
+  prospecto,
+  detalle,
+) {
+  const telefono = AGENTE_TELEFONO[responsableId];
+
+  if (!telefono) {
+    console.error(
+      "No hay teléfono configurado para alertar al responsable:",
+      responsableId,
+    );
+    return false;
+  }
+
+  const nombre =
+    prospecto.nombre_negocio ||
+    prospecto.contacto ||
+    `Prospecto #${prospecto.id}`;
+
+  const mensaje =
+    `⚠️ *${titulo}*\n\n` +
+    `Prospecto: *${nombre}*\n` +
+    `${detalle}\n\n` +
+    `Revisalo desde Prospectos para resolverlo.`;
+
+  try {
+    return await enviarPorChatwoot(
+      telefono,
+      mensaje,
+      responsableId,
+    );
+  } catch (err) {
+    console.error(
+      "ERROR enviando alerta al responsable:",
+      err.response?.data || err.message,
+    );
+    return false;
+  }
+}
+
 function guardarResultadoAccion(req, titulo, resultados) {
   req.session.resultadoAccion = {
     titulo,
@@ -1481,6 +1523,13 @@ const resultados = [
           ok: false,
           texto: `No se pudo crear la reunión de Zoom: ${zoomError}`,
         });
+
+        await alertarResponsableError(
+          responsableId,
+          "Error al crear la reunión de Zoom",
+          prospecto,
+          `La demo quedó registrada para ${formatearFechaAR(demo_fecha)}, pero no se pudo crear la reunión de Zoom.\n\nError: ${zoomError}`,
+        );
       }
     } else {
       zoomError =
@@ -1492,6 +1541,13 @@ const resultados = [
         ok: false,
         texto: zoomError,
       });
+
+      await alertarResponsableError(
+        responsableId,
+        "Error al crear la reunión de Zoom",
+        prospecto,
+        `La demo quedó registrada para ${formatearFechaAR(demo_fecha)}, pero no se pudo crear la reunión porque el responsable no tiene una cuenta de Zoom configurada.`,
+      );
     }
 
     const fechaFormateada = formatearFechaAR(demo_fecha);
@@ -1541,12 +1597,19 @@ const resultados = [
             ? "Se envió al cliente la confirmación con el link de Zoom."
             : "Se envió al cliente la confirmación de la demo sin link de Zoom.",
         });
-      } else {
-        resultados.push({
-          ok: false,
-          texto: "No se pudo enviar el mensaje automático al cliente.",
-        });
-      }
+          } else {
+            resultados.push({
+              ok: false,
+              texto: "No se pudo enviar el mensaje automático al cliente.",
+            });
+
+            await alertarResponsableError(
+              responsableId,
+              "No se pudo enviar la invitación",
+              prospecto,
+              `La demo quedó coordinada para ${fechaFormateada}, pero no se pudo enviar el mensaje automático al contacto.`,
+            );
+          }
     } catch (msgErr) {
       console.error(
         "ERROR enviando mensaje de demo por Chatwoot:",
@@ -1563,6 +1626,13 @@ const resultados = [
             "Error de Chatwoot"
           }`,
       });
+
+      await alertarResponsableError(
+        responsableId,
+        "No se pudo enviar la invitación",
+        prospecto,
+        `La demo quedó coordinada para ${fechaFormateada}, pero falló el envío del mensaje automático al contacto.`,
+      );
     }
 
     // ---------------------------------------------------------
@@ -3286,16 +3356,23 @@ if (cambioFechaDemo) {
       `Demo ${nombreParaZoom}`,
       fechaDemoNueva,
     );
-  } catch (zoomErr) {
-    console.error(
-      "ERROR recreando reunión Zoom:",
-      zoomErr.response?.data || zoomErr.message,
-    );
+      } catch (zoomErr) {
+      console.error(
+        "ERROR recreando reunión Zoom:",
+        zoomErr.response?.data || zoomErr.message,
+      );
 
-    return res.status(500).send(
-      "No se pudo crear la nueva reunión de Zoom. La fecha de la demo no fue modificada.",
-    );
-  }
+      await alertarResponsableError(
+        responsableDemoId,
+        "Error al reprogramar la demostración",
+        actual,
+        `Se intentó reprogramar la demo para ${formatearFechaAR(fechaDemoNueva)}, pero no se pudo crear la nueva reunión de Zoom. La fecha anterior continúa vigente.`,
+      );
+
+      return res.status(500).send(
+        "No se pudo crear la nueva reunión de Zoom. La fecha de la demo no fue modificada.",
+      );
+    }
 
     // Guardar nueva fecha y reemplazar el link anterior.
     // También habilitamos nuevamente el recordatorio de 2 horas.
@@ -3363,11 +3440,24 @@ if (cambioFechaDemo) {
           console.error(
             "No se pudo reenviar la invitación de la demo reprogramada",
           );
+
+          await alertarResponsableError(
+            responsableDemoId,
+            "No se pudo enviar la nueva invitación",
+            actual,
+            `La demo fue reprogramada para ${fechaNuevaFormateada} y el nuevo Zoom fue creado correctamente, pero no se pudo enviar la invitación actualizada al contacto.`,
+          );
         }
       } catch (msgErr) {
         console.error(
           "ERROR reenviando invitación de demo:",
           msgErr.response?.data || msgErr.message,
+        );
+        await alertarResponsableError(
+          responsableDemoId,
+          "No se pudo enviar la nueva invitación",
+          actual,
+          `La demo fue reprogramada para ${fechaNuevaFormateada}, pero falló el envío de la invitación actualizada al contacto.`,
         );
       }
     }
