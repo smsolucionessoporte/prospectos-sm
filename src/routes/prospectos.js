@@ -712,23 +712,29 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
           </button>
         `);
     }
-    if (p.estado === "demo_coordinada") {
-      acciones.push(
-        `<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary">
-          <i class="ti ti-clipboard-list"></i> Completar relevamiento
-        </a>`,
-      );
+        if (p.estado === "demo_coordinada") {
+          const demoYaPaso =
+            p.demo_fecha &&
+            new Date(p.demo_fecha).getTime() <= Date.now();
 
-      acciones.push(`
-        <button
-          type="button"
-          class="btn btn-danger"
-          onclick="abrirModalPerdido()"
-        >
-          <i class="ti ti-x"></i> Marcar como perdido
-        </button>
-      `);
-    }
+          if (demoYaPaso) {
+            acciones.push(
+              `<a href="/prospectos/${p.id}/relevamiento" class="btn btn-primary">
+                <i class="ti ti-clipboard-list"></i> Cargar relevamiento
+              </a>`,
+            );
+          }
+
+          acciones.push(`
+            <button
+              type="button"
+              class="btn btn-danger"
+              onclick="abrirModalPerdido()"
+            >
+              <i class="ti ti-x"></i> Marcar como perdido
+            </button>
+          `);
+        }
 
     if (p.estado === "demo_realizada") {
       acciones.push(`
@@ -860,9 +866,7 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email || "—")}</span></div>
               <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${{ manual: "Manual", "prospecto-redes": "📱 Redes", "prospecto-interno": "💬 Interno" }[p.origen] || "—"}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ""}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} — ${esc(p.demo_resp_nombre || "—")}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ""}</span></div>` : ""}
-              ${p.estado === "demo_realizada" ? `<div class="detail-item"><span class="detail-label">Próxima acción</span><span class="detail-val">Cerrar cliente (${esc(responsableCierre(p))})</span></div>` : ""}
-              <div class="detail-item">
-                <span class="detail-label">Responsable</span>
+              ${p.estado === "demo_realizada" ? `<div class="detail-item"><span class="detail-label">Próxima acción</span><span class="detail-val">Cerrar cliente</span></div>` : ""}                <span class="detail-label">Responsable</span>
                 <span class="detail-val">${esc(responsableActualNombre)}</span>
               </div>
             </div>
@@ -2892,7 +2896,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                 <label>Próxima acción</label>
                 <input
                   type="text"
-                  value="${esc(PROXIMA_ACCION[p.estado] || "—")}${
+                    value="${esc(PROXIMA_ACCION[p.estado] || "—")}"
                     p.estado === "demo_realizada"
                       ? " (" + esc(responsableCierre(p)) + ")"
                       : ""

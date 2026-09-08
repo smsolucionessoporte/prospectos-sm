@@ -147,63 +147,103 @@ function iniciarResumenDiario() {
 
 async function enviarResumenDiario() {
   try {
-    
-
-    const pendientesDemo = await pool.query(`
-      SELECT p.*, u.nombre as u_nombre
+    const { rows } = await pool.query(`
+      SELECT
+        p.*,
+        u.nombre AS responsable_nombre
       FROM prospectos p
-      LEFT JOIN usuarios u ON p.creado_por = u.id
-      WHERE p.estado = 'prospecto'
-    `);
-    const demosCoordinadas = await pool.query(`
-      SELECT p.*, u.nombre as u_nombre
-      FROM prospectos p
-      LEFT JOIN usuarios u ON p.demo_responsable = u.id
-      WHERE p.estado = 'demo_coordinada'
-    `);
-    const pendientesConfirmar = await pool.query(`
-      SELECT p.*, u.nombre as u_nombre
-      FROM prospectos p
-      LEFT JOIN usuarios u ON p.demo_responsable = u.id
-      WHERE p.estado = 'demo_realizada'
+      LEFT JOIN usuarios u
+        ON u.id = COALESCE(p.demo_responsable, p.creado_por)
+      WHERE p.estado IN (
+        'prospecto',
+        'demo_coordinada',
+        'demo_realizada'
+      )
+      ORDER BY
+        u.nombre NULLS LAST,
+        CASE p.estado
+          WHEN 'prospecto' THEN 1
+          WHEN 'demo_coordinada' THEN 2
+          WHEN 'demo_realizada' THEN 3
+          ELSE 4
+        END,
+        p.demo_fecha NULLS LAST,
+        p.creado_en
     `);
 
-    if (!pendientesDemo.rows.length && !demosCoordinadas.rows.length && !pendientesConfirmar.rows.length) return;
+    if (!rows.length) return;
 
-    let mensaje = `☀️ Resumen diario de casos pendientes:\n`;
+    const porResponsable = {};
 
-    if (pendientesDemo.rows.length) {
-      mensaje += `\n📋 *Pendientes de coordinar demo (${pendientesDemo.rows.length}):*\n`;
-      pendientesDemo.rows.forEach(p => {
-        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (cargó: ${p.u_nombre || '—'})\n`;
-        if (p.notas) mensaje += `   📝 ${p.notas}\n`;
-      });
-    }
-    
-    if (demosCoordinadas.rows.length) {
-      mensaje += `\n📅 *Demos coordinadas (${demosCoordinadas.rows.length}):*\n`;
-      demosCoordinadas.rows.forEach(p => {
-        const fecha = new Date(p.demo_fecha).toLocaleString('es-AR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-        mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} — ${fecha} (${p.u_nombre || '—'})\n`;
-      });
-    }
-      if (pendientesConfirmar.rows.length) {
-        mensaje += `\n✅ *Demos realizadas, a definir (${pendientesConfirmar.rows.length}):*\n`;
-        const porResponsable = {};
-        pendientesConfirmar.rows.forEach(p => {
-          const resp = responsableCierre(p) || '—';
-          if (!porResponsable[resp]) porResponsable[resp] = [];
-          porResponsable[resp].push(p);
-        });
-        Object.entries(porResponsable).forEach(([resp, items]) => {
-          mensaje += `\n Cierre: ${resp}_\n`;
-          items.forEach(p => mensaje += `• ${p.nombre_negocio || p.contacto || 'Sin nombre'} — ${p.telefono} (${p.u_nombre || '—'})\n`);
+    rows.forEach((p) => {
+      const responsable = p.responsable_nombre || "Sin responsable";
+
+      if (!porResponsable[responsable]) {
+        porResponsable[responsable] = {
+          prospectos: [],
+          demos: [],
+          cierres: [],
+        };
+      }
+
+      if (p.estado === "prospecto") {
+        porResponsable[responsable].prospectos.push(p);
+      } else if (p.estado === "demo_coordinada") {
+        porResponsable[responsable].demos.push(p);
+      } else if (p.estado === "demo_realizada") {
+        porResponsable[responsable].cierres.push(p);
+      }
+    });
+
+    let mensaje = `☀️ *Resumen diario de casos pendientes*\n`;
+
+    for (const [responsable, grupos] of Object.entries(porResponsable)) {
+      mensaje += `\n👤 *${responsable}*\n`;
+
+      if (grupos.prospectos.length) {
+        mensaje += `\n📋 Pendientes de coordinar demo (${grupos.prospectos.length}):\n`;
+
+        grupos.prospectos.forEach((p) => {
+          mensaje += `• ${p.nombre_negocio || p.contacto || "Sin nombre"} — ${p.telefono || "—"}\n`;
+
+          if (p.nota_prospecto) {
+            mensaje += `   📝 ${p.nota_prospecto}\n`;
+          }
         });
       }
 
-      await enviarAvisoInterno(mensaje);
+      if (grupos.demos.length) {
+        mensaje += `\n📅 Demos coordinadas (${grupos.demos.length}):\n`;
+
+        grupos.demos.forEach((p) => {
+          const fecha = p.demo_fecha
+            ? new Date(p.demo_fecha).toLocaleString("es-AR", {
+                day: "2-digit",
+                month: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                timeZone: "America/Argentina/Buenos_Aires",
+              })
+            : "Sin fecha";
+
+          mensaje += `• ${p.nombre_negocio || p.contacto || "Sin nombre"} — ${fecha}\n`;
+        });
+      }
+
+      if (grupos.cierres.length) {
+        mensaje += `\n✅ Demos realizadas, a definir (${grupos.cierres.length}):\n`;
+
+        grupos.cierres.forEach((p) => {
+          mensaje += `• ${p.nombre_negocio || p.contacto || "Sin nombre"} — ${p.telefono || "—"}\n`;
+        });
+      }
+
+      mensaje += `\n`;
+    }
+
+    await enviarAvisoInterno(mensaje.trim());
   } catch (err) {
-    console.error('Error en resumen diario:', err);
+    console.error("Error en resumen diario:", err);
   }
 }
 
