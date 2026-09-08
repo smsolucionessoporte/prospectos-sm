@@ -24,12 +24,36 @@ function esc(str) {
     .replace(/"/g, "&quot;");
 }
 
+function formatearDateTimeLocalAR(fecha) {
+  if (!fecha) return "";
+
+  const d = new Date(fecha);
+
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+
+  const get = (tipo) =>
+    partes.find((p) => p.type === tipo)?.value || "";
+
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
+
+
 function guardarResultadoAccion(req, titulo, resultados) {
   req.session.resultadoAccion = {
     titulo,
     resultados,
   };
 }
+
+
 
 function renderResultadoAccion(resultado) {
   if (!resultado) return "";
@@ -672,24 +696,6 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
 
     const est = ESTADOS_COLOR[p.estado] || "gray";
     const estadoLabel = ESTADOS_LABEL[p.estado] || p.estado;
-    const u = req.session.usuario;
-
-    let responsablesAdmin = [];
-
-    if (u.rol === "admin") {
-      const { rows: usuariosActivos } = await pool.query(`
-        SELECT id, nombre, rol
-        FROM usuarios
-        WHERE activo = true
-          AND rol IN ('soporte', 'admin', 'vendedor')
-        ORDER BY nombre
-      `);
-
-      responsablesAdmin = usuariosActivos;
-    }
-
-    const responsableActualId = p.demo_responsable || p.creado_por || null;
-
     const responsableActualNombre =
       p.demo_resp_nombre || p.creado_por_nombre || "—";
 
@@ -815,7 +821,13 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
         <div class="hist-body">
           <span class="hist-estado">${ESTADOS_LABEL[h.estado_nuevo] || h.estado_nuevo}</span>
           <span class="hist-meta">${h.usuario_nombre} · ${new Date(h.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
-          ${h.nota ? `<span class="hist-nota">${esc(h.nota)}</span>` : ""}
+        ${
+          h.nota
+            ? `<span class="hist-nota">${esc(h.nota)}</span>`
+            : h.estado_nuevo === "perdido" && p.motivo_perdida
+              ? `<span class="hist-nota">Motivo de pérdida: ${esc(p.motivo_perdida)}</span>`
+              : ""
+        }
         </div>
       </div>
     `,
@@ -866,65 +878,22 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email || "—")}</span></div>
               <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${{ manual: "Manual", "prospecto-redes": "📱 Redes", "prospecto-interno": "💬 Interno" }[p.origen] || "—"}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ""}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} — ${esc(p.demo_resp_nombre || "—")}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ""}</span></div>` : ""}
-              ${p.estado === "demo_realizada" ? `<div class="detail-item"><span class="detail-label">Próxima acción</span><span class="detail-val">Cerrar cliente</span></div>` : ""}                <span class="detail-label">Responsable</span>
+              ${
+                p.estado === "demo_realizada"
+                  ? `
+                    <div class="detail-item">
+                      <span class="detail-label">Próxima acción</span>
+                      <span class="detail-val">Cerrar cliente</span>
+                    </div>
+                  `
+                  : ""
+              }
+
+              <div class="detail-item">
+                <span class="detail-label">Responsable</span>
                 <span class="detail-val">${esc(responsableActualNombre)}</span>
               </div>
             </div>
-
-            ${
-              u.rol === "admin"
-                ? `
-            <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border, #e5e7eb)">
-              <div class="section-title-row">
-                <i class="ti ti-user-cog"></i>
-                <span>Cambiar responsable</span>
-                <span class="section-meta">Solo administradores</span>
-              </div>
-
-              <form
-                method="POST"
-                action="/prospectos/${p.id}/responsable"
-                style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:10px"
-              >
-                <div class="field" style="min-width:260px;margin:0">
-                  <label for="responsable_id">Nuevo responsable</label>
-
-                  <select
-                    id="responsable_id"
-                    name="responsable_id"
-                    required
-                  >
-                    <option value="">Seleccionar...</option>
-
-                    ${responsablesAdmin
-                      .map(
-                        (r) => `
-                      <option
-                        value="${r.id}"
-                        ${Number(responsableActualId) === Number(r.id) ? "selected" : ""}
-                      >
-                        ${esc(r.nombre)} (${esc(r.rol)})
-                      </option>
-                    `,
-                      )
-                      .join("")}
-                  </select>
-                </div>
-
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  onclick="return confirm('¿Confirmás el cambio de responsable de este prospecto?')"
-                >
-                  <i class="ti ti-user-cog"></i>
-                  Cambiar responsable
-                </button>
-              </form>
-            </div>
-          `
-                : ""
-            }
-
             ${
               p.propuesta_monto_inicial ||
               p.propuesta_cuotas ||
@@ -2209,9 +2178,20 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
               ? [estado, req.params.id, extra.motivo_perdida]
               : [estado, req.params.id],
         );
+        const notaHistorial =
+          estado === "perdido"
+            ? `Motivo de pérdida: ${extra.motivo_perdida}`
+            : nota || null;
+
         await pool.query(
           `
-          INSERT INTO historial_estados (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+          INSERT INTO historial_estados (
+            prospecto_id,
+            estado_anterior,
+            estado_nuevo,
+            usuario_id,
+            nota
+          )
           VALUES ($1,$2,$3,$4,$5)
         `,
           [
@@ -2219,7 +2199,7 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
             estadoAnterior,
             estado,
             req.session.usuario.id,
-            nota || null,
+            notaHistorial,
           ],
         );
 
@@ -2440,6 +2420,24 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
     const p = rows[0];
 
+    const u = req.session.usuario;
+
+    let responsablesAdmin = [];
+
+    if (u.rol === "admin") {
+      const { rows: usuariosActivos } = await pool.query(`
+        SELECT id, nombre, rol
+        FROM usuarios
+        WHERE activo = true
+          AND rol IN ('soporte', 'admin', 'vendedor')
+        ORDER BY nombre
+      `);
+
+      responsablesAdmin = usuariosActivos;
+    }
+
+    const responsableActualId = p.demo_responsable || p.creado_por || null;
+
     const demoCoordinada =
       p.estado !== "prospecto" && p.estado !== "sin_respuesta";
 
@@ -2505,14 +2503,16 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
       <div class="form-card">
         <form
-          method="POST"
-          action="/prospectos/${p.id}/editar"
-          onsubmit="return confirm(
-            '¿Confirmás que querés guardar estos cambios?\\n\\n' +
-            'Esta acción solamente modifica la información del prospecto.\\n' +
-            'NO cambia su etapa comercial y NO envía mensajes automáticos al cliente.'
-          )"
-        >
+            method="POST"
+            action="/prospectos/${p.id}/editar"
+            onsubmit="return confirmarEdicion()"
+          >
+            <input
+              type="hidden"
+              id="reenviar_invitacion"
+              name="reenviar_invitacion"
+              value="0"
+            >
 
           <!-- DATOS DEL PROSPECTO -->
           <div class="form-section">
@@ -2575,11 +2575,33 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
               <div class="field">
                 <label>Responsable</label>
-                <input
-                  type="text"
-                  value="${esc(responsableNombre)}"
-                  disabled
-                >
+
+                ${
+                  u.rol === "admin"
+                    ? `
+                      <select name="responsable_id" required>
+                        ${responsablesAdmin
+                          .map(
+                            (r) => `
+                              <option
+                                value="${r.id}"
+                                ${Number(responsableActualId) === Number(r.id) ? "selected" : ""}
+                              >
+                                ${esc(r.nombre)} (${esc(r.rol)})
+                              </option>
+                            `,
+                          )
+                          .join("")}
+                      </select>
+                    `
+                    : `
+                      <input
+                        type="text"
+                        value="${esc(responsableNombre)}"
+                        disabled
+                      >
+                    `
+                }
               </div>
             </div>
           </div>
@@ -2700,45 +2722,30 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                   disabled
                 >
               </div>
-
-              <div class="field">
-                <label>Responsable</label>
-                <input
-                  type="text"
-                  value="${esc(responsableNombre)}"
-                  disabled
-                >
-              </div>
             </div>
 
             ${
-              demoCoordinada
-                ? `
-              <div class="field">
-                <label>Fecha de la demo</label>
-                <input
-                  type="text"
-                  value="${
-                    p.demo_fecha
-                      ? new Date(p.demo_fecha).toLocaleString("es-AR", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "—"
-                  }"
-                  disabled
-                >
-                <small class="text-muted">
-                  Para modificar la coordinación de una demo debe utilizarse el flujo correspondiente.
-                </small>
-              </div>
-            `
-                : ""
-            }
-          </div>
+            p.demo_fecha
+              ? `
+            <div class="field">
+              <label>Fecha y hora de la demo</label>
+
+              <input
+                type="datetime-local"
+                id="demo_fecha"
+                name="demo_fecha"
+                value="${formatearDateTimeLocalAR(p.demo_fecha)}"
+                data-original="${formatearDateTimeLocalAR(p.demo_fecha)}"
+                required
+              >
+
+              <small class="text-muted">
+                Si modificás la fecha, se creará una nueva reunión en Zoom.
+              </small>
+            </div>
+          `
+              : ""
+          }
 
           ${
             demoHecha
@@ -2896,11 +2903,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                 <label>Próxima acción</label>
                 <input
                   type="text"
-                    value="${esc(PROXIMA_ACCION[p.estado] || "—")}"
-                    p.estado === "demo_realizada"
-                      ? " (" + esc(responsableCierre(p)) + ")"
-                      : ""
-                  }"
+                  value="${esc(PROXIMA_ACCION[p.estado] || "—")}"
                   disabled
                 >
               </div>
@@ -2960,7 +2963,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
         </form>
       </div>
 
-      <script>
+            <script>
         document.querySelectorAll('.chip-label input').forEach(input => {
           function sync() {
             const chip = input.nextElementSibling;
@@ -2981,6 +2984,43 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
           sync();
         });
+
+        function confirmarEdicion() {
+          const fechaInput = document.getElementById("demo_fecha");
+          const reenviarInput = document.getElementById("reenviar_invitacion");
+
+          if (fechaInput) {
+            const fechaOriginal = fechaInput.dataset.original || "";
+            const fechaNueva = fechaInput.value || "";
+
+            if (fechaNueva !== fechaOriginal) {
+              const continuar = confirm(
+                "Estás modificando la fecha de la demostración.\\n\\n" +
+                "Se creará una nueva reunión en Zoom con la nueva fecha y hora.\\n\\n" +
+                "¿Querés continuar?"
+              );
+
+              if (!continuar) {
+                return false;
+              }
+
+              const reenviar = confirm(
+                "¿Deseás reenviar la invitación actualizada al contacto?\\n\\n" +
+                "Aceptar: guardar y reenviar invitación.\\n" +
+                "Cancelar: guardar sin reenviar."
+              );
+
+              reenviarInput.value = reenviar ? "1" : "0";
+
+              return true;
+            }
+          }
+
+          return confirm(
+            "¿Confirmás que querés guardar estos cambios?\\n\\n" +
+            "No se cambiará la etapa comercial ni se enviarán mensajes automáticos al cliente."
+          );
+        }
       </script>
     `,
         req,
@@ -3007,21 +3047,79 @@ router.post("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
     const actual = curRows[0];
 
-    const demoHecha = ["demo_realizada", "confirmado", "perdido"].includes(
+    // Detectar si se modificó la fecha/hora de una demo ya coordinada
+    const fechaDemoAnterior = actual.demo_fecha
+      ? formatearDateTimeLocalAR(actual.demo_fecha)
+      : "";
+
+    const fechaDemoNueva = b.demo_fecha || "";
+
+    const cambioFechaDemo =
+      Boolean(actual.demo_fecha) &&
+      Boolean(fechaDemoNueva) &&
+      fechaDemoNueva !== fechaDemoAnterior;
+
+let cambioResponsable = null;
+
+  if (req.session.usuario.rol === "admin" && b.responsable_id) {
+    const responsableId = Number(b.responsable_id);
+
+    if (!Number.isInteger(responsableId) || responsableId <= 0) {
+      return res.status(400).send("Responsable no válido");
+    }
+
+    const { rows: responsables } = await pool.query(
+      `
+      SELECT id, nombre
+      FROM usuarios
+      WHERE id = $1
+        AND activo = true
+        AND rol IN ('soporte', 'admin', 'vendedor')
+      LIMIT 1
+      `,
+      [responsableId],
+    );
+
+    if (!responsables.length) {
+      return res.status(400).send("Responsable no válido o inactivo");
+    }
+
+    const nuevoResponsable = responsables[0];
+
+    const responsableAnteriorId =
+      actual.demo_responsable !== null
+        ? actual.demo_responsable
+        : actual.creado_por;
+
+    if (Number(responsableAnteriorId) !== responsableId) {
+      const { rows: anteriorRows } = await pool.query(
+        `SELECT nombre FROM usuarios WHERE id=$1`,
+        [responsableAnteriorId],
+      );
+
+      cambioResponsable = {
+        id: responsableId,
+        nombre: nuevoResponsable.nombre,
+        anterior: anteriorRows[0]?.nombre || "Sin asignar",
+        usaDemoResponsable: actual.demo_responsable !== null,
+      };
+    }
+  }
+
+  const demoHecha = ["demo_realizada", "confirmado", "perdido"].includes(
       actual.estado,
     );
 
-    /*
-     * IMPORTANTE:
-     * Editar NO cambia:
-     * - estado
-     * - fecha de demo
-     * - responsable
-     * - motivo de pérdida
-     * - fecha de confirmación
-     *
-     * Esos datos se modifican mediante sus acciones específicas.
-     */
+      /*
+      * IMPORTANTE:
+      * Editar NO cambia:
+      * - estado
+      * - motivo de pérdida
+      * - fecha de confirmación
+      *
+      * El responsable puede ser modificado únicamente por un administrador.
+      * La fecha de una demo coordinada puede ser reprogramada desde Editar.
+      */
 
     const modulos = demoHecha
       ? Array.isArray(b.modulos)
@@ -3121,12 +3219,167 @@ router.post("/prospectos/:id/editar", requireAuth, async (req, res) => {
       ],
     );
 
+        if (cambioResponsable) {
+      if (cambioResponsable.usaDemoResponsable) {
+        await pool.query(
+          `
+          UPDATE prospectos
+          SET demo_responsable=$1, actualizado_en=NOW()
+          WHERE id=$2
+          `,
+          [cambioResponsable.id, req.params.id],
+        );
+      } else {
+        await pool.query(
+          `
+          UPDATE prospectos
+          SET creado_por=$1, actualizado_en=NOW()
+          WHERE id=$2
+          `,
+          [cambioResponsable.id, req.params.id],
+        );
+      }
+
+      await pool.query(
+        `
+        INSERT INTO historial_estados
+          (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+        VALUES ($1,$2,$2,$3,$4)
+        `,
+        [
+          req.params.id,
+          actual.estado,
+          req.session.usuario.id,
+          `Responsable cambiado de ${cambioResponsable.anterior} a ${cambioResponsable.nombre}`,
+        ],
+      );
+    }
+
+    // ─── REPROGRAMAR DEMO ─────────────────────────────────────────────
+if (cambioFechaDemo) {
+  // Si el admin cambió responsable en esta misma edición,
+  // la nueva reunión se crea en el Zoom del nuevo responsable.
+  const responsableDemoId = cambioResponsable
+    ? cambioResponsable.id
+    : actual.demo_responsable || actual.creado_por;
+
+  const zoomEmail = AGENTE_ZOOM[responsableDemoId];
+
+  if (!zoomEmail) {
+    return res
+      .status(400)
+      .send("El responsable de la demo no tiene una cuenta de Zoom configurada");
+  }
+
+  const nombreParaZoom =
+    b.nombre_negocio ||
+    b.contacto ||
+    actual.nombre_negocio ||
+    actual.contacto ||
+    "Prospecto";
+
+  let nuevoJoinUrl;
+
+  try {
+    nuevoJoinUrl = await crearReunionZoom(
+      zoomEmail,
+      `Demo ${nombreParaZoom}`,
+      fechaDemoNueva,
+    );
+  } catch (zoomErr) {
+    console.error(
+      "ERROR recreando reunión Zoom:",
+      zoomErr.response?.data || zoomErr.message,
+    );
+
+    return res.status(500).send(
+      "No se pudo crear la nueva reunión de Zoom. La fecha de la demo no fue modificada.",
+    );
+  }
+
+    // Guardar nueva fecha y reemplazar el link anterior.
+    // También habilitamos nuevamente el recordatorio de 2 horas.
+    await pool.query(
+      `
+      UPDATE prospectos
+      SET
+        demo_fecha = $1,
+        zoom_join_url = $2,
+        recordatorio_enviado = false,
+        actualizado_en = NOW()
+      WHERE id = $3
+      `,
+      [fechaDemoNueva, nuevoJoinUrl, req.params.id],
+    );
+
+    const fechaAnteriorFormateada = formatearFechaAR(fechaDemoAnterior);
+    const fechaNuevaFormateada = formatearFechaAR(fechaDemoNueva);
+
+    await pool.query(
+      `
+      INSERT INTO historial_estados
+        (
+          prospecto_id,
+          estado_anterior,
+          estado_nuevo,
+          usuario_id,
+          nota
+        )
+      VALUES ($1,$2,$2,$3,$4)
+      `,
+      [
+        req.params.id,
+        actual.estado,
+        req.session.usuario.id,
+        `Demo reprogramada de ${fechaAnteriorFormateada} a ${fechaNuevaFormateada}`,
+      ],
+    );
+
+    // Reenviar invitación solamente si el usuario eligió hacerlo.
+    if (b.reenviar_invitacion === "1") {
+      const mensaje = `*Msj automático*
+
+  ¡Hola! 👋
+
+  La fecha de tu demostración fue reprogramada.
+
+  📅 Nueva fecha: ${fechaNuevaFormateada}
+
+  Te dejamos el nuevo link para unirte a la demostración: 🎥
+
+  🔗 ${nuevoJoinUrl}
+
+  💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
+
+      try {
+        const enviado = await enviarPorChatwoot(
+          b.telefono || actual.telefono,
+          mensaje,
+          responsableDemoId,
+        );
+
+        if (!enviado) {
+          console.error(
+            "No se pudo reenviar la invitación de la demo reprogramada",
+          );
+        }
+      } catch (msgErr) {
+        console.error(
+          "ERROR reenviando invitación de demo:",
+          msgErr.response?.data || msgErr.message,
+        );
+      }
+    }
+  }
+
     res.redirect("/prospectos/" + req.params.id);
   } catch (err) {
     console.error("Error editando prospecto:", err);
     res.status(500).send("Error al guardar");
   }
 });
+
+
 
 function formatObjeciones(obj) {
   if (!obj) return "—";

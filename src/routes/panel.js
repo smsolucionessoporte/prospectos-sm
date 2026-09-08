@@ -242,7 +242,7 @@ router.get("/panel", requireAuth, async (req, res) => {
         year: "2-digit",
       });
       return `
-        <tr onclick="location.href='/prospectos/${p.id}'" class="row-link">
+        <tr>
           <td>
                       <div class="prospect-contact">${esc(p.contacto || "—")}</div>
                       ${p.propuesta_texto ? `<div class="prospect-next"><i class="ti ti-message-check"></i> Propuesta cargada</div>` : ""}
