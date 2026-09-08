@@ -12,6 +12,10 @@ const AGENTE_TELEFONO = {
   6: "+54 9 11 3278-0621", // Marisol
   8: "+54 9 11 5564-4899", // Rafael
   10: "+54 9 11 6927-3611", // Román
+  11: "+54 9 11 5403-7905", // Tomás
+  12: "+54 9 11 3274-6298", // Giuliano
+  7: "+54 9 11 2478-5622", // Daniel
+
 };
 
 const AGENTE_CHATWOOT_ID = {
