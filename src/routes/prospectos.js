@@ -1411,6 +1411,15 @@ router.post("/prospectos/:id/demo", requireAuth, async (req, res) => {
       return res.status(404).send("Prospecto no encontrado");
     }
 
+    if (!["prospecto", "sin_respuesta"].includes(prospecto.estado)) {
+      return res.status(409).send(`
+        <script>
+          alert('Este prospecto cambió de estado y la demo no puede volver a coordinarse desde esta pantalla.');
+          window.location.href = '/prospectos/${req.params.id}';
+        </script>
+      `);
+    }
+
     const responsableId = Number(demo_responsable_id);
 
     if (!responsableId) {
