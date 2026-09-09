@@ -254,7 +254,7 @@ const chatwootAgentId = Number(
         const labelsActuales = labelsData.payload || [];
 
         const nuevasLabels = [
-          ...labelsActuales.filter(label => label !== 'bot-activo'),
+          ...labelsActuales.filter(label => label !== 'bot-ventas-activo'),
           'derivar-ventas'
         ];
 
