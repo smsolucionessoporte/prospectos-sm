@@ -306,14 +306,15 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
             WHERE chatwoot_conversation_id IS NOT NULL
           DO NOTHING
           RETURNING id`,
-          [
-            null,
-            nombre_contacto || null,
-            telefono,
-            rubro || "Otro",
-            creadoPor,
-            origen || "manual",
-            chatwoot_conversation_id || null,
+            [
+            null,                              // nombre_negocio
+            nombre_contacto || null,           // contacto
+            telefono,                          // telefono
+            rubro || "Otro",                   // rubro
+            null,                              // nota_prospecto
+            creadoPor,                         // creado_por
+            origen || "manual",                // origen
+            chatwoot_conversation_id || null,  // chatwoot_conversation_id
           ],
         );
 
