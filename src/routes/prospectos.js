@@ -774,6 +774,26 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
           }
 
           acciones.push(`
+            <form
+              method="POST"
+              action="/prospectos/${p.id}/reprogramar-demo"
+              style="display:inline"
+              onsubmit="return confirm(
+                '¿Confirmás que la demostración fue cancelada y debe reprogramarse?\\n\\n' +
+                'Al continuar:\\n' +
+                '• La demo actual dejará de figurar como coordinada.\\n' +
+                '• El prospecto volverá al estado PROSPECTO.\\n' +
+                '• Quedará registrado en el historial que la demo debe reprogramarse.\\n' +
+                '• Luego podrás coordinar una nueva fecha.'
+              )"
+            >
+              <button type="submit" class="btn btn-secondary">
+                <i class="ti ti-calendar-repeat"></i> Reprogramar
+              </button>
+            </form>
+          `);
+
+          acciones.push(`
             <button
               type="button"
               class="btn btn-danger"
@@ -1305,6 +1325,88 @@ router.post(
     }
   },
 );
+
+// REPROGRAMAR DEMO
+
+router.post("/prospectos/:id/reprogramar-demo", requireAuth, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `
+      SELECT id, estado, demo_fecha
+      FROM prospectos
+      WHERE id = $1
+      FOR UPDATE
+      `,
+      [req.params.id],
+    );
+
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).send("Prospecto no encontrado");
+    }
+
+    const prospecto = rows[0];
+
+    if (prospecto.estado !== "demo_coordinada") {
+      await client.query("ROLLBACK");
+
+      return res.status(409).send(`
+        <script>
+          alert('Este prospecto ya no tiene una demo coordinada para reprogramar.');
+          window.location.href = '/prospectos/${req.params.id}';
+        </script>
+      `);
+    }
+
+    const fechaAnterior = prospecto.demo_fecha
+      ? new Date(prospecto.demo_fecha).toLocaleString("es-AR", {
+          timeZone: "America/Argentina/Buenos_Aires",
+        })
+      : "sin fecha registrada";
+
+    await client.query(
+      `
+      UPDATE prospectos
+      SET
+        estado = 'prospecto',
+        demo_fecha = NULL,
+        demo_responsable = NULL,
+        zoom_join_url = NULL,
+        recordatorio_relevamiento_enviado = FALSE,
+        actualizado_en = NOW()
+      WHERE id = $1
+      `,
+      [req.params.id],
+    );
+
+    await client.query(
+      `
+      INSERT INTO historial_estados
+        (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+      VALUES ($1, 'demo_coordinada', 'prospecto', $2, $3)
+      `,
+      [
+        req.params.id,
+        req.session.usuario.id,
+        `Demo cancelada. Pendiente de reprogramación. Fecha anterior: ${fechaAnterior}`,
+      ],
+    );
+
+    await client.query("COMMIT");
+
+    res.redirect(`/prospectos/${req.params.id}`);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error reprogramando demo:", err);
+    res.status(500).send("No se pudo reprogramar la demo");
+  } finally {
+    client.release();
+  }
+});
 
 // ─── COORDINAR DEMO ───────────────────────────────────────────────────────────
 router.get("/prospectos/:id/demo", requireAuth, async (req, res) => {
