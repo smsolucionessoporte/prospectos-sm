@@ -188,9 +188,24 @@ async function procesarConversacion(c) {
       fecha_primera_respuesta_vendedor,
       creado_en, actualizado_en
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,
-      CASE WHEN $6::varchar IS NOT NULL THEN COALESCE($5,$3) ELSE NULL END,
-      $7,$8,$9,$10,$11,NOW(),NOW()
+      $1::bigint,
+      $2::varchar,
+      $3::timestamptz,
+      $4::boolean,
+      $5::timestamptz,
+      $6::varchar,
+      CASE
+        WHEN $6::varchar IS NOT NULL
+          THEN COALESCE($5::timestamptz, $3::timestamptz)
+        ELSE NULL::timestamptz
+      END,
+      $7::boolean,
+      $8::timestamptz,
+      $9::integer,
+      $10::varchar,
+      $11::timestamptz,
+      NOW(),
+      NOW()
     )
     ON CONFLICT (chatwoot_conversation_id)
     DO UPDATE SET
