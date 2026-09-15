@@ -1,4 +1,5 @@
 const express = require("express");
+const axios = require("axios");
 const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
@@ -916,13 +917,12 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
             AND cv.fecha_derivacion IS NOT NULL
-            AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
-        )::int AS respondidos,
+        )::int AS medidos,
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
             AND cv.fecha_derivacion IS NOT NULL
-            AND cv.fecha_primera_respuesta_vendedor IS NULL
-        )::int AS sin_responder,
+            AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
+        )::int AS respondidos,
         ROUND(AVG(
           EXTRACT(EPOCH FROM (cv.fecha_primera_respuesta_vendedor - cv.fecha_derivacion)) / 60
         ) FILTER (
@@ -941,7 +941,7 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       params,
     );
 
-    const alertas = await pool.query(
+    const alertasCandidatas = await pool.query(
       `
       SELECT
         cv.chatwoot_conversation_id,
@@ -965,6 +965,43 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       params,
     );
 
+    // "Necesitan atención" debe representar pendientes actuales, no históricos
+    // ya resueltos. Validamos en vivo el estado de Chatwoot de los candidatos.
+    let alertasActuales = alertasCandidatas.rows;
+    const chatwootUrl = process.env.CHATWOOT_URL;
+    const chatwootToken = process.env.CHATWOOT_API_TOKEN;
+    const chatwootAccountId = process.env.CHATWOOT_ACCOUNT_ID || "1";
+
+    if (chatwootUrl && chatwootToken && alertasActuales.length) {
+      const cw = axios.create({
+        baseURL: `${chatwootUrl}/api/v1/accounts/${chatwootAccountId}`,
+        headers: { api_access_token: chatwootToken },
+        timeout: 8000,
+      });
+
+      const verificadas = await Promise.all(
+        alertasActuales.map(async (a) => {
+          try {
+            const r = await cw.get(`/conversations/${a.chatwoot_conversation_id}`);
+            const status = String(r.data?.status || "").toLowerCase();
+            return status === "open" || status === "pending" ? a : null;
+          } catch (err) {
+            console.warn(`No se pudo verificar Chatwoot #${a.chatwoot_conversation_id}:`, err.message);
+            return a;
+          }
+        }),
+      );
+      alertasActuales = verificadas.filter(Boolean);
+    }
+
+    const pendientesPorVendedor = new Map();
+    for (const a of alertasActuales) {
+      pendientesPorVendedor.set(
+        a.vendedor,
+        (pendientesPorVendedor.get(a.vendedor) || 0) + 1,
+      );
+    }
+
     const porcentaje = (cantidad, total) =>
       total ? Math.round((Number(cantidad) / Number(total)) * 100) : 0;
 
@@ -980,14 +1017,15 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       <tr>
         <td class="control-seller-name">${r.vendedor}</td>
         <td class="control-number">${r.derivados}</td>
+        <td class="control-number">${r.medidos}</td>
         <td class="control-number">${r.respondidos}</td>
-        <td class="control-number">${r.sin_responder}</td>
-        <td class="control-response-time">${r.promedio_minutos !== null ? tiempo(r.promedio_minutos) : "—"}</td>
+        <td class="control-number">${pendientesPorVendedor.get(r.vendedor) || 0}</td>
+        <td class="control-response-time">${r.promedio_minutos !== null ? `${tiempo(r.promedio_minutos)} <span class="control-sample">(${r.respondidos} medidos)</span>` : "—"}</td>
       </tr>
     `).join("");
 
-    const filasAlertas = alertas.rows.length
-      ? alertas.rows.map((a) => `
+    const filasAlertas = alertasActuales.length
+      ? alertasActuales.map((a) => `
           <div class="control-alert-item">
             <div>
               <strong>Conversación #${a.chatwoot_conversation_id}</strong>
@@ -1034,12 +1072,12 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         <div class="control-section-header">
           <div>
             <h2>Respuesta de vendedores</h2>
-            <p>Tiempo desde la derivación hasta la primera respuesta del vendedor. El histórico solo calcula tiempos cuando Chatwoot permite reconstruir la derivación con una hora confiable.</p>
+            <p>Derivados muestra el total asignado. Casos medidos y promedio usan solo derivaciones con hora histórica confiable. Pendientes actuales valida el estado vigente en Chatwoot.</p>
           </div>
         </div>
         <div class="control-performance-wrap">
           <table class="control-performance-table">
-            <thead><tr><th>Vendedor</th><th>Derivados</th><th>Respondidos</th><th>Sin responder</th><th>Promedio respuesta</th></tr></thead>
+            <thead><tr><th>Vendedor</th><th>Derivados</th><th>Casos medidos</th><th>Respondidos</th><th>Pendientes actuales</th><th>Promedio respuesta</th></tr></thead>
             <tbody>${filasRendimiento}</tbody>
           </table>
         </div>
@@ -1049,9 +1087,9 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         <div class="control-section-header">
           <div>
             <h2><i class="ti ti-bell"></i> Necesitan atención</h2>
-            <p>Derivaciones con hora registrada que todavía no recibieron respuesta del vendedor.</p>
+            <p>Derivaciones abiertas actualmente en Chatwoot, con hora registrada y todavía sin respuesta del vendedor.</p>
           </div>
-          <span class="control-alert-count">${alertas.rows.length}</span>
+          <span class="control-alert-count">${alertasActuales.length}</span>
         </div>
         <div class="control-alert-list">${filasAlertas}</div>
       </div>

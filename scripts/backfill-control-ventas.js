@@ -79,18 +79,39 @@ function esMensajeHandoff(m) {
   );
 }
 
-function detectarClasificacion(mensajesCliente) {
-  const textos = mensajesCliente.map((m) => normalizar(m.content || ""));
+function detectarClasificacion(mensajes) {
+  const visibles = mensajes.filter((m) => !m.private && m.content);
+  const incoming = visibles.filter(esIncoming);
+  const textos = incoming.map((m) => normalizar(m.content || ""));
 
   const consultaErronea = textos.some((t) =>
-    /\b(equivocad[oa]|numero equivocado|mensaje equivocado|me equivoque|por error|no corresponde|calculadora)\b/.test(t),
+    /\b(equivocad[oa]|numero equivocado|mensaje equivocado|me equivoque|por error|no corresponde|calculadora|busco trabajo|buscando trabajo|busqueda laboral|curriculum|curriculo|vacante|trabajar con ustedes|soy proveedor|somos proveedores|necesito soporte|soporte tecnico|soy cliente|ya soy cliente|cliente actual)\b/.test(t),
   );
   if (consultaErronea) return "consulta_erronea";
 
-  const noInteresado = textos.some((t) =>
-    /\b(no me interesa|no estoy interesado|no estoy interesada|no nos interesa|ya no me interesa|por ahora no|no gracias|no, gracias|no deseo continuar)\b/.test(t),
+  const rechazoExplicito = textos.some((t) =>
+    /\b(no me interesa|no estoy interesado|no estoy interesada|no nos interesa|ya no me interesa|por ahora no|no gracias|no, gracias|no deseo continuar|no quiero continuar|no vamos a continuar|contratamos otro|contrate otro|elegimos otro|otro servicio|otro sistema)\b/.test(t),
   );
-  if (noInteresado) return "no_interesado";
+  if (rechazoExplicito) return "no_interesado";
+
+  // Un "3" solo cuenta como rechazo si inmediatamente antes el bot ofreció
+  // un menú donde 3 significaba no interesado. Así evitamos clasificar
+  // números sueltos del histórico.
+  for (let i = 0; i < visibles.length; i++) {
+    const m = visibles[i];
+    if (!esIncoming(m) || normalizar(m.content || "") !== "3") continue;
+
+    const anterior = [...visibles.slice(0, i)].reverse().find(esOutgoing);
+    const tAnterior = normalizar(anterior?.content || "");
+    if (
+      tAnterior.includes("1, 2 o 3") ||
+      tAnterior.includes("1, 2, o 3") ||
+      (tAnterior.includes("3") && tAnterior.includes("no me interesa")) ||
+      (tAnterior.includes("3") && tAnterior.includes("no estoy interesado"))
+    ) {
+      return "no_interesado";
+    }
+  }
 
   return null;
 }
@@ -132,7 +153,7 @@ async function procesarConversacion(c) {
   mensajes.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
 
   const mensajesCliente = mensajes.filter((m) => !m.private && esIncoming(m) && m.content);
-  const clasificacion = detectarClasificacion(mensajesCliente);
+  const clasificacion = detectarClasificacion(mensajes);
 
   // Si llegó a derivación o clasificación, necesariamente hubo interacción aunque
   // Chatwoot ya no conserve el primer incoming completo en el endpoint histórico.
