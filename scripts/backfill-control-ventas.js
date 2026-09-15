@@ -230,7 +230,9 @@ if (origen === "otro") {
 
   const mensajesCliente = mensajes.filter((m) => !m.private && esIncoming(m) && m.content);
   const clasificacion = detectarClasificacion(mensajes);
-
+    const derivado = labels
+    .map((l) => normalizar(l))
+    .includes("derivar-ventas");
   // Si llegó a derivación o clasificación, necesariamente hubo interacción aunque
   // Chatwoot ya no conserve el primer incoming completo en el endpoint histórico.
   const primeraRespuestaCliente = mensajesCliente.length > 1
