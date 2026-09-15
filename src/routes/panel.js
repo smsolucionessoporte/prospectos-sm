@@ -37,9 +37,10 @@ function puedeCerrar(usuarioSesion, prospecto) {
 }
 
 const ORIGEN_LABEL = {
-  manual: "Manual",
-  "prospecto-redes": "📱 Redes",
+  "meta-pos-cliente": "📱 Meta",
+  "google-pos-cliente": "🌐 Google",
   "prospecto-interno": "💬 Interno",
+  manual: "Manual",
 };
 
 router.get("/panel", requireAuth, async (req, res) => {

@@ -219,12 +219,21 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
         // disponibles en lugar de crear otro prospecto.
         await pool.query(
           `UPDATE prospectos
-           SET contacto = COALESCE($2, contacto),
-               telefono = COALESCE($3, telefono),
-               creado_por = COALESCE($4, creado_por),
-               actualizado_en = NOW()
-           WHERE id = $1`,
-          [prospectoId, nombre_contacto || null, telefono || null, creadoPor],
+            SET contacto = COALESCE($2, contacto),
+                telefono = COALESCE($3, telefono),
+                creado_por = COALESCE($4, creado_por),
+                rubro = COALESCE($5, rubro),
+                origen = COALESCE($6, origen),
+                actualizado_en = NOW()
+            WHERE id = $1`,
+        [
+          prospectoId,
+          nombre_contacto || null,
+          telefono || null,
+          creadoPor,
+          rubro || null,
+          origen || null,
+        ],        
         );
 
         console.log(
@@ -399,6 +408,175 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
     });
   } catch (err) {
     console.error("Error creando prospecto automático:", err);
+
+    return res.status(500).json({
+      error: "Error interno",
+    });
+  }
+});
+
+// ─── CONTROL COMERCIAL DESDE CHATWOOT ────────────────────────────────────────
+router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
+  const apiKey = req.headers["x-api-key"];
+
+  if (apiKey !== process.env.AUTOMATION_API_KEY) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const {
+    chatwoot_conversation_id,
+    evento,
+    origen,
+    vendedor_id,
+    vendedor_nombre,
+  } = req.body;
+
+  if (!chatwoot_conversation_id) {
+    return res.status(400).json({
+      error: "Falta chatwoot_conversation_id",
+    });
+  }
+
+  const eventosPermitidos = [
+    "ingreso",
+    "respuesta_cliente",
+    "consulta_erronea",
+    "no_interesado",
+    "derivacion",
+    "respuesta_vendedor",
+  ];
+
+  if (!eventosPermitidos.includes(evento)) {
+    return res.status(400).json({
+      error: "Evento no permitido",
+    });
+  }
+
+  try {
+    // Garantizar que exista el registro.
+    // Si llega primero cualquier otro evento, igualmente lo creamos.
+    await pool.query(
+      `
+      INSERT INTO control_ventas (
+        chatwoot_conversation_id,
+        origen,
+        fecha_ingreso
+      )
+      VALUES ($1, $2, NOW())
+
+      ON CONFLICT (chatwoot_conversation_id)
+      DO UPDATE SET
+        origen = COALESCE(
+          EXCLUDED.origen,
+          control_ventas.origen
+        ),
+        actualizado_en = NOW()
+      `,
+      [
+        chatwoot_conversation_id,
+        origen || null,
+      ],
+    );
+
+    if (evento === "respuesta_cliente") {
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET
+          respondio_cliente = TRUE,
+          fecha_primera_respuesta_cliente =
+            COALESCE(fecha_primera_respuesta_cliente, NOW()),
+          actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+        `,
+        [chatwoot_conversation_id],
+      );
+    }
+
+    if (evento === "consulta_erronea") {
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET
+          respondio_cliente = TRUE,
+          fecha_primera_respuesta_cliente =
+            COALESCE(fecha_primera_respuesta_cliente, NOW()),
+          clasificacion = 'consulta_erronea',
+          fecha_clasificacion = NOW(),
+          actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+        `,
+        [chatwoot_conversation_id],
+      );
+    }
+
+    if (evento === "no_interesado") {
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET
+          respondio_cliente = TRUE,
+          fecha_primera_respuesta_cliente =
+            COALESCE(fecha_primera_respuesta_cliente, NOW()),
+          clasificacion = 'no_interesado',
+          fecha_clasificacion = NOW(),
+          actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+        `,
+        [chatwoot_conversation_id],
+      );
+    }
+
+    if (evento === "derivacion") {
+      const usuarioLocal =
+        vendedor_id
+          ? AGENTE_CHATWOOT_ID[vendedor_id] || null
+          : null;
+
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET
+          derivado = TRUE,
+          fecha_derivacion =
+            COALESCE(fecha_derivacion, NOW()),
+          vendedor_id =
+            COALESCE($2, vendedor_id),
+          vendedor_nombre =
+            COALESCE($3, vendedor_nombre),
+          actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+        `,
+        [
+          chatwoot_conversation_id,
+          usuarioLocal,
+          vendedor_nombre || null,
+        ],
+      );
+    }
+
+    if (evento === "respuesta_vendedor") {
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET
+          fecha_primera_respuesta_vendedor =
+            COALESCE(fecha_primera_respuesta_vendedor, NOW()),
+          actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+          AND derivado = TRUE
+        `,
+        [chatwoot_conversation_id],
+      );
+    }
+
+    return res.json({
+      ok: true,
+      chatwoot_conversation_id,
+      evento,
+    });
+  } catch (err) {
+    console.error("Error registrando evento de control:", err);
 
     return res.status(500).json({
       error: "Error interno",
@@ -938,7 +1116,14 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Rubro</span><span class="detail-val">${esc(p.rubro || "—")}${p.rubro_otro ? " (" + esc(p.rubro_otro) + ")" : ""}</span></div>
               <div class="detail-item"><span class="detail-label">Teléfono</span><span class="detail-val">${esc(p.telefono || "—")}</span></div>
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email || "—")}</span></div>
-              <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${{ manual: "Manual", "prospecto-redes": "📱 Redes", "prospecto-interno": "💬 Interno" }[p.origen] || "—"}</span></div>
+              <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${
+                {
+                  manual: "Manual",
+                  "meta-pos-cliente": "📱 Meta",
+                  "google-pos-cliente": "🌐 Google",
+                  "prospecto-interno": "💬 Interno"
+                }                
+                [p.origen] || "—"}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ""}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} — ${esc(p.demo_resp_nombre || "—")}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ""}</span></div>` : ""}
               ${
                 p.estado === "demo_realizada"
@@ -2649,9 +2834,10 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
     const origenLabel =
       {
-        manual: "Manual",
-        "prospecto-redes": "📱 Redes",
-        "prospecto-interno": "💬 Interno",
+      manual: "Manual",
+      "meta-pos-cliente": "📱 Meta",
+      "google-pos-cliente": "🌐 Google",
+      "prospecto-interno": "💬 Interno"
       }[p.origen] || "—";
 
     const responsableNombre = p.demo_resp_nombre || p.creado_por_nombre || "—";
