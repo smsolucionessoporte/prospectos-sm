@@ -594,3 +594,39 @@ textarea { resize: vertical; min-height: 72px; }
   .control-performance-table td { padding: 11px 12px; }
   .control-section-header p { line-height: 1.45; }
 }
+
+/* Colores de estadísticas */
+.control-stat-card.stat-total {
+  border-top: 4px solid #2563eb;
+  background: #eff6ff;
+}
+
+.control-stat-card.stat-meta {
+  border-top: 4px solid #7c3aed;
+  background: #f5f3ff;
+}
+
+.control-stat-card.stat-google {
+  border-top: 4px solid #0891b2;
+  background: #ecfeff;
+}
+
+.control-stat-card.stat-no-response {
+  border-top: 4px solid #f59e0b;
+  background: #fffbeb;
+}
+
+.control-stat-card.stat-error {
+  border-top: 4px solid #dc2626;
+  background: #fef2f2;
+}
+
+.control-stat-card.stat-no-advance {
+  border-top: 4px solid #64748b;
+  background: #f8fafc;
+}
+
+.control-stat-card.stat-derived {
+  border-top: 4px solid #16a34a;
+  background: #f0fdf4;
+}
