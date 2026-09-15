@@ -87,6 +87,56 @@ CREATE TABLE IF NOT EXISTS zoom_oauth_tokens (
   expires_at TIMESTAMPTZ NOT NULL,
   actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS control_ventas (
+  id BIGSERIAL PRIMARY KEY,
+  chatwoot_conversation_id BIGINT NOT NULL UNIQUE,
+
+  origen VARCHAR(30),
+  fecha_ingreso TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  respondio_cliente BOOLEAN NOT NULL DEFAULT false,
+  fecha_primera_respuesta_cliente TIMESTAMPTZ,
+
+  clasificacion VARCHAR(30),
+  fecha_clasificacion TIMESTAMPTZ,
+
+  derivado BOOLEAN NOT NULL DEFAULT false,
+  fecha_derivacion TIMESTAMPTZ,
+
+  vendedor_id INTEGER REFERENCES usuarios(id),
+  vendedor_nombre VARCHAR(150),
+
+  fecha_primera_respuesta_vendedor TIMESTAMPTZ,
+
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CHECK (
+    origen IS NULL OR
+    origen IN ('meta', 'google', 'otro')
+  ),
+
+  CHECK (
+    clasificacion IS NULL OR
+    clasificacion IN (
+      'valido',
+      'consulta_erronea',
+      'no_interesado'
+    )
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_control_ventas_fecha_ingreso
+  ON control_ventas(fecha_ingreso DESC);
+
+CREATE INDEX IF NOT EXISTS idx_control_ventas_origen
+  ON control_ventas(origen);
+
+CREATE INDEX IF NOT EXISTS idx_control_ventas_vendedor
+  ON control_ventas(vendedor_id);
+
+CREATE INDEX IF NOT EXISTS idx_control_ventas_derivacion
+  ON control_ventas(fecha_derivacion);
 `;
 
 async function runMigrations() {

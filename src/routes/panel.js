@@ -1,8 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { pool } = require("../db");
-const { requireAuth, layout } = require("../middleware/auth");
-const { responsableCierre } = require("./prospectos");
+const { requireAuth, requireRol, layout } = require("../middleware/auth");
 
 const ESTADOS = {
   prospecto: { label: "Prospecto", color: "gray" },
@@ -385,7 +384,6 @@ router.get("/panel", requireAuth, async (req, res) => {
       <div class="page-header">
         <div>
           <h1 class="page-title">Panel de prospectos</h1>
-          <p class="page-sub">${totalGeneral} prospectos en total</p>
         </div>
         <a href="/prospectos/nuevo" class="btn btn-primary">
           <i class="ti ti-user-plus"></i> Nuevo prospecto
@@ -898,5 +896,425 @@ function esc(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
+  try {
+    const periodo = req.query.periodo || "30";
+
+    let desde = null;
+    let hasta = null;
+
+    if (periodo === "hoy") {
+      desde = new Date();
+      desde.setHours(0, 0, 0, 0);
+    } else if (periodo === "7") {
+      desde = new Date();
+      desde.setDate(desde.getDate() - 7);
+    } else if (periodo === "30") {
+      desde = new Date();
+      desde.setDate(desde.getDate() - 30);
+    } else if (periodo === "personalizado") {
+      desde = req.query.desde
+        ? new Date(`${req.query.desde}T00:00:00`)
+        : null;
+
+      hasta = req.query.hasta
+        ? new Date(`${req.query.hasta}T23:59:59`)
+        : null;
+    }
+
+    const condiciones = [];
+    const params = [];
+
+    if (desde) {
+      params.push(desde);
+      condiciones.push(`fecha_ingreso >= $${params.length}`);
+    }
+
+    if (hasta) {
+      params.push(hasta);
+      condiciones.push(`fecha_ingreso <= $${params.length}`);
+    }
+
+    const where = condiciones.length
+      ? `WHERE ${condiciones.join(" AND ")}`
+      : "";
+
+    const resumen = await pool.query(
+      `
+      SELECT
+        COUNT(*)::int AS entraron,
+
+        COUNT(*) FILTER (
+          WHERE origen = 'meta'
+        )::int AS meta,
+
+        COUNT(*) FILTER (
+          WHERE origen = 'google'
+        )::int AS google,
+
+        COUNT(*) FILTER (
+          WHERE respondio_cliente = false
+        )::int AS no_respondieron,
+
+        COUNT(*) FILTER (
+          WHERE clasificacion = 'consulta_erronea'
+        )::int AS consultas_erroneas,
+
+        COUNT(*) FILTER (
+          WHERE clasificacion = 'no_interesado'
+        )::int AS no_interesados,
+
+        COUNT(*) FILTER (
+          WHERE derivado = true
+        )::int AS derivados
+
+      FROM control_ventas
+      ${where}
+      `,
+      params,
+    );
+
+    const stats = resumen.rows[0] || {
+      entraron: 0,
+      meta: 0,
+      google: 0,
+      no_respondieron: 0,
+      consultas_erroneas: 0,
+      no_interesados: 0,
+      derivados: 0,
+    };
+
+    const rendimiento = await pool.query(
+      `
+      SELECT
+        COALESCE(vendedor_nombre, u.nombre, 'Sin asignar') AS vendedor,
+
+        COUNT(*) FILTER (
+          WHERE derivado = true
+        )::int AS derivados,
+
+        COUNT(*) FILTER (
+          WHERE fecha_primera_respuesta_vendedor IS NOT NULL
+        )::int AS respondidos,
+
+        COUNT(*) FILTER (
+          WHERE derivado = true
+            AND fecha_primera_respuesta_vendedor IS NULL
+        )::int AS sin_responder,
+
+        ROUND(
+          AVG(
+            EXTRACT(
+              EPOCH FROM (
+                fecha_primera_respuesta_vendedor - fecha_derivacion
+              )
+            ) / 60
+          ) FILTER (
+            WHERE fecha_derivacion IS NOT NULL
+              AND fecha_primera_respuesta_vendedor IS NOT NULL
+          )
+        )::int AS promedio_minutos
+
+      FROM control_ventas cv
+      LEFT JOIN usuarios u ON u.id = cv.vendedor_id
+
+      ${where}
+
+      GROUP BY vendedor_id, vendedor_nombre, u.nombre
+
+      HAVING COUNT(*) FILTER (
+        WHERE derivado = true
+      ) > 0
+
+      ORDER BY derivados DESC, vendedor
+      `,
+      params,
+    );
+
+    const alertas = await pool.query(
+      `
+      SELECT
+        chatwoot_conversation_id,
+        COALESCE(vendedor_nombre, u.nombre, 'Sin asignar') AS vendedor,
+        fecha_derivacion,
+
+        FLOOR(
+          EXTRACT(EPOCH FROM (NOW() - fecha_derivacion)) / 60
+        )::int AS minutos_espera
+
+      FROM control_ventas cv
+      LEFT JOIN usuarios u ON u.id = cv.vendedor_id
+
+      WHERE derivado = true
+        AND fecha_derivacion IS NOT NULL
+        AND fecha_primera_respuesta_vendedor IS NULL
+
+      ORDER BY fecha_derivacion ASC
+      LIMIT 100
+      `,
+    );
+
+    const porcentaje = (cantidad, total) => {
+      if (!total) return 0;
+      return Math.round((Number(cantidad) / Number(total)) * 100);
+    };
+
+    const tiempo = (minutos) => {
+      const n = Number(minutos || 0);
+
+      if (n < 60) {
+        return `${n} min`;
+      }
+
+      const horas = Math.floor(n / 60);
+      const resto = n % 60;
+
+      return resto
+        ? `${horas} h ${resto} min`
+        : `${horas} h`;
+    };
+
+    const filasRendimiento =
+      rendimiento.rows.length > 0
+        ? rendimiento.rows
+            .map(
+              (r) => `
+              <tr>
+                <td><strong>${r.vendedor}</strong></td>
+                <td>${r.derivados}</td>
+                <td>${r.respondidos}</td>
+                <td>${r.sin_responder}</td>
+                <td>
+                  ${
+                    r.promedio_minutos !== null
+                      ? tiempo(r.promedio_minutos)
+                      : "—"
+                  }
+                </td>
+              </tr>
+            `,
+            )
+            .join("")
+        : `
+          <tr>
+            <td colspan="5" class="empty-row">
+              Todavía no hay derivaciones registradas para este período.
+            </td>
+          </tr>
+        `;
+
+    const filasAlertas =
+      alertas.rows.length > 0
+        ? alertas.rows
+            .map(
+              (a) => `
+              <div class="control-alert-item">
+                <div>
+                  <strong>Conversación #${a.chatwoot_conversation_id}</strong>
+                  <div class="control-alert-sub">
+                    Responsable: ${a.vendedor}
+                  </div>
+                </div>
+
+                <div class="control-alert-time">
+                  ${tiempo(a.minutos_espera)} sin respuesta
+                </div>
+              </div>
+            `,
+            )
+            .join("")
+        : `
+          <div class="control-empty">
+            <i class="ti ti-circle-check"></i>
+            No hay derivaciones pendientes de respuesta.
+          </div>
+        `;
+
+    res.send(
+      layout(
+        "Control de ventas",
+        `
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Control de ventas</h1>
+            <p class="page-sub">
+              Seguimiento del canal comercial y atención de prospectos.
+            </p>
+          </div>
+        </div>
+
+        <form method="GET" action="/control" class="control-period-form">
+
+          <button
+            name="periodo"
+            value="hoy"
+            class="btn ${periodo === "hoy" ? "btn-primary" : "btn-secondary"}">
+            Hoy
+          </button>
+
+          <button
+            name="periodo"
+            value="7"
+            class="btn ${periodo === "7" ? "btn-primary" : "btn-secondary"}">
+            7 días
+          </button>
+
+          <button
+            name="periodo"
+            value="30"
+            class="btn ${periodo === "30" ? "btn-primary" : "btn-secondary"}">
+            30 días
+          </button>
+
+          <input type="hidden" name="periodo" value="personalizado">
+
+          <label>
+            Desde
+            <input type="date" name="desde" value="${req.query.desde || ""}">
+          </label>
+
+          <label>
+            Hasta
+            <input type="date" name="hasta" value="${req.query.hasta || ""}">
+          </label>
+
+          <button
+            type="submit"
+            name="periodo"
+            value="personalizado"
+            class="btn btn-secondary">
+            Aplicar
+          </button>
+        </form>
+
+        <div class="control-stats-grid">
+
+          <div class="control-stat-card">
+            <div class="control-stat-value">${stats.entraron}</div>
+            <div class="control-stat-title">Entraron</div>
+            <div class="control-stat-desc">Canal de ventas</div>
+          </div>
+
+          <div class="control-stat-card">
+            <div class="control-stat-value">${stats.meta}</div>
+            <div class="control-stat-title">Meta</div>
+            <div class="control-stat-desc">
+              ${porcentaje(stats.meta, stats.entraron)}% del total
+            </div>
+          </div>
+
+          <div class="control-stat-card">
+            <div class="control-stat-value">${stats.google}</div>
+            <div class="control-stat-title">Google</div>
+            <div class="control-stat-desc">
+              ${porcentaje(stats.google, stats.entraron)}% del total
+            </div>
+          </div>
+
+          <div class="control-stat-card">
+            <div class="control-stat-value">${stats.no_respondieron}</div>
+            <div class="control-stat-title">No respondieron</div>
+            <div class="control-stat-desc">
+              No contestaron el primer mensaje
+            </div>
+          </div>
+
+          <div class="control-stat-card">
+            <div class="control-stat-value">${stats.consultas_erroneas}</div>
+            <div class="control-stat-title">Consultas erróneas</div>
+            <div class="control-stat-desc">
+              Ingresaron por error o no correspondía
+            </div>
+          </div>
+
+          <div class="control-stat-card">
+            <div class="control-stat-value">${stats.no_interesados}</div>
+            <div class="control-stat-title">No interesados</div>
+            <div class="control-stat-desc">
+              Identificaron la propuesta pero no continuaron
+            </div>
+          </div>
+
+          <div class="control-stat-card control-stat-highlight">
+            <div class="control-stat-value">${stats.derivados}</div>
+            <div class="control-stat-title">Derivados</div>
+            <div class="control-stat-desc">
+              ${porcentaje(stats.derivados, stats.entraron)}% de los ingresos
+            </div>
+          </div>
+
+        </div>
+
+        <div class="control-section">
+          <div class="control-section-header">
+            <div>
+              <h2>Respuesta de vendedores</h2>
+              <p>
+                Tiempo desde la derivación hasta la primera respuesta humana.
+              </p>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Vendedor</th>
+                  <th>Derivados</th>
+                  <th>Respondidos</th>
+                  <th>Sin responder</th>
+                  <th>Promedio respuesta</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                ${filasRendimiento}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="control-section">
+          <div class="control-section-header">
+            <div>
+              <h2>
+                <i class="ti ti-bell"></i>
+                Necesitan atención
+              </h2>
+              <p>
+                Derivaciones que todavía no recibieron respuesta del vendedor.
+              </p>
+            </div>
+
+            <span class="control-alert-count">
+              ${alertas.rows.length}
+            </span>
+          </div>
+
+          <div class="control-alert-list">
+            ${filasAlertas}
+          </div>
+        </div>
+        `,
+        req,
+      ),
+    );
+  } catch (err) {
+    console.error("Error cargando control de ventas:", err);
+
+    res.status(500).send(
+      layout(
+        "Error",
+        `
+          <div class="alert alert-error">
+            No se pudo cargar el panel de control.
+          </div>
+        `,
+        req,
+      ),
+    );
+  }
+});
 
 module.exports = router;

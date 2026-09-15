@@ -241,3 +241,162 @@ textarea { resize: vertical; min-height: 72px; }
   .page-header { flex-direction: column; align-items: flex-start; }
   .prospects-table { display: block; overflow-x: auto; }
 }
+
+/* =========================================================
+   CONTROL DE VENTAS
+   ========================================================= */
+
+.control-period-form {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.control-period-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: #667085;
+}
+
+.control-period-form input[type="date"] {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.control-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.control-stat-card {
+  min-height: 125px;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.control-stat-value {
+  margin-bottom: 5px;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: #101828;
+}
+
+.control-stat-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #344054;
+}
+
+.control-stat-desc {
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #667085;
+}
+
+.control-stat-highlight {
+  border-color: #b2ccff;
+  background: #f5f8ff;
+}
+
+.control-section {
+  margin-top: 20px;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.control-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 16px;
+}
+
+.control-section-header h2 {
+  margin: 0;
+  font-size: 17px;
+  color: #101828;
+}
+
+.control-section-header p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #667085;
+}
+
+.control-alert-count {
+  min-width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: #fee4e2;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.control-alert-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.control-alert-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  padding: 13px 4px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.control-alert-item:last-child {
+  border-bottom: 0;
+}
+
+.control-alert-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #667085;
+}
+
+.control-alert-time {
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.control-empty {
+  padding: 25px;
+  text-align: center;
+  color: #667085;
+}
+
+@media (max-width: 700px) {
+  .control-alert-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
