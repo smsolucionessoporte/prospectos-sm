@@ -415,6 +415,192 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
   }
 });
 
+// ─── REASIGNACIÓN AUTOMÁTICA DESDE CHATWOOT ─────────────────────────────────
+router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
+  const apiKey = req.headers["x-api-key"];
+
+  if (apiKey !== process.env.AUTOMATION_API_KEY) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const {
+    chatwoot_conversation_id,
+    vendedor_id,
+    vendedor_nombre,
+    vendedor_anterior_nombre,
+  } = req.body;
+
+  if (!chatwoot_conversation_id) {
+    return res.status(400).json({
+      error: "Falta chatwoot_conversation_id",
+    });
+  }
+
+  if (!vendedor_id) {
+    return res.status(400).json({
+      error: "Falta vendedor_id",
+    });
+  }
+
+  const nuevoResponsableId = AGENTE_CHATWOOT_ID[vendedor_id] || null;
+
+  if (!nuevoResponsableId) {
+    return res.status(400).json({
+      error: `No existe mapeo local para el agente Chatwoot ${vendedor_id}`,
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const { rows: prospectos } = await client.query(
+      `
+      SELECT
+        p.id,
+        p.estado,
+        p.creado_por,
+        p.demo_responsable,
+        uc.nombre AS creado_por_nombre,
+        ud.nombre AS demo_responsable_nombre
+      FROM prospectos p
+      LEFT JOIN usuarios uc
+        ON uc.id = p.creado_por
+      LEFT JOIN usuarios ud
+        ON ud.id = p.demo_responsable
+      WHERE p.chatwoot_conversation_id = $1
+      LIMIT 1
+      FOR UPDATE OF p
+      `,
+      [chatwoot_conversation_id],
+    );
+
+    if (!prospectos.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Prospecto no encontrado para esa conversación",
+      });
+    }
+
+    const actual = prospectos[0];
+
+    const { rows: responsables } = await client.query(
+      `
+      SELECT id, nombre
+      FROM usuarios
+      WHERE id = $1
+        AND activo = true
+        AND rol IN ('soporte', 'admin', 'vendedor')
+      LIMIT 1
+      `,
+      [nuevoResponsableId],
+    );
+
+    if (!responsables.length) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error: "El nuevo responsable no existe o está inactivo",
+      });
+    }
+
+    const nuevoResponsable = responsables[0];
+
+    const tieneResponsableDemo = actual.demo_responsable !== null;
+
+    const responsableAnteriorNombre =
+      vendedor_anterior_nombre ||
+      (tieneResponsableDemo
+        ? actual.demo_responsable_nombre
+        : actual.creado_por_nombre) ||
+      "Sin asignar";
+
+    if (tieneResponsableDemo) {
+      await client.query(
+        `
+        UPDATE prospectos
+        SET
+          demo_responsable = $1,
+          actualizado_en = NOW()
+        WHERE id = $2
+        `,
+        [nuevoResponsable.id, actual.id],
+      );
+    } else {
+      await client.query(
+        `
+        UPDATE prospectos
+        SET
+          creado_por = $1,
+          actualizado_en = NOW()
+        WHERE id = $2
+        `,
+        [nuevoResponsable.id, actual.id],
+      );
+    }
+
+    await client.query(
+      `
+      UPDATE control_ventas
+      SET
+        vendedor_id = $2,
+        vendedor_nombre = $3,
+        actualizado_en = NOW()
+      WHERE chatwoot_conversation_id = $1
+      `,
+      [
+        chatwoot_conversation_id,
+        nuevoResponsable.id,
+        vendedor_nombre || nuevoResponsable.nombre,
+      ],
+    );
+
+    const nota =
+      `Reasignación automática por falta de respuesta: ` +
+      `${responsableAnteriorNombre} → ${nuevoResponsable.nombre}`;
+
+    await client.query(
+      `
+      INSERT INTO historial_estados
+        (
+          prospecto_id,
+          estado_anterior,
+          estado_nuevo,
+          usuario_id,
+          nota
+        )
+      VALUES ($1, $2, $2, NULL, $3)
+      `,
+      [actual.id, actual.estado, nota],
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({
+      ok: true,
+      prospecto_id: actual.id,
+      chatwoot_conversation_id,
+      responsable_anterior: responsableAnteriorNombre,
+      responsable_nuevo: nuevoResponsable.nombre,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+
+    console.error(
+      "Error sincronizando reasignación automática:",
+      err,
+    );
+
+    return res.status(500).json({
+      error: "Error interno",
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── CONTROL COMERCIAL DESDE CHATWOOT ────────────────────────────────────────
 router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
   const apiKey = req.headers["x-api-key"];
@@ -1060,8 +1246,7 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
         <div class="hist-dot ${ESTADOS_COLOR[h.estado_nuevo] || "gray"}"></div>
         <div class="hist-body">
           <span class="hist-estado">${ESTADOS_LABEL[h.estado_nuevo] || h.estado_nuevo}</span>
-          <span class="hist-meta">${h.usuario_nombre} · ${new Date(h.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
-        ${
+<span class="hist-meta">${h.usuario_nombre || "Automatización"} · ${new Date(h.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>        ${
           h.nota
             ? `<span class="hist-nota">${esc(h.nota)}</span>`
             : h.estado_nuevo === "perdido" && p.motivo_perdida
