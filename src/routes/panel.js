@@ -941,11 +941,13 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
 
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
+            AND cv.fecha_derivacion IS NOT NULL
             AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
         )::int AS respondidos,
 
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
+            AND cv.fecha_derivacion IS NOT NULL
             AND cv.fecha_primera_respuesta_vendedor IS NULL
         )::int AS pendientes,
 
