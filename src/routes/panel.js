@@ -935,9 +935,10 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       SELECT
         v.nombre AS vendedor,
 
-        COUNT(cv.id) FILTER (
-          WHERE cv.derivado = true
-        )::int AS derivados,
+          COUNT(cv.id) FILTER (
+        WHERE cv.derivado = true
+          AND cv.fecha_derivacion IS NOT NULL
+      )::int AS derivados,
 
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
