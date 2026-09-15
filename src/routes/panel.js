@@ -1117,7 +1117,7 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
           <div class="control-stat-desc">${porcentaje(stats.sin_identificar || 0, stats.entraron)}% del total</div>
         </div>
 
-        <div class="control-stat-card stat-no-responde">
+        <div class="control-stat-card stat-no-response">
           <div class="control-stat-value">${stats.no_respondieron}</div>
           <div class="control-stat-title">No respondieron</div>
           <div class="control-stat-desc">${porcentaje(stats.no_respondieron, stats.entraron)}% del total · No contestaron el primer mensaje</div>
