@@ -630,3 +630,17 @@ textarea { resize: vertical; min-height: 72px; }
   border-top: 4px solid #16a34a;
   background: #f0fdf4;
 }
+
+.control-stat-card.stat-other {
+  border-top: 4px solid #64748b;
+  background: #f8fafc;
+}
+
+.control-stat-prefix {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.65;
+  margin-bottom: 2px;
+}

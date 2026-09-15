@@ -902,6 +902,7 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         COUNT(*)::int AS entraron,
         COUNT(*) FILTER (WHERE cv.origen = 'meta')::int AS meta,
         COUNT(*) FILTER (WHERE cv.origen = 'google')::int AS google,
+        COUNT(*) FILTER (WHERE origen = 'otro')::int AS sin_identificar,
         COUNT(*) FILTER (WHERE cv.respondio_cliente = false)::int AS no_respondieron,
         COUNT(*) FILTER (WHERE cv.clasificacion = 'consulta_erronea')::int AS consultas_erroneas,
         COUNT(*) FILTER (
@@ -1095,8 +1096,15 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         <div class="control-stat-card stat-total"><div class="control-stat-value">${stats.entraron}</div><div class="control-stat-title">Entraron</div><div class="control-stat-desc">Canal de ventas</div></div>
         <div class="control-stat-card stat-meta"><div class="control-stat-value">${stats.meta}</div><div class="control-stat-title">Meta</div><div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total</div></div>
         <div class="control-stat-card stat-google"><div class="control-stat-value">${stats.google}</div><div class="control-stat-title">Google</div><div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div></div>
+        <div class="control-stat-card stat-other">
+          <div class="control-stat-value">${stats.sin_identificar || 0}</div>
+          <div class="control-stat-title">Sin identificar</div>
+          <div class="control-stat-desc">
+            ${porcentaje(stats.sin_identificar || 0)}% del total
+          </div>
+        </div>
         <div class="control-stat-card stat-no-responde"><div class="control-stat-value">${stats.no_respondieron}</div><div class="control-stat-title">No respondieron</div><div class="control-stat-desc">No contestaron el primer mensaje</div></div>
-        <div class="control-stat-card stat-error"><div class="control-stat-value">${stats.consultas_erroneas}</div><div class="control-stat-title">Consultas erróneas</div><div class="control-stat-desc">Ingresaron por error o no correspondía</div></div>
+        <div class="control-stat-card stat-error"><div class="control-stat-prefix">Al menos</div><div class="control-stat-value">${stats.consultas_erroneas}</div><div class="control-stat-title">Consultas erróneas</div><div class="control-stat-desc">Ingresaron por error o no correspondía</div></div>
         <div class="control-stat-card stat-no-advance"><div class="control-stat-value">${stats.no_avanzaron}</div><div class="control-stat-title">No avanzaron</div><div class="control-stat-desc">Identificaron la propuesta pero no continuaron</div></div>
         <div class="control-stat-card control-stat-highlight stat-derived"><div class="control-stat-value">${stats.derivados}</div><div class="control-stat-title">Derivados</div><div class="control-stat-desc">${porcentaje(stats.derivados, stats.entraron)}% de los ingresos</div></div>
       </div>
