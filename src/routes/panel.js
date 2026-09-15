@@ -887,7 +887,11 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         COUNT(*) FILTER (WHERE cv.origen = 'google')::int AS google,
         COUNT(*) FILTER (WHERE cv.respondio_cliente = false)::int AS no_respondieron,
         COUNT(*) FILTER (WHERE cv.clasificacion = 'consulta_erronea')::int AS consultas_erroneas,
-        COUNT(*) FILTER (WHERE cv.clasificacion = 'no_interesado')::int AS no_interesados,
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = true
+            AND cv.derivado = false
+            AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
+        )::int AS no_avanzaron,        
         COUNT(*) FILTER (WHERE cv.derivado = true)::int AS derivados
       FROM control_ventas cv
       WHERE ${filtro}
@@ -897,11 +901,10 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
 
     const stats = resumen.rows[0] || {
       entraron: 0, meta: 0, google: 0, no_respondieron: 0,
-      consultas_erroneas: 0, no_interesados: 0, derivados: 0,
+      consultas_erroneas: 0, no_avanzaron: 0, derivados: 0,
     };
 
-    // Solo estos cuatro usuarios forman parte del equipo comercial medido.
-    // Marisol y cualquier otro usuario quedan fuera aunque hayan escrito en el chat.
+    // Identifica rendimiento de los usuarios del grupo comercial
     const rendimiento = await pool.query(
       `
       WITH vendedores(id, nombre, orden) AS (
@@ -913,28 +916,40 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       )
       SELECT
         v.nombre AS vendedor,
-        COUNT(cv.id) FILTER (WHERE cv.derivado = true)::int AS derivados,
+
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
-            AND cv.fecha_derivacion IS NOT NULL
-        )::int AS medidos,
+        )::int AS derivados,
+
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
-            AND cv.fecha_derivacion IS NOT NULL
             AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
         )::int AS respondidos,
+
+        COUNT(cv.id) FILTER (
+          WHERE cv.derivado = true
+            AND cv.fecha_primera_respuesta_vendedor IS NULL
+        )::int AS pendientes,
+
         ROUND(AVG(
-          EXTRACT(EPOCH FROM (cv.fecha_primera_respuesta_vendedor - cv.fecha_derivacion)) / 60
+          EXTRACT(
+            EPOCH FROM (
+              cv.fecha_primera_respuesta_vendedor - cv.fecha_derivacion
+            )
+          ) / 60
         ) FILTER (
           WHERE cv.derivado = true
             AND cv.fecha_derivacion IS NOT NULL
             AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
             AND cv.fecha_primera_respuesta_vendedor >= cv.fecha_derivacion
         ))::int AS promedio_minutos
+
       FROM vendedores v
+
       LEFT JOIN control_ventas cv
         ON cv.vendedor_id = v.id
-       AND ${filtro}
+      AND ${filtro}
+
       GROUP BY v.id, v.nombre, v.orden
       ORDER BY v.orden
       `,
@@ -1017,10 +1032,11 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       <tr>
         <td class="control-seller-name">${r.vendedor}</td>
         <td class="control-number">${r.derivados}</td>
-        <td class="control-number">${r.medidos}</td>
         <td class="control-number">${r.respondidos}</td>
-        <td class="control-number">${pendientesPorVendedor.get(r.vendedor) || 0}</td>
-        <td class="control-response-time">${r.promedio_minutos !== null ? `${tiempo(r.promedio_minutos)} <span class="control-sample">(${r.respondidos} medidos)</span>` : "—"}</td>
+        <td>${r.pendientes}</td>
+        <td>
+          <strong>${formatearMinutos(r.promedio_minutos)}</strong>
+        </td>
       </tr>
     `).join("");
 
@@ -1064,7 +1080,7 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         <div class="control-stat-card"><div class="control-stat-value">${stats.google}</div><div class="control-stat-title">Google</div><div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div></div>
         <div class="control-stat-card"><div class="control-stat-value">${stats.no_respondieron}</div><div class="control-stat-title">No respondieron</div><div class="control-stat-desc">No contestaron el primer mensaje</div></div>
         <div class="control-stat-card"><div class="control-stat-value">${stats.consultas_erroneas}</div><div class="control-stat-title">Consultas erróneas</div><div class="control-stat-desc">Ingresaron por error o no correspondía</div></div>
-        <div class="control-stat-card"><div class="control-stat-value">${stats.no_interesados}</div><div class="control-stat-title">No interesados</div><div class="control-stat-desc">Identificaron la propuesta pero no continuaron</div></div>
+        <div class="control-stat-card"><div class="control-stat-value">${stats.no_avanzaron}</div><div class="control-stat-title">No avanzaron</div><div class="control-stat-desc">Identificaron la propuesta pero no continuaron</div></div>
         <div class="control-stat-card control-stat-highlight"><div class="control-stat-value">${stats.derivados}</div><div class="control-stat-title">Derivados</div><div class="control-stat-desc">${porcentaje(stats.derivados, stats.entraron)}% de los ingresos</div></div>
       </div>
 
@@ -1072,13 +1088,26 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         <div class="control-section-header">
           <div>
             <h2>Respuesta de vendedores</h2>
-            <p>Derivados muestra el total asignado. Casos medidos y promedio usan solo derivaciones con hora histórica confiable. Pendientes actuales valida el estado vigente en Chatwoot.</p>
+            <p>
+              Tiempo desde la derivación hasta la primera respuesta del vendedor.
+            </p>
           </div>
         </div>
+
         <div class="control-performance-wrap">
           <table class="control-performance-table">
-            <thead><tr><th>Vendedor</th><th>Derivados</th><th>Casos medidos</th><th>Respondidos</th><th>Pendientes actuales</th><th>Promedio respuesta</th></tr></thead>
-            <tbody>${filasRendimiento}</tbody>
+            <thead>
+              <tr>
+                <th>Vendedor</th>
+                <th>Derivados</th>
+                <th>Respondidos</th>
+                <th>Pendientes</th>
+                <th>Promedio respuesta</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filasRendimiento}
+            </tbody>
           </table>
         </div>
       </div>

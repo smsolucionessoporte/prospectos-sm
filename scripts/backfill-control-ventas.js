@@ -85,42 +85,24 @@ function esMensajeHandoff(m) {
 }
 
 function detectarClasificacion(mensajes) {
-  const visibles = mensajes.filter((m) => !m.private && m.content);
-  const incoming = visibles.filter(esIncoming);
+  const incoming = mensajes.filter(
+    (m) => !m.private && esIncoming(m) && m.content,
+  );
+
   const textos = incoming.map((m) => normalizar(m.content || ""));
 
+  // Solo intentamos detectar consultas claramente erróneas.
+  //
+  // En el panel, "No avanzaron" se calculará como:
+  // respondió + no es consulta errónea + no fue derivado.
   const consultaErronea = textos.some((t) =>
-    /\b(equivocad[oa]|numero equivocado|mensaje equivocado|me equivoque|por error|no corresponde|calculadora|busco trabajo|buscando trabajo|busqueda laboral|curriculum|curriculo|vacante|trabajar con ustedes|soy proveedor|somos proveedores|necesito soporte|soporte tecnico|soy cliente|ya soy cliente|cliente actual)\b/.test(t),
+    /\b(equivocad[oa]|numero equivocado|mensaje equivocado|me equivoque|por error|no corresponde|calculadora|busco trabajo|buscando trabajo|busqueda laboral|curriculum|curriculo|vacante|trabajar con ustedes|soy proveedor|somos proveedores|necesito soporte|soporte tecnico|soy cliente|ya soy cliente|cliente actual)\b/.test(
+      t,
+    ),
   );
-  if (consultaErronea) return "consulta_erronea";
 
-  const rechazoExplicito = textos.some((t) =>
-    /\b(no me interesa|no estoy interesado|no estoy interesada|no nos interesa|ya no me interesa|por ahora no|no gracias|no, gracias|no deseo continuar|no quiero continuar|no vamos a continuar|contratamos otro|contrate otro|elegimos otro|otro servicio|otro sistema)\b/.test(t),
-  );
-  if (rechazoExplicito) return "no_interesado";
-
-  // Un "3" solo cuenta como rechazo si inmediatamente antes el bot ofreció
-  // un menú donde 3 significaba no interesado. Así evitamos clasificar
-  // números sueltos del histórico.
-  for (let i = 0; i < visibles.length; i++) {
-    const m = visibles[i];
-    if (!esIncoming(m) || normalizar(m.content || "") !== "3") continue;
-
-    const anterior = [...visibles.slice(0, i)].reverse().find(esOutgoing);
-    const tAnterior = normalizar(anterior?.content || "");
-    if (
-      tAnterior.includes("1, 2 o 3") ||
-      tAnterior.includes("1, 2, o 3") ||
-      (tAnterior.includes("3") && tAnterior.includes("no me interesa")) ||
-      (tAnterior.includes("3") && tAnterior.includes("no estoy interesado"))
-    ) {
-      return "no_interesado";
-    }
-  }
-
-  return null;
+  return consultaErronea ? "consulta_erronea" : null;
 }
-
 async function obtenerConversaciones() {
   const todas = [];
   let page = 1;
@@ -140,10 +122,57 @@ async function obtenerConversaciones() {
 }
 
 async function obtenerMensajes(conversationId) {
-  const response = await api.get(`/conversations/${conversationId}/messages`);
-  if (Array.isArray(response.data?.payload)) return response.data.payload;
-  if (Array.isArray(response.data)) return response.data;
-  return [];
+  const todos = [];
+  const idsVistos = new Set();
+
+  let before = null;
+
+  while (true) {
+    const response = await api.get(
+      `/conversations/${conversationId}/messages`,
+      {
+        params: before ? { before } : {},
+      },
+    );
+
+    const payload = Array.isArray(response.data?.payload)
+      ? response.data.payload
+      : Array.isArray(response.data)
+        ? response.data
+        : [];
+
+    if (!payload.length) break;
+
+    for (const mensaje of payload) {
+      const id = Number(mensaje.id);
+
+      if (Number.isFinite(id)) {
+        if (idsVistos.has(id)) continue;
+        idsVistos.add(id);
+      }
+
+      todos.push(mensaje);
+    }
+
+    const idsPagina = payload
+      .map((mensaje) => Number(mensaje.id))
+      .filter((id) => Number.isFinite(id));
+
+    if (!idsPagina.length) break;
+
+    const idMasAntiguo = Math.min(...idsPagina);
+
+    // Evita loops si Chatwoot devuelve nuevamente la misma página.
+    if (before !== null && idMasAntiguo >= before) break;
+
+    before = idMasAntiguo;
+
+    // Chatwoot devuelve hasta 20 mensajes por página.
+    // Si vinieron menos de 20, llegamos al comienzo.
+    if (payload.length < 20) break;
+  }
+
+  return todos;
 }
 
 async function procesarConversacion(c) {
@@ -275,6 +304,7 @@ async function procesarConversacion(c) {
     id,
     origen,
     clasificacion,
+    respondioCliente,
     derivado,
     vendedor: vendedor?.nombre || null,
     tiempoConfiable: Boolean(fechaDerivacion),
@@ -297,7 +327,7 @@ async function main() {
   let derivadas = 0;
   let conTiempo = 0;
   let consultasErroneas = 0;
-  let noInteresados = 0;
+  let noAvanzaron = 0;
 
   for (const conversacion of conversaciones) {
     try {
@@ -308,8 +338,13 @@ async function main() {
       if (r.derivado) derivadas++;
       if (r.tiempoConfiable) conTiempo++;
       if (r.clasificacion === "consulta_erronea") consultasErroneas++;
-      if (r.clasificacion === "no_interesado") noInteresados++;
-
+        if (
+        r.respondioCliente &&
+        !r.derivado &&
+        r.clasificacion !== "consulta_erronea"
+        ) {
+        noAvanzaron++;
+        }
       console.log(
         `[${procesadas}/${conversaciones.length}] #${r.id}` +
           ` | ${r.origen}` +
@@ -331,7 +366,11 @@ async function main() {
       COUNT(*) FILTER (WHERE origen='meta')::int AS meta,
       COUNT(*) FILTER (WHERE origen='google')::int AS google,
       COUNT(*) FILTER (WHERE clasificacion='consulta_erronea')::int AS consultas_erroneas,
-      COUNT(*) FILTER (WHERE clasificacion='no_interesado')::int AS no_interesados,
+      COUNT(*) FILTER (
+        WHERE respondio_cliente = true
+            AND derivado = false
+            AND COALESCE(clasificacion, '') <> 'consulta_erronea'
+        )::int AS no_avanzaron,
       COUNT(*) FILTER (WHERE derivado=true)::int AS derivados,
       COUNT(*) FILTER (WHERE derivado=true AND fecha_derivacion IS NOT NULL)::int AS derivaciones_con_hora_confiable,
       COUNT(*) FILTER (WHERE derivado=true AND fecha_primera_respuesta_vendedor IS NOT NULL)::int AS respuestas_con_hora_confiable
@@ -348,7 +387,7 @@ async function main() {
   console.log(`Derivadas detectadas: ${derivadas}`);
   console.log(`Derivaciones con hora confiable: ${conTiempo}`);
   console.log(`Consultas erróneas detectadas: ${consultasErroneas}`);
-  console.log(`No interesados detectados: ${noInteresados}`);
+  console.log(`No avanzaron detectados: ${noAvanzaron}`);
   console.log("\nCONTROL_VENTAS:");
   console.table(resumen.rows);
 }
