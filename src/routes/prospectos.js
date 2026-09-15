@@ -2410,13 +2410,14 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
         `🏬 Rubro: ${p.rubro || "—"}${p.rubro_otro ? ` (${p.rubro_otro})` : ""}\n` +
         `⭐ Módulos: ${(p.modulos || []).join(", ") || "—"}\n` +
         `🛠️ Equipamiento: ${(p.equipamiento || []).join(", ") || "—"}${p.equip_observaciones ? ` — ${p.equip_observaciones}` : ""}\n` +
-        `🔥 Interés: ${
+          `🔥 Interés: ${
           {
             alto: "Alto",
             medio: "Medio",
             bajo: "Bajo",
           }[p.nivel_interes] || "—"
         }\n\n` +
+        `👨‍💼 Vendedor a cargo: ${nombreResponsableDemo}\n` +
         `👉 Cerrar cliente: ${link}`;
 
       const avisoEnviado =
@@ -2685,6 +2686,7 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
           `🏬 Rubro: ${full.rubro || "—"}${full.rubro_otro ? ` (${full.rubro_otro})` : ""}\n\n` +
           `⭐ Módulos contratados: ${(full.modulos_contratados || []).join(", ") || "—"}\n` +
           `🛠️ Equipamiento: ${(full.equipamiento || []).join(", ") || "—"}${full.equip_observaciones ? ` — ${full.equip_observaciones}` : ""}\n\n` +
+          `👨‍💼 Vendedor a cargo: ${nombreResponsable}\n` +
           `👉 Ver prospecto: ${linkProspecto}`;
 
         const avisoEnviado =
