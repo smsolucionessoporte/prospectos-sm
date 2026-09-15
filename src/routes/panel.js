@@ -847,6 +847,22 @@ function esc(str) {
     .replace(/"/g, "&quot;");
 }
 
+function formatearMinutos(minutos) {
+  if (minutos === null || minutos === undefined) return "—";
+
+  const total = Number(minutos);
+
+  if (!Number.isFinite(total) || total < 0) return "—";
+
+  const horas = Math.floor(total / 60);
+  const mins = Math.round(total % 60);
+
+  if (horas === 0) return `${mins} min`;
+  if (mins === 0) return `${horas} h`;
+
+  return `${horas} h ${mins} min`;
+}
+
 router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
   try {
     const periodo = req.query.periodo || "30";
