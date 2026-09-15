@@ -998,34 +998,8 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       params,
     );
 
-    // "Necesitan atención" debe representar pendientes actuales, no históricos
-    // ya resueltos. Validamos en vivo el estado de Chatwoot de los candidatos.
-    let alertasActuales = alertasCandidatas.rows;
-    const chatwootUrl = process.env.CHATWOOT_URL;
-    const chatwootToken = process.env.CHATWOOT_API_TOKEN;
-    const chatwootAccountId = process.env.CHATWOOT_ACCOUNT_ID || "1";
-
-    if (chatwootUrl && chatwootToken && alertasActuales.length) {
-      const cw = axios.create({
-        baseURL: `${chatwootUrl}/api/v1/accounts/${chatwootAccountId}`,
-        headers: { api_access_token: chatwootToken },
-        timeout: 8000,
-      });
-
-      const verificadas = await Promise.all(
-        alertasActuales.map(async (a) => {
-          try {
-            const r = await cw.get(`/conversations/${a.chatwoot_conversation_id}`);
-            const status = String(r.data?.status || "").toLowerCase();
-            return status === "open" || status === "pending" ? a : null;
-          } catch (err) {
-            console.warn(`No se pudo verificar Chatwoot #${a.chatwoot_conversation_id}:`, err.message);
-            return a;
-          }
-        }),
-      );
-      alertasActuales = verificadas.filter(Boolean);
-    }
+    // "Necesitan atención" debe representar pendientes actuales
+    const alertasActuales = alertasCandidatas.rows;
 
     const pendientesPorVendedor = new Map();
     for (const a of alertasActuales) {
@@ -1175,7 +1149,7 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         <div class="control-section-header">
           <div>
             <h2><i class="ti ti-bell"></i> Necesitan atención</h2>
-            <p>Derivaciones abiertas actualmente en Chatwoot, con hora registrada y todavía sin respuesta del vendedor.</p>
+            <p>Derivaciones que todavía no recibieron respuesta del vendedor.</p>
           </div>
           <span class="control-alert-count">${alertasActuales.length}</span>
         </div>
