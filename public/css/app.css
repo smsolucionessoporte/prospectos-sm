@@ -400,3 +400,146 @@ textarea { resize: vertical; min-height: 72px; }
     flex-direction: column;
   }
 }
+
+/* =========================================================
+   RESPONSIVE MOBILE
+   ========================================================= */
+
+@media (max-width: 700px) {
+
+  /* ---------- CONTENIDO GENERAL ---------- */
+
+  .container,
+  .main-content {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+
+  /* ---------- CONTROL: FILTROS ---------- */
+
+  .control-period-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .control-period-form > button:nth-of-type(1),
+  .control-period-form > button:nth-of-type(2),
+  .control-period-form > button:nth-of-type(3) {
+    width: 100%;
+  }
+
+  .control-period-form label {
+    width: 100%;
+  }
+
+  .control-period-form input[type="date"] {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+
+  /* ---------- CONTROL: CARDS ---------- */
+
+  .control-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .control-stat-card {
+    min-width: 0;
+    min-height: 125px;
+    padding: 16px;
+  }
+
+  .control-stat-value {
+    font-size: 27px;
+  }
+
+  .control-stat-title {
+    font-size: 14px;
+  }
+
+  .control-stat-desc {
+    font-size: 12px;
+  }
+
+
+  /* ---------- SECCIONES ---------- */
+
+  .control-section {
+    padding: 16px;
+    overflow: hidden;
+  }
+
+  .control-section-header {
+    align-items: flex-start;
+  }
+
+
+  /* ---------- TABLA VENDEDORES ---------- */
+
+  .control-section .table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .control-section .data-table {
+    min-width: 650px;
+    width: 650px;
+  }
+
+  .control-section .data-table th,
+  .control-section .data-table td {
+    padding: 10px 12px;
+    white-space: nowrap;
+  }
+
+
+  /* ---------- ALERTAS ---------- */
+
+  .control-alert-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .control-alert-time {
+    white-space: normal;
+  }
+
+
+  /* ---------- PANEL PRINCIPAL: FILTROS ---------- */
+
+  .filters-card,
+  .filter-card {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .filters-row,
+  .filter-row {
+    flex-wrap: wrap;
+  }
+
+
+  /* ---------- PANEL PRINCIPAL: TABLA ---------- */
+
+  .table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table {
+    min-width: 800px;
+  }
+}

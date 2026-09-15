@@ -77,30 +77,6 @@ router.get("/panel", requireAuth, async (req, res) => {
     const desdeFiltro = desde || null;
     const hastaFiltro = hasta || hoyStr;
 
-    // Conteos por estado para las cards — respetan el período seleccionado
-    // (no el filtro de estados, para que las cards sigan mostrando el desglose completo)
-    let conteosWhere = [];
-    let conteosParams = [];
-    let ci = 1;
-    if (desdeFiltro) {
-      conteosWhere.push(`creado_en >= $${ci++}`);
-      conteosParams.push(desdeFiltro);
-    }
-    if (hastaFiltro) {
-      conteosWhere.push(`creado_en < $${ci++}::date + interval '1 day'`);
-      conteosParams.push(hastaFiltro);
-    }
-    const conteosWhereClause = conteosWhere.length
-      ? "WHERE " + conteosWhere.join(" AND ")
-      : "";
-    const conteos = await pool.query(
-      `SELECT estado, COUNT(*) as total FROM prospectos ${conteosWhereClause} GROUP BY estado`,
-      conteosParams,
-    );
-    const totales = {};
-    conteos.rows.forEach((r) => (totales[r.estado] = parseInt(r.total)));
-    const totalGeneral = Object.values(totales).reduce((a, b) => a + b, 0);
-
     // Lista de responsables para el filtro (soporte + admin activos).
     // No hace falta si el usuario tiene vista restringida (no puede elegir otro responsable).
     const responsables = vistaRestringida
@@ -201,26 +177,6 @@ router.get("/panel", requireAuth, async (req, res) => {
       if (!gruposPorEstado[p.estado]) gruposPorEstado[p.estado] = [];
       gruposPorEstado[p.estado].push(p);
     });
-
-    // Cards de estado (cada una tilda solo ese estado y dispara filtrado=1)
-    const qsFechas = `${desdeFiltro ? "&desde=" + desdeFiltro : ""}${hastaFiltro ? "&hasta=" + hastaFiltro : ""}`;
-    const cardsHtml = Object.entries(ESTADOS)
-      .map(([key, meta]) => {
-        const esUnico =
-          estadosSeleccionados.length === 1 && estadosSeleccionados[0] === key;
-        return `
-      <a href="/panel?filtrado=1&estados=${key}${qsFechas}" class="stat-card ${esUnico ? "active" : ""}">
-        <span class="stat-num ${meta.color}">${totales[key] || 0}</span>
-        <span class="stat-label">${meta.label}</span>
-      </a>
-    `;
-      })
-      .join("");
-
-    const todosLosEstadosQs = Object.keys(ESTADOS)
-      .map((k) => `estados=${k}`)
-      .join("&");
-    const esTodos = estadosSeleccionados.length === Object.keys(ESTADOS).length;
 
     // Cantidad de filtros "no default" activos, para el badge del botón Filtros
     let filtrosActivosCount = 0;
@@ -388,14 +344,6 @@ router.get("/panel", requireAuth, async (req, res) => {
         <a href="/prospectos/nuevo" class="btn btn-primary">
           <i class="ti ti-user-plus"></i> Nuevo prospecto
         </a>
-      </div>
-
-      <div class="stats-row">
-        <a href="/panel?filtrado=1&${todosLosEstadosQs}${qsFechas}" class="stat-card ${esTodos ? "active" : ""}">
-          <span class="stat-num">${totalGeneral}</span>
-          <span class="stat-label">Todos</span>
-        </a>
-        ${cardsHtml}
       </div>
 
       <div class="filter-bar">
@@ -1166,8 +1114,6 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
             class="btn ${periodo === "30" ? "btn-primary" : "btn-secondary"}">
             30 días
           </button>
-
-          <input type="hidden" name="periodo" value="personalizado">
 
           <label>
             Desde
