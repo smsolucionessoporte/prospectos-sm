@@ -7,17 +7,13 @@ const TOKEN = process.env.CHATWOOT_API_TOKEN;
 const INBOX_ID = 6;
 
 if (!CHATWOOT_URL || !TOKEN) {
-  console.error(
-    "Faltan CHATWOOT_URL o CHATWOOT_API_TOKEN en las variables de entorno.",
-  );
+  console.error("Faltan CHATWOOT_URL o CHATWOOT_API_TOKEN.");
   process.exit(1);
 }
 
 const api = axios.create({
   baseURL: `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}`,
-  headers: {
-    api_access_token: TOKEN,
-  },
+  headers: { api_access_token: TOKEN },
   timeout: 30000,
 });
 
@@ -26,11 +22,15 @@ function fechaUnix(valor) {
   return new Date(Number(valor) * 1000);
 }
 
-function detectarOrigen(labels = []) {
-  const normalized = labels.map((l) => String(l).toLowerCase());
+function normalizar(valor = "") {
+  return String(valor).trim().toLowerCase();
+}
 
-  if (normalized.includes("meta-pos-cliente")) return "meta";
-  if (normalized.includes("google-pos-cliente")) return "google";
+function detectarOrigen(labels = []) {
+  const l = labels.map(normalizar);
+
+  if (l.includes("meta-pos-cliente")) return "meta";
+  if (l.includes("google-pos-cliente")) return "google";
 
   return "otro";
 }
@@ -38,7 +38,26 @@ function detectarOrigen(labels = []) {
 function esMensajeCliente(m) {
   return (
     Number(m.message_type) === 0 ||
-    String(m.message_type).toLowerCase() === "incoming"
+    normalizar(m.message_type) === "incoming"
+  );
+}
+
+function esBot(nombre = "") {
+  const n = normalizar(nombre);
+
+  return (
+    n.includes("bot ventas") ||
+    n.includes("sm bot") ||
+    n === "bot"
+  );
+}
+
+function obtenerNombreRemitente(m) {
+  return (
+    m.sender?.name ||
+    m.sender?.available_name ||
+    m.sender_name ||
+    null
   );
 }
 
@@ -47,11 +66,25 @@ function esMensajeHumano(m) {
 
   const outgoing =
     Number(m.message_type) === 1 ||
-    String(m.message_type).toLowerCase() === "outgoing";
+    normalizar(m.message_type) === "outgoing";
 
   if (!outgoing) return false;
 
-  return String(m.sender_type || "").toLowerCase() === "user";
+  const nombre = obtenerNombreRemitente(m);
+
+  if (!nombre) return false;
+  if (esBot(nombre)) return false;
+
+  /*
+   * En históricos Chatwoot no siempre expone sender_type
+   * de forma uniforme. Si es outgoing y tiene un remitente
+   * real que no es el bot, lo consideramos respuesta humana.
+   */
+  return true;
+}
+
+function obtenerIdRemitente(m) {
+  return m.sender?.id || m.sender_id || null;
 }
 
 async function obtenerConversaciones() {
@@ -96,64 +129,35 @@ async function obtenerMensajes(conversationId) {
   const payload = response.data?.payload;
 
   if (Array.isArray(payload)) return payload;
-
   if (Array.isArray(response.data)) return response.data;
 
   return [];
 }
 
-async function buscarUsuarioPorChatwoot(agentId, nombre) {
-  if (!agentId && !nombre) return null;
+async function buscarUsuario(nombre) {
+  if (!nombre || esBot(nombre)) return null;
 
-  /*
-   * Primero intentamos aprovechar los prospectos que ya fueron creados
-   * desde Chatwoot y tienen responsable conocido.
-   */
-  if (agentId) {
-    const porProspecto = await pool.query(
-      `
-      SELECT u.id
-      FROM prospectos p
-      JOIN usuarios u ON u.id = COALESCE(p.demo_responsable, p.creado_por)
-      WHERE p.chatwoot_conversation_id IS NOT NULL
-        AND u.activo = true
-        AND LOWER(u.nombre) = LOWER($1)
-      LIMIT 1
-      `,
-      [nombre || ""],
-    );
+  const result = await pool.query(
+    `
+    SELECT id
+    FROM usuarios
+    WHERE activo = true
+      AND LOWER(nombre) = LOWER($1)
+    LIMIT 1
+    `,
+    [nombre],
+  );
 
-    if (porProspecto.rows.length) {
-      return porProspecto.rows[0].id;
-    }
-  }
-
-  if (nombre) {
-    const porNombre = await pool.query(
-      `
-      SELECT id
-      FROM usuarios
-      WHERE activo = true
-        AND LOWER(nombre) = LOWER($1)
-      LIMIT 1
-      `,
-      [nombre],
-    );
-
-    if (porNombre.rows.length) {
-      return porNombre.rows[0].id;
-    }
-  }
-
-  return null;
+  return result.rows[0]?.id || null;
 }
 
 async function procesarConversacion(c) {
   const id = Number(c.id);
 
   const labels = Array.isArray(c.labels) ? c.labels : [];
-  const origen = detectarOrigen(labels);
+  const labelsNormalizados = labels.map(normalizar);
 
+  const origen = detectarOrigen(labels);
   const fechaIngreso = fechaUnix(c.created_at) || new Date();
 
   const mensajes = await obtenerMensajes(id);
@@ -162,12 +166,12 @@ async function procesarConversacion(c) {
     (a, b) => Number(a.created_at || 0) - Number(b.created_at || 0),
   );
 
+  // -----------------------------------------
+  // RESPUESTA DEL CLIENTE
+  // -----------------------------------------
+
   const mensajesCliente = mensajes.filter(esMensajeCliente);
 
-  /*
-   * El primer mensaje es el ingreso del contacto.
-   * Si hay otro incoming posterior, consideramos que respondió al bot.
-   */
   const primeraRespuestaCliente =
     mensajesCliente.length > 1
       ? fechaUnix(mensajesCliente[1].created_at)
@@ -175,38 +179,36 @@ async function procesarConversacion(c) {
 
   const respondioCliente = Boolean(primeraRespuestaCliente);
 
-  const derivado = labels
-    .map((l) => String(l).toLowerCase())
-    .includes("derivar-ventas");
+  // -----------------------------------------
+  // DERIVACIÓN
+  // -----------------------------------------
 
-  const assignee = c.meta?.assignee || null;
-  const vendedorNombre =
-    assignee?.name || assignee?.available_name || null;
+  const derivado = labelsNormalizados.includes("derivar-ventas");
 
-  const vendedorId = await buscarUsuarioPorChatwoot(
-    assignee?.id || null,
-    vendedorNombre,
-  );
+  // -----------------------------------------
+  // RESPUESTAS HUMANAS
+  // -----------------------------------------
 
   const mensajesHumanos = mensajes.filter(esMensajeHumano);
 
-  const primeraRespuestaVendedor =
+  const primerMensajeHumano =
     mensajesHumanos.length > 0
-      ? fechaUnix(mensajesHumanos[0].created_at)
+      ? mensajesHumanos[0]
+      : null;
+
+  const primeraRespuestaVendedor =
+    primerMensajeHumano
+      ? fechaUnix(primerMensajeHumano.created_at)
       : null;
 
   /*
-   * Chatwoot no nos entrega directamente la fecha histórica en que
-   * se agregó derivar-ventas.
+   * Para el histórico Chatwoot no conserva necesariamente
+   * el instante exacto en que se agregó derivar-ventas.
    *
-   * Para históricos usamos como mejor aproximación:
-   * - first_reply_created_at, si existe;
-   * - primera respuesta humana;
-   *
-   * Nunca usamos una fecha posterior a la primera respuesta humana.
-   *
-   * Los registros nuevos del bot ya tienen fecha_derivacion exacta
-   * y el ON CONFLICT de abajo NO la pisa.
+   * first_reply_created_at es la mejor referencia histórica
+   * disponible. Si no existe pero sí tenemos respuesta humana,
+   * usamos esa fecha para evitar generar una alerta histórica
+   * falsa.
    */
   let fechaDerivacion = null;
 
@@ -216,6 +218,45 @@ async function procesarConversacion(c) {
       primeraRespuestaVendedor ||
       null;
   }
+
+  // -----------------------------------------
+  // VENDEDOR
+  // -----------------------------------------
+
+  let vendedorNombre = null;
+  let vendedorChatwootId = null;
+
+  /*
+   * Para históricos preferimos quién realmente respondió.
+   * El assignee actual puede haber cambiado después.
+   */
+  if (primerMensajeHumano) {
+    vendedorNombre = obtenerNombreRemitente(primerMensajeHumano);
+    vendedorChatwootId = obtenerIdRemitente(primerMensajeHumano);
+  }
+
+  /*
+   * Si todavía no respondió nadie pero está derivada,
+   * usamos el responsable actual para la alerta.
+   */
+  if (!vendedorNombre && derivado) {
+    const assignee = c.meta?.assignee || null;
+    const nombreAssignee =
+      assignee?.name ||
+      assignee?.available_name ||
+      null;
+
+    if (nombreAssignee && !esBot(nombreAssignee)) {
+      vendedorNombre = nombreAssignee;
+      vendedorChatwootId = assignee?.id || null;
+    }
+  }
+
+  const vendedorId = await buscarUsuario(vendedorNombre);
+
+  // -----------------------------------------
+  // UPSERT
+  // -----------------------------------------
 
   await pool.query(
     `
@@ -240,13 +281,7 @@ async function procesarConversacion(c) {
     ON CONFLICT (chatwoot_conversation_id)
     DO UPDATE SET
 
-      origen =
-        CASE
-          WHEN control_ventas.origen IS NULL
-            OR control_ventas.origen = 'otro'
-          THEN EXCLUDED.origen
-          ELSE control_ventas.origen
-        END,
+      origen = EXCLUDED.origen,
 
       fecha_ingreso =
         COALESCE(
@@ -276,20 +311,20 @@ async function procesarConversacion(c) {
 
       vendedor_id =
         COALESCE(
-          control_ventas.vendedor_id,
-          EXCLUDED.vendedor_id
+          EXCLUDED.vendedor_id,
+          control_ventas.vendedor_id
         ),
 
       vendedor_nombre =
         COALESCE(
-          control_ventas.vendedor_nombre,
-          EXCLUDED.vendedor_nombre
+          EXCLUDED.vendedor_nombre,
+          control_ventas.vendedor_nombre
         ),
 
       fecha_primera_respuesta_vendedor =
         COALESCE(
-          control_ventas.fecha_primera_respuesta_vendedor,
-          EXCLUDED.fecha_primera_respuesta_vendedor
+          EXCLUDED.fecha_primera_respuesta_vendedor,
+          control_ventas.fecha_primera_respuesta_vendedor
         ),
 
       actualizado_en = NOW()
@@ -311,7 +346,6 @@ async function procesarConversacion(c) {
   return {
     id,
     origen,
-    respondioCliente,
     derivado,
     vendedor: vendedorNombre,
     respondioVendedor: Boolean(primeraRespuestaVendedor),
@@ -332,27 +366,29 @@ async function main() {
   let procesadas = 0;
   let errores = 0;
   let derivadas = 0;
+  let respondidas = 0;
   let meta = 0;
   let google = 0;
 
   for (const conversacion of conversaciones) {
     try {
-      const resultado = await procesarConversacion(conversacion);
+      const r = await procesarConversacion(conversacion);
 
       procesadas++;
 
-      if (resultado.derivado) derivadas++;
-      if (resultado.origen === "meta") meta++;
-      if (resultado.origen === "google") google++;
+      if (r.derivado) derivadas++;
+      if (r.derivado && r.respondioVendedor) respondidas++;
+      if (r.origen === "meta") meta++;
+      if (r.origen === "google") google++;
 
       console.log(
-        `[${procesadas}/${conversaciones.length}] #${resultado.id}` +
-          ` | ${resultado.origen}` +
-          ` | derivado=${resultado.derivado ? "SI" : "NO"}` +
-          ` | vendedor=${resultado.vendedor || "—"}`,
+        `[${procesadas}/${conversaciones.length}] #${r.id}` +
+          ` | ${r.origen}` +
+          ` | derivado=${r.derivado ? "SI" : "NO"}` +
+          ` | respondió vendedor=${r.respondioVendedor ? "SI" : "NO"}` +
+          ` | vendedor=${r.vendedor || "—"}`,
       );
 
-      // Evitamos castigar innecesariamente la API.
       await new Promise((resolve) => setTimeout(resolve, 100));
     } catch (err) {
       errores++;
@@ -364,9 +400,20 @@ async function main() {
     }
   }
 
-  const totalControl = await pool.query(
-    `SELECT COUNT(*)::int AS total FROM control_ventas`,
-  );
+  const resumen = await pool.query(`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE derivado = true)::int AS derivados,
+      COUNT(*) FILTER (
+        WHERE derivado = true
+          AND fecha_primera_respuesta_vendedor IS NOT NULL
+      )::int AS respondidos,
+      COUNT(*) FILTER (
+        WHERE derivado = true
+          AND fecha_primera_respuesta_vendedor IS NULL
+      )::int AS pendientes
+    FROM control_ventas
+  `);
 
   console.log("\n========================================");
   console.log(" BACKFILL TERMINADO");
@@ -376,9 +423,10 @@ async function main() {
   console.log(`Meta detectadas: ${meta}`);
   console.log(`Google detectadas: ${google}`);
   console.log(`Derivadas detectadas: ${derivadas}`);
-  console.log(
-    `Registros actuales en control_ventas: ${totalControl.rows[0].total}`,
-  );
+  console.log(`Respondidas detectadas: ${respondidas}`);
+
+  console.log("\nCONTROL_VENTAS:");
+  console.table(resumen.rows);
 }
 
 main()
