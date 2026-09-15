@@ -176,14 +176,27 @@ async function obtenerMensajes(conversationId) {
 }
 
 async function procesarConversacion(c) {
-  const id = Number(c.id);
-  const labels = Array.isArray(c.labels) ? c.labels : [];
-  const labelsNorm = labels.map(normalizar);
-  const origen = detectarOrigen(labels);
-  const fechaIngreso = fechaUnix(c.created_at) || new Date();
-  const derivado = labelsNorm.includes("derivar-ventas");
+const labels = Array.isArray(c.labels) ? c.labels : [];
 
-  const mensajes = await obtenerMensajes(id);
+const fechaIngreso = fechaUnix(c.created_at) || new Date();
+
+const mensajes = await obtenerMensajes(id);
+
+let origen = detectarOrigen(labels);
+
+if (origen === "otro") {
+  const textoHistorico = mensajes
+    .filter((m) => !m.private && esIncoming(m) && m.content)
+    .map((m) => normalizar(m.content || ""))
+    .join(" ");
+
+  if (textoHistorico.includes("chatea con nosotros")) {
+    origen = "meta";
+  } else if (textoHistorico.includes("sitio web")) {
+    origen = "google";
+  }
+}
+
   mensajes.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
 
   const mensajesCliente = mensajes.filter((m) => !m.private && esIncoming(m) && m.content);
