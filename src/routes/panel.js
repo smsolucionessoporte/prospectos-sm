@@ -1093,20 +1093,54 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
       </form>
 
       <div class="control-stats-grid">
-        <div class="control-stat-card stat-total"><div class="control-stat-value">${stats.entraron}</div><div class="control-stat-title">Entraron</div><div class="control-stat-desc">Canal de ventas</div></div>
-        <div class="control-stat-card stat-meta"><div class="control-stat-value">${stats.meta}</div><div class="control-stat-title">Meta</div><div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total</div></div>
-        <div class="control-stat-card stat-google"><div class="control-stat-value">${stats.google}</div><div class="control-stat-title">Google</div><div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div></div>
+        <div class="control-stat-card stat-total">
+          <div class="control-stat-value">${stats.entraron}</div>
+          <div class="control-stat-title">Entraron</div>
+          <div class="control-stat-desc">100% del total</div>
+        </div>
+
+        <div class="control-stat-card stat-meta">
+          <div class="control-stat-value">${stats.meta}</div>
+          <div class="control-stat-title">Meta</div>
+          <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total</div>
+        </div>
+
+        <div class="control-stat-card stat-google">
+          <div class="control-stat-value">${stats.google}</div>
+          <div class="control-stat-title">Google</div>
+          <div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div>
+        </div>
+
         <div class="control-stat-card stat-other">
           <div class="control-stat-value">${stats.sin_identificar || 0}</div>
           <div class="control-stat-title">Sin identificar</div>
-          <div class="control-stat-desc">
-            ${porcentaje(stats.sin_identificar || 0)}% del total
-          </div>
+          <div class="control-stat-desc">${porcentaje(stats.sin_identificar || 0, stats.entraron)}% del total</div>
         </div>
-        <div class="control-stat-card stat-no-responde"><div class="control-stat-value">${stats.no_respondieron}</div><div class="control-stat-title">No respondieron</div><div class="control-stat-desc">No contestaron el primer mensaje</div></div>
-        <div class="control-stat-card stat-error"><div class="control-stat-prefix">Al menos</div><div class="control-stat-value">${stats.consultas_erroneas}</div><div class="control-stat-title">Consultas erróneas</div><div class="control-stat-desc">Ingresaron por error o no correspondía</div></div>
-        <div class="control-stat-card stat-no-advance"><div class="control-stat-value">${stats.no_avanzaron}</div><div class="control-stat-title">No avanzaron</div><div class="control-stat-desc">Identificaron la propuesta pero no continuaron</div></div>
-        <div class="control-stat-card control-stat-highlight stat-derived"><div class="control-stat-value">${stats.derivados}</div><div class="control-stat-title">Derivados</div><div class="control-stat-desc">${porcentaje(stats.derivados, stats.entraron)}% de los ingresos</div></div>
+
+        <div class="control-stat-card stat-no-responde">
+          <div class="control-stat-value">${stats.no_respondieron}</div>
+          <div class="control-stat-title">No respondieron</div>
+          <div class="control-stat-desc">${porcentaje(stats.no_respondieron, stats.entraron)}% del total · No contestaron el primer mensaje</div>
+        </div>
+
+        <div class="control-stat-card stat-error">
+          <div class="control-stat-prefix">Al menos</div>
+          <div class="control-stat-value">${stats.consultas_erroneas}</div>
+          <div class="control-stat-title">Consultas erróneas</div>
+          <div class="control-stat-desc">${porcentaje(stats.consultas_erroneas, stats.entraron)}% del total · Ingresaron por error o no correspondía</div>
+        </div>
+
+        <div class="control-stat-card stat-no-advance">
+          <div class="control-stat-value">${stats.no_avanzaron}</div>
+          <div class="control-stat-title">No avanzaron</div>
+          <div class="control-stat-desc">${porcentaje(stats.no_avanzaron, stats.entraron)}% del total · Respondieron pero no llegaron a derivarse</div>
+        </div>
+
+        <div class="control-stat-card control-stat-highlight stat-derived">
+          <div class="control-stat-value">${stats.derivados}</div>
+          <div class="control-stat-title">Derivados</div>
+          <div class="control-stat-desc">${porcentaje(stats.derivados, stats.entraron)}% del total</div>
+        </div>
       </div>
 
       <div class="control-section">
