@@ -38,6 +38,8 @@ function puedeCerrar(usuarioSesion, prospecto) {
 }
 
 const ORIGEN_LABEL = {
+  meta: "📱 Meta",
+  google: "🌐 Google",
   "meta-pos-cliente": "📱 Meta",
   "google-pos-cliente": "🌐 Google",
   "prospecto-interno": "💬 Interno",

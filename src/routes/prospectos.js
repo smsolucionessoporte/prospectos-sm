@@ -1302,12 +1302,14 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
               <div class="detail-item"><span class="detail-label">Teléfono</span><span class="detail-val">${esc(p.telefono || "—")}</span></div>
               <div class="detail-item"><span class="detail-label">Email</span><span class="detail-val">${esc(p.email || "—")}</span></div>
               <div class="detail-item"><span class="detail-label">Origen</span><span class="detail-val">${
-                {
-                  manual: "Manual",
-                  "meta-pos-cliente": "📱 Meta",
-                  "google-pos-cliente": "🌐 Google",
-                  "prospecto-interno": "💬 Interno"
-                }                
+              {
+                manual: "Manual",
+                meta: "📱 Meta",
+                google: "🌐 Google",
+                "meta-pos-cliente": "📱 Meta",
+                "google-pos-cliente": "🌐 Google",
+                "prospecto-interno": "💬 Interno"
+              }           
                 [p.origen] || "—"}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ""}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} — ${esc(p.demo_resp_nombre || "—")}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ""}</span></div>` : ""}
               ${
@@ -3021,12 +3023,13 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
     const origenLabel =
       {
-      manual: "Manual",
-      "meta-pos-cliente": "📱 Meta",
-      "google-pos-cliente": "🌐 Google",
-      "prospecto-interno": "💬 Interno"
-      }[p.origen] || "—";
-
+        manual: "Manual",
+        meta: "📱 Meta",
+        google: "🌐 Google",
+        "meta-pos-cliente": "📱 Meta",
+        "google-pos-cliente": "🌐 Google",
+        "prospecto-interno": "💬 Interno"
+      }
     const responsableNombre = p.demo_resp_nombre || p.creado_por_nombre || "—";
 
     res.send(
