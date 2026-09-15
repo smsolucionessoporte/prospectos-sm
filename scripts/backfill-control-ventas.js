@@ -69,13 +69,18 @@ function esMensajeDeVendedor(m) {
 
 function esMensajeHandoff(m) {
   if (m.private || !esOutgoing(m)) return false;
+
+  // El handoff lo envía el bot. Nunca tomamos como marca de derivación
+  // un mensaje escrito por alguno de los vendedores medidos.
+  if (vendedorPorNombre(nombreRemitente(m))) return false;
+
   const t = normalizar(m.content || "");
   return (
     t.includes("ya te derivamos con un asesor") ||
     t.includes("te derivamos con un asesor") ||
     t.includes("te ponemos en contacto con un asesor") ||
     t.includes("derivamos con un asesor comercial") ||
-    t.includes("asesor comercial") && t.includes("a la brevedad")
+    (t.includes("asesor comercial") && t.includes("a la brevedad"))
   );
 }
 
@@ -164,11 +169,12 @@ async function procesarConversacion(c) {
     primeraRespuestaCliente || derivado || clasificacion,
   );
 
-  // La fecha histórica de derivación SOLO se considera confiable si encontramos
-  // el mensaje real de handoff del bot. No usamos first_reply_created_at.
-  const handoff = derivado
-    ? [...mensajes].reverse().find(esMensajeHandoff) || null
-    : null;
+  // La fecha histórica de derivación sale del mensaje REAL del bot que anuncia
+  // "Ya te derivamos con un asesor...". Si hubo más de un handoff, usamos el
+  // último: representa la derivación vigente y evita medir desde una derivación
+  // anterior. No usamos first_reply_created_at ni una fecha aproximada.
+  const handoffs = derivado ? mensajes.filter(esMensajeHandoff) : [];
+  const handoff = handoffs.length ? handoffs[handoffs.length - 1] : null;
   const fechaDerivacion = handoff ? fechaUnix(handoff.created_at) : null;
 
   let vendedor = null;
