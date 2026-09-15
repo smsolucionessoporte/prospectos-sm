@@ -866,8 +866,91 @@ function formatearMinutos(minutos) {
   return `${horas} h ${mins} min`;
 }
 
-router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
-  try {
+// HELPERS DE LAS CARDS DE CONTROL
+// Estas funciones solamente generan HTML.
+// No consultan la base de datos ni modifican información.
+
+function controlBreakdownTooltip(label, breakdown) {
+  // Armamos las líneas que se mostrarán al dejar
+  // el mouse sobre una card.
+
+  const lines = [];
+
+  // Solo agregamos una categoría si tiene registros.
+  if ((breakdown.meta || 0) > 0) {
+    lines.push(`Meta: ${breakdown.meta}`);
+  }
+
+  if ((breakdown.google || 0) > 0) {
+    lines.push(`Google: ${breakdown.google}`);
+  }
+
+  if ((breakdown.otro || 0) > 0) {
+    lines.push(`Sin identificar: ${breakdown.otro}`);
+  }
+
+  // Si no hay nada para mostrar, no ponemos tooltip.
+  if (!lines.length) {
+    return "";
+  }
+
+  return `${label}\n${lines.join("\n")}`;
+}
+
+
+function renderControlStatCard({
+  title,
+  value,
+  description = "",
+  cardClass = "",
+  eyebrow = "",
+  percentText = "",
+  tooltip = "",
+}) {
+  // Esta función recibe los datos de una card
+  // y devuelve el HTML correspondiente.
+
+  return `
+    <div
+      class="control-stat-card ${cardClass}"
+      ${tooltip ? `title="${tooltip.replace(/"/g, "&quot;")}"` : ""}
+    >
+      ${
+        eyebrow
+          ? `<div class="control-stat-eyebrow">${eyebrow}</div>`
+          : ""
+      }
+
+      <div class="control-stat-value">${value}</div>
+
+      <div class="control-stat-title">
+        ${title}
+      </div>
+
+      ${
+        percentText
+          ? `<div class="control-stat-percent">${percentText}</div>`
+          : ""
+      }
+
+      ${
+        description
+          ? `<div class="control-stat-desc">${description}</div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+
+
+// Control: admin + vendedores
+router.get("/control", requireAuth, requireRol("admin", "vendedor"), async (req, res) => {
+    try {
+    // Usuario actual
+    const usuarioControl = req.session.usuario;
+    const esAdminControl = usuarioControl.rol === "admin";
+    const esVendedorControl = usuarioControl.rol === "vendedor";
     const periodo = req.query.periodo || "30";
     let desde = null;
     let hasta = null;
@@ -898,6 +981,16 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
     }
     const filtro = condiciones.length ? condiciones.join(" AND ") : "TRUE";
 
+    // Filtro del usuario en Control
+const paramsControl = [...params];
+
+const filtroUsuarioControl = esAdminControl
+  ? "TRUE"
+  : (() => {
+      paramsControl.push(usuarioControl.id);
+      return `v.id = $${paramsControl.length}`;
+    })();
+
     const resumen = await pool.query(
       `
       SELECT
@@ -913,6 +1006,75 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
         )::int AS no_avanzaron,        
         COUNT(*) FILTER (WHERE cv.derivado = true)::int AS derivados
+        -- Desglose por origen: no respondieron
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = false
+            AND cv.origen = 'meta'
+        )::int AS no_respondieron_meta,
+
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = false
+            AND cv.origen = 'google'
+        )::int AS no_respondieron_google,
+
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = false
+            AND cv.origen = 'otro'
+        )::int AS no_respondieron_otro,
+
+        -- Desglose por origen: consultas erróneas
+        COUNT(*) FILTER (
+          WHERE cv.clasificacion = 'consulta_erronea'
+            AND cv.origen = 'meta'
+        )::int AS consultas_erroneas_meta,
+
+        COUNT(*) FILTER (
+          WHERE cv.clasificacion = 'consulta_erronea'
+            AND cv.origen = 'google'
+        )::int AS consultas_erroneas_google,
+
+        COUNT(*) FILTER (
+          WHERE cv.clasificacion = 'consulta_erronea'
+            AND cv.origen = 'otro'
+        )::int AS consultas_erroneas_otro,
+
+        -- Desglose por origen: no avanzaron
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = true
+            AND cv.derivado = false
+            AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
+            AND cv.origen = 'meta'
+        )::int AS no_avanzaron_meta,
+
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = true
+            AND cv.derivado = false
+            AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
+            AND cv.origen = 'google'
+        )::int AS no_avanzaron_google,
+
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = true
+            AND cv.derivado = false
+            AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
+            AND cv.origen = 'otro'
+        )::int AS no_avanzaron_otro,
+
+        -- Desglose por origen: derivados
+        COUNT(*) FILTER (
+          WHERE cv.derivado = true
+            AND cv.origen = 'meta'
+        )::int AS derivados_meta,
+
+        COUNT(*) FILTER (
+          WHERE cv.derivado = true
+            AND cv.origen = 'google'
+        )::int AS derivados_google,
+
+        COUNT(*) FILTER (
+          WHERE cv.derivado = true
+            AND cv.origen = 'otro'
+        )::int AS derivados_otro
       FROM control_ventas cv
       WHERE ${filtro}
       `,
@@ -973,11 +1135,13 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         ON cv.vendedor_id = v.id
       AND ${filtro}
 
-      GROUP BY v.id, v.nombre, v.orden
-      ORDER BY v.orden
-      `,
-      params,
-    );
+      WHERE ${filtroUsuarioControl}
+
+        GROUP BY v.id, v.nombre, v.orden
+        ORDER BY v.orden
+          `,
+    paramsControl,
+        );
 
     const alertasCandidatas = await pool.query(
       `
@@ -994,13 +1158,14 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         (11, 'Tomas Parcel')
       ) AS v(id, nombre) ON v.id = cv.vendedor_id
       WHERE ${filtro}
+        AND ${filtroUsuarioControl} -- vendedor: solo lo suyo
         AND cv.derivado = true
         AND cv.fecha_derivacion IS NOT NULL
         AND cv.fecha_primera_respuesta_vendedor IS NULL
       ORDER BY cv.fecha_derivacion ASC
       LIMIT 100
       `,
-      params,
+      paramsControl,
     );
 
     // "Necesitan atención" debe representar pendientes actuales
@@ -1071,84 +1236,136 @@ router.get("/control", requireAuth, requireRol("admin"), async (req, res) => {
         <button type="submit" name="periodo" value="personalizado" class="btn btn-secondary">Aplicar</button>
       </form>
 
-      <div class="control-stats-grid">
-        <div class="control-stat-card stat-total">
-          <div class="control-stat-value">${stats.entraron}</div>
-          <div class="control-stat-title">Entraron</div>
-          <div class="control-stat-desc">100% del total</div>
-        </div>
+${esAdminControl ? `
+  <!-- ADMIN: origen -->
+  <div class="control-mini-title">Origen de los contactos</div>
 
-        <div class="control-stat-card stat-meta">
-          <div class="control-stat-value">${stats.meta}</div>
-          <div class="control-stat-title">Meta</div>
-          <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total</div>
-        </div>
+  <div class="control-stats-grid control-stats-grid-four">
+    <div class="control-stat-card stat-total">
+      <div class="control-stat-value">${stats.entraron}</div>
+      <div class="control-stat-title">Entraron</div>
+      <div class="control-stat-desc">100% del total</div>
+    </div>
 
-        <div class="control-stat-card stat-google">
-          <div class="control-stat-value">${stats.google}</div>
-          <div class="control-stat-title">Google</div>
-          <div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div>
-        </div>
+    <div class="control-stat-card stat-meta">
+      <div class="control-stat-value">${stats.meta}</div>
+      <div class="control-stat-title">Meta</div>
+      <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total</div>
+    </div>
 
-        <div class="control-stat-card stat-other">
-          <div class="control-stat-value">${stats.sin_identificar || 0}</div>
-          <div class="control-stat-title">Sin identificar</div>
-          <div class="control-stat-desc">${porcentaje(stats.sin_identificar || 0, stats.entraron)}% del total</div>
-        </div>
+    <div class="control-stat-card stat-google">
+      <div class="control-stat-value">${stats.google}</div>
+      <div class="control-stat-title">Google</div>
+      <div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div>
+    </div>
 
-        <div class="control-stat-card stat-no-response">
-          <div class="control-stat-value">${stats.no_respondieron}</div>
-          <div class="control-stat-title">No respondieron</div>
-          <div class="control-stat-desc">${porcentaje(stats.no_respondieron, stats.entraron)}% del total · No contestaron el primer mensaje</div>
-        </div>
+    <div class="control-stat-card stat-other">
+      <div class="control-stat-value">${stats.sin_identificar || 0}</div>
+      <div class="control-stat-title">Sin identificar</div>
+      <div class="control-stat-desc">${porcentaje(stats.sin_identificar || 0, stats.entraron)}% del total</div>
+    </div>
+  </div>
 
-        <div class="control-stat-card stat-error">
-          <div class="control-stat-prefix">Al menos</div>
-          <div class="control-stat-value">${stats.consultas_erroneas}</div>
-          <div class="control-stat-title">Consultas erróneas</div>
-          <div class="control-stat-desc">${porcentaje(stats.consultas_erroneas, stats.entraron)}% del total · Ingresaron por error o no correspondía</div>
-        </div>
+  <!-- ADMIN: resultado -->
+  <div class="control-mini-title">Resultado del contacto</div>
 
-        <div class="control-stat-card stat-no-advance">
-          <div class="control-stat-value">${stats.no_avanzaron}</div>
-          <div class="control-stat-title">No avanzaron</div>
-          <div class="control-stat-desc">${porcentaje(stats.no_avanzaron, stats.entraron)}% del total · Respondieron pero no llegaron a derivarse</div>
-        </div>
+  <div class="control-stats-grid control-stats-grid-four">
+    <div
+      class="control-stat-card stat-no-response"
+      title="${controlBreakdownTooltip("No respondieron", {
+        meta: stats.no_respondieron_meta,
+        google: stats.no_respondieron_google,
+        otro: stats.no_respondieron_otro
+      })}">
+      <div class="control-stat-value">${stats.no_respondieron}</div>
+      <div class="control-stat-title">No respondieron</div>
+      <div class="control-stat-desc">${porcentaje(stats.no_respondieron, stats.entraron)}% del total · No contestaron el primer mensaje</div>
+    </div>
 
-        <div class="control-stat-card control-stat-highlight stat-derived">
-          <div class="control-stat-value">${stats.derivados}</div>
-          <div class="control-stat-title">Derivados</div>
-          <div class="control-stat-desc">${porcentaje(stats.derivados, stats.entraron)}% del total</div>
-        </div>
+      <div
+        class="control-stat-card stat-error"
+        title="${controlBreakdownTooltip("Consultas erróneas", {
+          meta: stats.consultas_erroneas_meta,
+          google: stats.consultas_erroneas_google,
+          otro: stats.consultas_erroneas_otro
+        })}"
+      >
+      <div class="control-stat-prefix">Al menos</div>
+      <div class="control-stat-value">${stats.consultas_erroneas}</div>
+      <div class="control-stat-title">Consultas erróneas</div>
+      <div class="control-stat-desc">${porcentaje(stats.consultas_erroneas, stats.entraron)}% del total · Ingresaron por error o no correspondía</div>
+    </div>
+
+      <div
+        class="control-stat-card stat-no-advance"
+        title="${controlBreakdownTooltip("No avanzaron", {
+          meta: stats.no_avanzaron_meta,
+          google: stats.no_avanzaron_google,
+          otro: stats.no_avanzaron_otro
+        })}"
+      >
+      <div class="control-stat-value">${stats.no_avanzaron}</div>
+      <div class="control-stat-title">No avanzaron</div>
+      <div class="control-stat-desc">${porcentaje(stats.no_avanzaron, stats.entraron)}% del total · Respondieron pero no llegaron a derivarse</div>
+    </div>
+
+      <div
+        class="control-stat-card control-stat-highlight stat-derived"
+        title="${controlBreakdownTooltip("Derivados", {
+          meta: stats.derivados_meta,
+          google: stats.derivados_google,
+          otro: stats.derivados_otro
+        })}"
+      >
+      <div class="control-stat-value">${stats.derivados}</div>
+      <div class="control-stat-title">Derivados</div>
+      <div class="control-stat-desc">${porcentaje(stats.derivados, stats.entraron)}% del total</div>
+    </div>
+  </div>
+` : `
+  <!-- VENDEDOR: solo promedio propio -->
+  <div class="control-mini-title">Mi atención comercial</div>
+
+  <div class="control-stats-grid control-stats-grid-four">
+    <div class="control-stat-card stat-total">
+      <div class="control-stat-value">
+        ${formatearMinutos(rendimiento.rows[0]?.promedio_minutos)}
       </div>
+      <div class="control-stat-title">Promedio de respuesta</div>
+      <div class="control-stat-desc">Tiempo promedio hasta tu primera respuesta</div>
+    </div>
+  </div>
+`}
 
-      <div class="control-section">
-        <div class="control-section-header">
-          <div>
-            <h2>Respuesta de vendedores</h2>
-            <p>
-              Tiempo desde la derivación hasta la primera respuesta del vendedor.
-            </p>
-          </div>
-        </div>
-
-        <div class="control-performance-wrap">
-          <table class="control-performance-table">
-            <thead>
-              <tr>
-                <th>Vendedor</th>
-                <th>Derivados</th>
-                <th>Respondidos</th>
-                <th>Pendientes</th>
-                <th>Promedio respuesta</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filasRendimiento}
-            </tbody>
-          </table>
-        </div>
+${esAdminControl ? `
+  <div class="control-section">
+    <div class="control-section-header">
+      <div>
+        <h2>Respuesta de vendedores</h2>
+        <p>
+          Tiempo desde la derivación hasta la primera respuesta del vendedor.
+        </p>
       </div>
+    </div>
+
+    <div class="control-performance-wrap">
+      <table class="control-performance-table">
+        <thead>
+          <tr>
+            <th>Vendedor</th>
+            <th>Derivados</th>
+            <th>Respondidos</th>
+            <th>Pendientes</th>
+            <th>Promedio respuesta</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filasRendimiento}
+        </tbody>
+      </table>
+    </div>
+  </div>
+` : ""}
 
       <div class="control-section">
         <div class="control-section-header">
