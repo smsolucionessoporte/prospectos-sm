@@ -175,7 +175,36 @@ async function obtenerMensajes(conversationId) {
   return todos;
 }
 
+function esConversacionInterna(c) {
+  const sender = c.meta?.sender || {};
+
+  const nombre = normalizar(sender.name || "");
+  const identifier = normalizar(sender.identifier || "");
+
+  const nombresInternos = [
+    "marisol rodriguez",
+    "rafael altadonna",
+    "giuliano carabajal",
+    "daniel gonzalez",
+    "tomas parcel",
+    "sm ventas (group)",
+  ];
+
+  if (nombresInternos.some((n) => nombre === normalizar(n))) {
+    return true;
+  }
+
+  // Los grupos de WhatsApp suelen identificarse como @g.us.
+  if (identifier.includes("@g.us")) {
+    return true;
+  }
+
+  return false;
+}
+
 async function procesarConversacion(c) {
+const id = Number(c.id);
+
 const labels = Array.isArray(c.labels) ? c.labels : [];
 
 const fechaIngreso = fechaUnix(c.created_at) || new Date();
@@ -343,6 +372,15 @@ async function main() {
   let noAvanzaron = 0;
 
   for (const conversacion of conversaciones) {
+            if (esConversacionInterna(conversacion)) {
+        console.log(
+            `OMITIDA #${conversacion.id} | conversación interna | ${
+            conversacion.meta?.sender?.name || "—"
+            }`,
+        );
+        continue;
+        }
+
     try {
       const r = await procesarConversacion(conversacion);
       procesadas++;
