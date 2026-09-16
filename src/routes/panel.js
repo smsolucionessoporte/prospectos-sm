@@ -37,11 +37,15 @@ function puedeCerrar(usuarioSesion, prospecto) {
   return true;
 }
 
+// Origen: valores nuevos + históricos
 const ORIGEN_LABEL = {
   meta: "📱 Meta",
   google: "🌐 Google",
+  otro: "—",
+
   "meta-pos-cliente": "📱 Meta",
   "google-pos-cliente": "🌐 Google",
+
   "prospecto-interno": "💬 Interno",
   manual: "Manual",
 };
@@ -1005,7 +1009,7 @@ const filtroUsuarioControl = esAdminControl
             AND cv.derivado = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
         )::int AS no_avanzaron,        
-        COUNT(*) FILTER (WHERE cv.derivado = true)::int AS derivados
+        COUNT(*) FILTER (WHERE cv.derivado = true)::int AS derivados,
         -- Desglose por origen: no respondieron
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = false

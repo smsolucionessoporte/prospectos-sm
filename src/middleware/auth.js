@@ -41,11 +41,15 @@ ${u ? `
         <i class="ti ti-layout-dashboard"></i> Panel
       </a>
 
-      ${u.rol === 'admin' ? `
-        <a href="/control" class="nav-link${req.path.startsWith('/control') ? ' active' : ''}">
-          <i class="ti ti-chart-bar"></i> Control
-        </a>
-      ` : ''}
+        ${u.rol === 'admin' || u.rol === 'vendedor' ? `
+          <a href="/control" class="nav-link${req.path.startsWith('/control') ? ' active' : ''}">
+            ${u.rol === 'vendedor'
+              ? '🔔'
+              : '<i class="ti ti-chart-bar"></i>'
+            }
+            Control
+          </a>
+        ` : ''}
 
       <a href="/prospectos/nuevo" class="nav-link${req.path.startsWith('/prospectos/nuevo') ? ' active' : ''}">
         <i class="ti ti-user-plus"></i> Nuevo
