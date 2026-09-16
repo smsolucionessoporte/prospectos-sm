@@ -41,7 +41,6 @@ ${u ? `
         <i class="ti ti-layout-dashboard"></i> Panel
       </a>
 
-        // Control: admin normal / vendedor con campanita
         ${u.rol === "admin" || u.rol === "vendedor" ? `
           <a
             href="/control"
