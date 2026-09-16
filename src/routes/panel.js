@@ -349,9 +349,6 @@ router.get("/panel", requireAuth, async (req, res) => {
         <div>
           <h1 class="page-title">Panel de prospectos</h1>
         </div>
-        <a href="/prospectos/nuevo" class="btn btn-primary">
-          <i class="ti ti-user-plus"></i> Nuevo prospecto
-        </a>
       </div>
 
       <div class="filter-bar">
@@ -1153,6 +1150,8 @@ const filtroUsuarioControl = esAdminControl
         cv.chatwoot_conversation_id,
         v.nombre AS vendedor,
         cv.fecha_derivacion,
+        p.contacto,
+        p.telefono,
         FLOOR(EXTRACT(EPOCH FROM (NOW() - cv.fecha_derivacion)) / 60)::int AS minutos_espera
       FROM control_ventas cv
       JOIN (VALUES
@@ -1161,6 +1160,10 @@ const filtroUsuarioControl = esAdminControl
         (7,  'Daniel Gonzalez'),
         (11, 'Tomas Parcel')
       ) AS v(id, nombre) ON v.id = cv.vendedor_id
+       -- Datos del prospecto
+      LEFT JOIN prospectos p
+        ON p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+        
       WHERE ${filtro}
         AND ${filtroUsuarioControl} -- vendedor: solo lo suyo
         AND cv.derivado = true
@@ -1210,8 +1213,16 @@ const filtroUsuarioControl = esAdminControl
       ? alertasActuales.map((a) => `
           <div class="control-alert-item">
             <div>
-              <strong>Conversación #${a.chatwoot_conversation_id}</strong>
-              <div class="control-alert-sub">Responsable: ${a.vendedor}</div>
+            <strong>${esc(a.contacto || `Conversación #${a.chatwoot_conversation_id}`)}</strong>
+
+            <div class="control-alert-sub">
+              ${a.telefono ? `📞 ${esc(a.telefono)} · ` : ""}
+              Conversación #${a.chatwoot_conversation_id}
+            </div>
+
+            <div class="control-alert-sub">
+              Responsable: ${esc(a.vendedor)}
+            </div>
             </div>
             <div class="control-alert-time">${tiempo(a.minutos_espera)} sin respuesta</div>
           </div>
