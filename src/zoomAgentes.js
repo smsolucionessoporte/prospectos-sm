@@ -26,6 +26,8 @@ const AGENTE_CHATWOOT_ID = {
   5: 10,  // Román
   13: 11, // Tomás
   11: 12, // Giuliano
+  19: 13, // Santiago
+
 };
 
 const AGENTE_INBOX = {
