@@ -4,19 +4,13 @@ const { pool } = require("../src/db");
 const CHATWOOT_URL = process.env.CHATWOOT_URL;
 const CHATWOOT_ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID;
 const CHATWOOT_API_TOKEN = process.env.CHATWOOT_API_TOKEN;
+const INBOX_ID = Number(process.env.CHATWOOT_INBOX_ID_VENTAS);
 
-async function getConversation(conversationId) {
-  const response = await axios.get(
-    `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}`,
-    {
-      headers: {
-        api_access_token: CHATWOOT_API_TOKEN,
-      },
-    },
-  );
+const FIX = process.argv.includes("--fix");
 
-  return response.data;
-}
+const headers = {
+  api_access_token: CHATWOOT_API_TOKEN,
+};
 
 function normalizarOrigenProspecto(origen) {
   if (origen === "google-pos-cliente") return "google";
@@ -24,75 +18,170 @@ function normalizarOrigenProspecto(origen) {
   return origen;
 }
 
-function detectarOrigenEtiquetas(labels) {
-  const normalized = labels.map((label) =>
-    String(label).toLowerCase(),
+function detectarOrigen(labels) {
+  const normalized = labels.map((x) =>
+    String(x).toLowerCase(),
   );
 
-  const hasGoogle =
-    normalized.includes("google-pos-cliente");
+  const google = normalized.includes("google-pos-cliente");
+  const meta = normalized.includes("meta-pos-cliente");
+  const interno = normalized.includes("prospecto-interno");
+  const auditar = normalized.includes("auditar-origen");
 
-  const hasMeta =
-    normalized.includes("meta-pos-cliente");
+  /*
+   * Google/Meta + auditar es un conflicto corregible:
+   * ya conocemos el origen, por lo que auditar debe eliminarse.
+   */
+  if (google && auditar && !meta && !interno) {
+    return {
+      tipo: "conflicto-auditar",
+      origen: "google",
+    };
+  }
 
-  const hasInterno =
-    normalized.includes("prospecto-interno");
+  if (meta && auditar && !google && !interno) {
+    return {
+      tipo: "conflicto-auditar",
+      origen: "meta",
+    };
+  }
 
-  const hasAuditar =
-    normalized.includes("auditar-origen");
-
-  const categorias = [
-    hasGoogle ? "google" : null,
-    hasMeta ? "meta" : null,
-    hasInterno ? "prospecto-interno" : null,
-    hasAuditar ? "auditar-origen" : null,
+  const origenesDefinitivos = [
+    google ? "google" : null,
+    meta ? "meta" : null,
+    interno ? "prospecto-interno" : null,
   ].filter(Boolean);
 
-  if (categorias.length > 1) {
+  if (origenesDefinitivos.length > 1) {
     return {
       tipo: "conflicto",
-      valor: categorias.join(" + "),
+      origen: origenesDefinitivos.join(" + "),
     };
   }
 
-  if (hasGoogle) {
-    return { tipo: "origen", valor: "google" };
+  if (google) {
+    return { tipo: "definitivo", origen: "google" };
   }
 
-  if (hasMeta) {
-    return { tipo: "origen", valor: "meta" };
+  if (meta) {
+    return { tipo: "definitivo", origen: "meta" };
   }
 
-  if (hasInterno) {
+  if (interno) {
     return {
-      tipo: "origen",
-      valor: "prospecto-interno",
+      tipo: "definitivo",
+      origen: "prospecto-interno",
     };
   }
 
-  if (hasAuditar) {
+  if (auditar) {
     return {
       tipo: "auditar",
-      valor: "auditar-origen",
+      origen: "auditar-origen",
     };
   }
 
   return {
     tipo: "sin-clasificacion",
-    valor: null,
+    origen: null,
   };
+}
+
+async function getConversacionesVentas() {
+  const conversaciones = [];
+
+  let page = 1;
+
+  while (true) {
+    const response = await axios.get(
+      `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations`,
+      {
+        headers,
+        params: {
+          inbox_id: INBOX_ID,
+          status: "all",
+          page,
+        },
+      },
+    );
+
+    const data = response.data;
+
+    const payload = Array.isArray(data?.data?.payload)
+      ? data.data.payload
+      : Array.isArray(data?.payload)
+        ? data.payload
+        : [];
+
+    if (!payload.length) {
+      break;
+    }
+
+    for (const conversation of payload) {
+      const inboxId =
+        conversation.inbox_id ??
+        conversation.inbox?.id ??
+        null;
+
+      if (Number(inboxId) === INBOX_ID) {
+        conversaciones.push(conversation);
+      }
+    }
+
+    page++;
+
+    if (page > 100) {
+      throw new Error(
+        "Se alcanzó el límite de páginas de Chatwoot",
+      );
+    }
+  }
+
+  return conversaciones;
+}
+
+async function quitarAuditarOrigen(conversationId) {
+  const response = await axios.get(
+    `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/labels`,
+    { headers },
+  );
+
+  const data = response.data;
+
+  let labels = [];
+
+  if (Array.isArray(data)) labels = data;
+  else if (Array.isArray(data?.payload)) labels = data.payload;
+  else if (Array.isArray(data?.labels)) labels = data.labels;
+
+  const nuevas = labels.filter(
+    (label) =>
+      String(label).toLowerCase() !== "auditar-origen",
+  );
+
+  await axios.post(
+    `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/labels`,
+    {
+      labels: nuevas,
+    },
+    { headers },
+  );
 }
 
 async function main() {
   if (
     !CHATWOOT_URL ||
     !CHATWOOT_ACCOUNT_ID ||
-    !CHATWOOT_API_TOKEN
+    !CHATWOOT_API_TOKEN ||
+    !INBOX_ID
   ) {
     throw new Error(
-      "Faltan CHATWOOT_URL, CHATWOOT_ACCOUNT_ID o CHATWOOT_API_TOKEN",
+      "Faltan variables de Chatwoot o CHATWOOT_INBOX_ID_VENTAS",
     );
   }
+
+  const conversaciones =
+    await getConversacionesVentas();
 
   const controlResult = await pool.query(`
     SELECT
@@ -107,280 +196,282 @@ async function main() {
     SELECT
       id,
       contacto,
-      telefono,
       origen,
       chatwoot_conversation_id
     FROM prospectos
     WHERE chatwoot_conversation_id IS NOT NULL
   `);
 
-  const controlMap = new Map();
-
-  for (const row of controlResult.rows) {
-    controlMap.set(
+  const controlMap = new Map(
+    controlResult.rows.map((row) => [
       Number(row.chatwoot_conversation_id),
       row,
-    );
-  }
+    ]),
+  );
 
-  const prospectosMap = new Map();
-
-  for (const row of prospectosResult.rows) {
-    prospectosMap.set(
+  const prospectosMap = new Map(
+    prospectosResult.rows.map((row) => [
       Number(row.chatwoot_conversation_id),
       row,
-    );
-  }
+    ]),
+  );
 
-  const conversationIds = new Set([
-    ...controlMap.keys(),
-    ...prospectosMap.keys(),
-  ]);
-
-  let revisadas = 0;
   let correctas = 0;
   let diferenciasControl = 0;
   let diferenciasProspectos = 0;
+  let faltanControl = 0;
   let pendientesAuditar = 0;
   let sinClasificacion = 0;
   let conflictos = 0;
-  let errores = 0;
+  let corregidas = 0;
 
-  const resultados = [];
+  const revisar = [];
 
-  for (const conversationId of conversationIds) {
-    try {
-const conversation = await getConversation(conversationId);
+  for (const conversation of conversaciones) {
+    const id = Number(conversation.id);
 
-const inboxId =
-  conversation?.inbox_id ??
-  conversation?.inbox?.id ??
-  null;
+    const labels = Array.isArray(conversation.labels)
+      ? conversation.labels
+      : [];
 
-// whatsapp-ventas
-if (Number(inboxId) !== Number(process.env.CHATWOOT_INBOX_ID_VENTAS)) {
-  continue;
-}
+    const estado = detectarOrigen(labels);
 
-const labels = Array.isArray(conversation.labels)
-  ? conversation.labels
-  : [];
-      const deteccion =
-        detectarOrigenEtiquetas(labels);
+    const control = controlMap.get(id) ?? null;
+    const prospecto = prospectosMap.get(id) ?? null;
 
-      const control =
-        controlMap.get(conversationId) ?? null;
+    /*
+     * Google/Meta + auditar:
+     * sabemos el origen; auditar es sobrante.
+     */
+    if (estado.tipo === "conflicto-auditar") {
+      conflictos++;
 
-      const prospecto =
-        prospectosMap.get(conversationId) ?? null;
-
-      revisadas++;
-
-      if (deteccion.tipo === "conflicto") {
-        conflictos++;
-
-        resultados.push({
-          conversacion: conversationId,
-          problema: "CONFLICTO ETIQUETAS",
-          chatwoot: deteccion.valor,
+      if (FIX) {
+        await quitarAuditarOrigen(id);
+        corregidas++;
+      } else {
+        revisar.push({
+          conversacion: id,
+          problema: "QUITAR AUDITAR-ORIGEN",
+          chatwoot: estado.origen,
           control: control?.origen ?? "NO EXISTE",
           prospectos:
             prospecto?.origen ?? "NO EXISTE",
           etiquetas: labels.join(", "),
         });
-
-        continue;
       }
 
-      if (deteccion.tipo === "auditar") {
-        pendientesAuditar++;
+      /*
+       * Seguimos comprobando las bases usando el
+       * origen definitivo que ya conocemos.
+       */
+    } else if (estado.tipo === "conflicto") {
+      conflictos++;
 
-        resultados.push({
-          conversacion: conversationId,
-          problema: "PENDIENTE AUDITAR",
-          chatwoot: "auditar-origen",
-          control: control?.origen ?? "NO EXISTE",
+      revisar.push({
+        conversacion: id,
+        problema: "CONFLICTO DE ORIGEN",
+        chatwoot: estado.origen,
+        control: control?.origen ?? "NO EXISTE",
+        prospectos:
+          prospecto?.origen ?? "NO EXISTE",
+        etiquetas: labels.join(", "),
+      });
+
+      continue;
+    }
+
+    if (estado.tipo === "auditar") {
+      pendientesAuditar++;
+
+      revisar.push({
+        conversacion: id,
+        problema: "PENDIENTE AUDITAR",
+        chatwoot: "auditar-origen",
+        control: control?.origen ?? "NO EXISTE",
+        prospectos:
+          prospecto?.origen ?? "NO EXISTE",
+        etiquetas: labels.join(", "),
+      });
+
+      continue;
+    }
+
+    if (estado.tipo === "sin-clasificacion") {
+      sinClasificacion++;
+
+      revisar.push({
+        conversacion: id,
+        problema: "SIN CLASIFICACION",
+        chatwoot: "SIN ETIQUETA",
+        control: control?.origen ?? "NO EXISTE",
+        prospectos:
+          prospecto?.origen ?? "NO EXISTE",
+        etiquetas: labels.join(", "),
+      });
+
+      continue;
+    }
+
+    const origenChatwoot = estado.origen;
+
+    let error = false;
+
+    /*
+     * CONTROL / ESTADÍSTICAS
+     *
+     * Google y Meta deben coincidir sí o sí.
+     */
+    if (
+      origenChatwoot === "google" ||
+      origenChatwoot === "meta"
+    ) {
+      if (!control) {
+        faltanControl++;
+        error = true;
+
+        revisar.push({
+          conversacion: id,
+          problema: "FALTA EN CONTROL",
+          chatwoot: origenChatwoot,
+          control: "NO EXISTE",
           prospectos:
             prospecto?.origen ?? "NO EXISTE",
           etiquetas: labels.join(", "),
         });
+      } else if (control.origen !== origenChatwoot) {
+        diferenciasControl++;
+        error = true;
 
-        continue;
-      }
-
-      if (
-        deteccion.tipo === "sin-clasificacion"
-      ) {
-        sinClasificacion++;
-
-        resultados.push({
-          conversacion: conversationId,
-          problema: "SIN CLASIFICACION",
-          chatwoot: "SIN ETIQUETA",
-          control: control?.origen ?? "NO EXISTE",
-          prospectos:
-            prospecto?.origen ?? "NO EXISTE",
-          etiquetas: labels.join(", "),
-        });
-
-        continue;
-      }
-
-      const origenChatwoot = deteccion.valor;
-
-      let tieneError = false;
-
-      // ─── CONTROL / ESTADÍSTICAS ───────────────────────
-      if (control) {
-        if (
-          origenChatwoot === "google" ||
-          origenChatwoot === "meta"
-        ) {
-          if (control.origen !== origenChatwoot) {
-            diferenciasControl++;
-            tieneError = true;
-
-            resultados.push({
-              conversacion: conversationId,
-              problema: "CONTROL",
-              chatwoot: origenChatwoot,
-              control: control.origen ?? "NULL",
-              prospectos:
-                prospecto?.origen ?? "NO EXISTE",
-              etiquetas: labels.join(", "),
-            });
-          }
-        }
-
-        if (
-          origenChatwoot === "prospecto-interno"
-        ) {
-          // Internos no necesitan tener origen Google/Meta en Control.
-          // No se marca error por ausencia o por no existir.
-        }
-      }
-
-      // ─── PROSPECTOS / PANEL ────────────────────────────
-      if (prospecto) {
-        const origenProspecto =
-          normalizarOrigenProspecto(
-            prospecto.origen,
+        if (FIX) {
+          await pool.query(
+            `
+            UPDATE control_ventas
+            SET origen = $2,
+                actualizado_en = NOW()
+            WHERE chatwoot_conversation_id = $1
+            `,
+            [id, origenChatwoot],
           );
 
-        if (
-          origenChatwoot === "google" ||
-          origenChatwoot === "meta"
-        ) {
-          if (
-            origenProspecto !== origenChatwoot
-          ) {
-            diferenciasProspectos++;
-            tieneError = true;
-
-            resultados.push({
-              conversacion: conversationId,
-              problema: "PROSPECTOS",
-              chatwoot: origenChatwoot,
-              control:
-                control?.origen ?? "NO EXISTE",
-              prospectos:
-                prospecto.origen ?? "NULL",
-              etiquetas: labels.join(", "),
-            });
-          }
+          corregidas++;
+        } else {
+          revisar.push({
+            conversacion: id,
+            problema: "CONTROL / ESTADISTICAS",
+            chatwoot: origenChatwoot,
+            control: control.origen ?? "NULL",
+            prospectos:
+              prospecto?.origen ?? "NO EXISTE",
+            etiquetas: labels.join(", "),
+          });
         }
+      }
+    }
 
-        if (
-          origenChatwoot ===
-            "prospecto-interno" &&
-          origenProspecto !==
-            "prospecto-interno"
-        ) {
-          diferenciasProspectos++;
-          tieneError = true;
+    /*
+     * PROSPECTOS / PANEL
+     *
+     * Solo lo comprobamos si el prospecto existe.
+     * No creamos prospectos desde el auditor.
+     */
+    if (prospecto) {
+      const origenActual =
+        normalizarOrigenProspecto(prospecto.origen);
 
-          resultados.push({
-            conversacion: conversationId,
-            problema: "PROSPECTOS INTERNO",
-            chatwoot: "prospecto-interno",
-            control:
-              control?.origen ?? "NO EXISTE",
+      if (origenActual !== origenChatwoot) {
+        diferenciasProspectos++;
+        error = true;
+
+        if (FIX) {
+          const nuevoOrigen =
+            origenChatwoot === "google"
+              ? "google"
+              : origenChatwoot === "meta"
+                ? "meta"
+                : "prospecto-interno";
+
+          await pool.query(
+            `
+            UPDATE prospectos
+            SET origen = $2,
+                actualizado_en = NOW()
+            WHERE chatwoot_conversation_id = $1
+            `,
+            [id, nuevoOrigen],
+          );
+
+          corregidas++;
+        } else {
+          revisar.push({
+            conversacion: id,
+            problema: "PROSPECTOS / PANEL",
+            chatwoot: origenChatwoot,
+            control: control?.origen ?? "NO EXISTE",
             prospectos:
               prospecto.origen ?? "NULL",
             etiquetas: labels.join(", "),
           });
         }
       }
+    }
 
-      if (!tieneError) {
-        correctas++;
-      }
-    } catch (err) {
-      errores++;
-
-      resultados.push({
-        conversacion: conversationId,
-        problema: "ERROR",
-        chatwoot: "",
-        control:
-          controlMap.get(conversationId)
-            ?.origen ?? "NO EXISTE",
-        prospectos:
-          prospectosMap.get(conversationId)
-            ?.origen ?? "NO EXISTE",
-        etiquetas:
-          err.response?.status
-            ? `HTTP ${err.response.status}`
-            : err.message,
-      });
+    if (!error) {
+      correctas++;
     }
   }
 
   console.log(
-    "\n===== AUDITORÍA INTEGRAL DE ORÍGENES ====="
+    "\n===== AUDITORÍA TOTAL WHATSAPP-VENTAS =====",
   );
 
   console.log(
-    `Conversaciones revisadas: ${revisadas}`
+    `Conversaciones Chatwoot inbox ${INBOX_ID}: ${conversaciones.length}`,
   );
 
   console.log(`Correctas: ${correctas}`);
 
   console.log(
-    `Diferencias Control/Estadísticas: ${diferenciasControl}`
+    `Diferencias Control/Estadísticas: ${diferenciasControl}`,
   );
 
   console.log(
-    `Diferencias Prospectos/Panel: ${diferenciasProspectos}`
+    `Diferencias Prospectos/Panel: ${diferenciasProspectos}`,
+  );
+
+  console.log(`Faltan en Control: ${faltanControl}`);
+
+  console.log(
+    `Pendientes auditar origen: ${pendientesAuditar}`,
   );
 
   console.log(
-    `Pendientes auditar origen: ${pendientesAuditar}`
+    `Sin clasificación de origen: ${sinClasificacion}`,
   );
 
   console.log(
-    `Sin clasificación de origen: ${sinClasificacion}`
+    `Conflictos de etiquetas: ${conflictos}`,
   );
 
-  console.log(
-    `Conflictos de etiquetas: ${conflictos}`
-  );
+  if (FIX) {
+    console.log(`Correcciones realizadas: ${corregidas}`);
+  }
 
-  console.log(`Errores: ${errores}`);
-
-  if (resultados.length) {
+  if (revisar.length) {
     console.log("\n===== REVISAR =====\n");
-    console.table(resultados);
+    console.table(revisar);
   } else {
     console.log(
-      "\nTodo coincide correctamente entre Chatwoot, Control y Prospectos."
+      "\nNo quedaron inconsistencias para revisar.",
     );
   }
 }
 
 main()
   .catch((err) => {
-    console.error(err);
+    console.error(
+      err.response?.data || err,
+    );
     process.exitCode = 1;
   })
   .finally(async () => {
