@@ -5,7 +5,13 @@ const { pool } = require('../db');
 const { layout } = require('../middleware/auth');
 
 router.get('/login', (req, res) => {
-  if (req.session?.usuario) return res.redirect('/panel');
+  if (req.session?.usuario) {
+    return res.redirect(
+      req.session.usuario.rol === "control"
+        ? "/control"
+        : "/panel"
+    );
+  }
   const next = req.query.next || '/panel';
   const error = req.query.error;
   res.send(layout('Iniciar sesión', `
@@ -47,8 +53,13 @@ router.post('/login', async (req, res) => {
       return res.redirect('/login?error=Email+o+contraseña+incorrectos');
     }
 req.session.usuario = { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol };
-const destino = (next && next.startsWith('/')) ? next : '/panel';
-req.session.save(() => res.redirect(destino));
+    const destino =
+      user.rol === "control"
+        ? "/control"
+        : (next && next.startsWith("/"))
+          ? next
+          : "/panel";
+      req.session.save(() => res.redirect(destino));
   } catch (err) {
     console.error(err);
     res.redirect('/login?error=Error+interno,+intentá+de+nuevo');

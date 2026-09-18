@@ -3217,11 +3217,24 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
             <div class="grid2">
               <div class="field">
                 <label>Origen</label>
-                <input
-                  type="text"
-                  value="${esc(origenLabel)}"
-                  disabled
-                >
+                ${
+                  req.session.usuario.rol === "admin"
+                    ? `
+                      <select name="origen">
+                        <option value="google" ${p.origen === "google" || p.origen === "google-pos-cliente" ? "selected" : ""}>Google</option>
+                        <option value="meta" ${p.origen === "meta" || p.origen === "meta-pos-cliente" ? "selected" : ""}>Meta</option>
+                        <option value="prospecto-interno" ${p.origen === "prospecto-interno" ? "selected" : ""}>Referido / Interno</option>
+                        <option value="sin-identificar" ${p.origen === "sin-identificar" ? "selected" : ""}>Sin identificar</option>
+                      </select>
+                    `
+                    : `
+                      <input
+                        type="text"
+                        value="${esc(ORIGEN_LABEL[p.origen] || p.origen || "—")}"
+                        readonly
+                      >
+                    `
+                }
               </div>
 
               <div class="field">
@@ -3725,6 +3738,26 @@ router.post("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
     const actual = curRows[0];
 
+    let nuevoOrigen = actual.origen;
+
+if (
+  req.session.usuario.rol === "admin" &&
+  b.origen
+) {
+  const origenesValidos = [
+    "google",
+    "meta",
+    "prospecto-interno",
+    "sin-identificar",
+  ];
+
+  if (!origenesValidos.includes(b.origen)) {
+    return res.status(400).send("Origen no válido");
+  }
+
+  nuevoOrigen = b.origen;
+}
+
     let cambioEstado = null;
 
     if (
@@ -3951,6 +3984,36 @@ let cambioResponsable = null;
           ],
         );
       }
+
+      if (
+  req.session.usuario.rol === "admin" &&
+  nuevoOrigen !== actual.origen
+) {
+  await pool.query(
+    `
+    UPDATE prospectos
+    SET origen = $1,
+        actualizado_en = NOW()
+    WHERE id = $2
+    `,
+    [nuevoOrigen, req.params.id],
+  );
+
+  await pool.query(
+    `
+    INSERT INTO historial_estados
+      (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+    VALUES ($1,$2,$2,$3,$4)
+    `,
+    [
+      req.params.id,
+      actual.estado,
+      req.session.usuario.id,
+      `Origen cambiado de ${actual.origen || "sin definir"} a ${nuevoOrigen}`,
+    ],
+  );
+}
+
 
         if (cambioResponsable) {
       if (cambioResponsable.usaDemoResponsable) {
