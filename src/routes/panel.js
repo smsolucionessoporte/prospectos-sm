@@ -1422,7 +1422,7 @@ paramsResumenVendedores,
           <td class="control-number" data-label="Demo realizada">
             <strong>${r.demos_realizadas}</strong>
             <span class="control-table-percent">
-            ${porcentajeEmbudo(r.demos_realizadas, r.derivados)}%            
+            (${porcentajeEmbudo(r.demos_realizadas, r.derivados)}%)           
             </span>
           </td>
 
