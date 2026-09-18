@@ -764,3 +764,93 @@ textarea { resize: vertical; min-height: 72px; }
     flex: 0 0 auto;
   }
 }
+
+/* Cards de resultado con detalle de origen */
+.control-flip-card {
+  padding: 0;
+  min-height: 170px;
+  perspective: 1000px;
+  cursor: pointer;
+  overflow: visible;
+}
+
+.control-flip-inner {
+  position: relative;
+  width: 100%;
+  min-height: 170px;
+  transition: transform 0.45s ease;
+  transform-style: preserve-3d;
+}
+
+.control-flip-card.flipped .control-flip-inner {
+  transform: rotateY(180deg);
+}
+
+.control-flip-front,
+.control-flip-back {
+  position: absolute;
+  inset: 0;
+  padding: 18px;
+  border-radius: inherit;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.control-flip-front {
+  display: flex;
+  flex-direction: column;
+}
+
+.control-flip-back {
+  transform: rotateY(180deg);
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.control-flip-back-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.control-origin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #eef2f7;
+  font-size: 13px;
+}
+
+.control-origin-row:last-of-type {
+  border-bottom: 0;
+}
+
+.control-origin-row strong {
+  font-size: 15px;
+}
+
+.control-flip-hint {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 11px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 700px) {
+  .control-flip-card,
+  .control-flip-inner {
+    min-height: 180px;
+  }
+
+  .control-flip-front,
+  .control-flip-back {
+    padding: 16px;
+  }
+}

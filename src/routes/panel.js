@@ -984,6 +984,65 @@ function controlBreakdownTooltip(label, breakdown) {
   return `${label}\n${lines.join("\n")}`;
 }
 
+function renderFlipResultCard({
+  title,
+  value,
+  description,
+  cardClass,
+  breakdown,
+  prefix = "",
+}) {
+  return `
+    <div
+      class="control-stat-card control-flip-card ${cardClass}"
+      onclick="this.classList.toggle('flipped')"
+      role="button"
+      tabindex="0"
+      onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); this.classList.toggle('flipped'); }"
+    >
+      <div class="control-flip-inner">
+
+        <div class="control-flip-front">
+          ${prefix ? `<div class="control-stat-prefix">${prefix}</div>` : ""}
+
+          <div class="control-stat-value">${value}</div>
+          <div class="control-stat-title">${title}</div>
+          <div class="control-stat-desc">${description}</div>
+
+          <div class="control-flip-hint">
+            <i class="ti ti-touch"></i>
+            Ver origen
+          </div>
+        </div>
+
+        <div class="control-flip-back">
+          <div class="control-flip-back-title">${title}</div>
+
+          <div class="control-origin-row">
+            <span>📱 Meta</span>
+            <strong>${breakdown.meta || 0}</strong>
+          </div>
+
+          <div class="control-origin-row">
+            <span>🌐 Google</span>
+            <strong>${breakdown.google || 0}</strong>
+          </div>
+
+          <div class="control-origin-row">
+            <span>❔ Sin identificar</span>
+            <strong>${breakdown.otro || 0}</strong>
+          </div>
+
+          <div class="control-flip-hint">
+            <i class="ti ti-arrow-back-up"></i>
+            Volver
+          </div>
+        </div>
+
+      </div>
+    </div>
+  `;
+}
 
 function renderControlStatCard({
   title,
@@ -1542,58 +1601,58 @@ ${esAdminControl ? `
   <!-- ADMIN: resultado -->
   <div class="control-mini-title">Resultado del contacto</div>
 
-  <div class="control-stats-grid control-stats-grid-four">
-    <div
-      class="control-stat-card stat-no-response"
-      title="${controlBreakdownTooltip("No respondieron", {
-        meta: stats.no_respondieron_meta,
-        google: stats.no_respondieron_google,
-        otro: stats.no_respondieron_otro
-      })}">
-      <div class="control-stat-value">${stats.no_respondieron}</div>
-      <div class="control-stat-title">No respondieron</div>
-      <div class="control-stat-desc">${porcentaje(stats.no_respondieron, stats.entraron)}% del total · No contestaron el primer mensaje</div>
-    </div>
+ <div class="control-stats-grid control-stats-grid-four">
 
-      <div
-        class="control-stat-card stat-error"
-        title="${controlBreakdownTooltip("Consultas erróneas", {
-          meta: stats.consultas_erroneas_meta,
-          google: stats.consultas_erroneas_google,
-          otro: stats.consultas_erroneas_otro
-        })}"
-      >
-      <div class="control-stat-prefix">Al menos</div>
-      <div class="control-stat-value">${stats.consultas_erroneas}</div>
-      <div class="control-stat-title">Consultas erróneas</div>
-      <div class="control-stat-desc">${porcentaje(stats.consultas_erroneas, stats.entraron)}% del total · Ingresaron por error o no correspondía</div>
-    </div>
+  ${renderFlipResultCard({
+    title: "No respondieron",
+    value: stats.no_respondieron,
+    description: `${porcentaje(stats.no_respondieron, stats.entraron)}% del total · No contestaron el primer mensaje`,
+    cardClass: "stat-no-response",
+    breakdown: {
+      meta: stats.no_respondieron_meta,
+      google: stats.no_respondieron_google,
+      otro: stats.no_respondieron_otro,
+    },
+  })}
 
-      <div
-        class="control-stat-card stat-no-advance"
-        title="${controlBreakdownTooltip("No avanzaron", {
-          meta: stats.no_avanzaron_meta,
-          google: stats.no_avanzaron_google,
-          otro: stats.no_avanzaron_otro
-        })}"
-      >
-      <div class="control-stat-value">${stats.no_avanzaron}</div>
-      <div class="control-stat-title">No avanzaron</div>
-      <div class="control-stat-desc">${porcentaje(stats.no_avanzaron, stats.entraron)}% del total · Respondieron pero no llegaron a derivarse</div>
-    </div>
+  ${renderFlipResultCard({
+    title: "Consultas erróneas",
+    value: stats.consultas_erroneas,
+    description: `${porcentaje(stats.consultas_erroneas, stats.entraron)}% del total · Ingresaron por error o no correspondía`,
+    cardClass: "stat-error",
+    prefix: "Al menos",
+    breakdown: {
+      meta: stats.consultas_erroneas_meta,
+      google: stats.consultas_erroneas_google,
+      otro: stats.consultas_erroneas_otro,
+    },
+  })}
 
-      <div
-        class="control-stat-card control-stat-highlight stat-derived"
-        title="${controlBreakdownTooltip("Derivados", {
-          meta: stats.derivados_meta,
-          google: stats.derivados_google,
-          otro: stats.derivados_otro
-        })}"
-      >
-      <div class="control-stat-value">${stats.derivados}</div>
-      <div class="control-stat-title">Derivados</div>
-      <div class="control-stat-desc">${porcentaje(stats.derivados, stats.entraron)}% del total</div>
-    </div>
+  ${renderFlipResultCard({
+    title: "No avanzaron",
+    value: stats.no_avanzaron,
+    description: `${porcentaje(stats.no_avanzaron, stats.entraron)}% del total · Respondieron pero no llegaron a derivarse`,
+    cardClass: "stat-no-advance",
+    breakdown: {
+      meta: stats.no_avanzaron_meta,
+      google: stats.no_avanzaron_google,
+      otro: stats.no_avanzaron_otro,
+    },
+  })}
+
+  ${renderFlipResultCard({
+    title: "Derivados",
+    value: stats.derivados,
+    description: `${porcentaje(stats.derivados, stats.entraron)}% del total`,
+    cardClass: "control-stat-highlight stat-derived",
+    breakdown: {
+      meta: stats.derivados_meta,
+      google: stats.derivados_google,
+      otro: stats.derivados_otro,
+    },
+  })}
+
+</div>
   </div>
 ` : `
   <!-- VENDEDOR: solo promedio propio -->
