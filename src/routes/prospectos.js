@@ -652,10 +652,21 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
 
       ON CONFLICT (chatwoot_conversation_id)
       DO UPDATE SET
-        origen = COALESCE(
-          EXCLUDED.origen,
-          control_ventas.origen
-        ),
+        origen = CASE
+          -- Si ya identificamos Meta o Google, nunca degradarlo a "otro".
+          WHEN control_ventas.origen IN ('meta', 'google')
+            THEN control_ventas.origen
+
+          -- Si estaba vacío/otro y ahora conseguimos un origen real, mejorarlo.
+          WHEN EXCLUDED.origen IN ('meta', 'google')
+            THEN EXCLUDED.origen
+
+          -- En cualquier otro caso conservar lo que ya teníamos.
+          ELSE COALESCE(
+            control_ventas.origen,
+            EXCLUDED.origen
+          )
+        END,
         actualizado_en = NOW()
       `,
       [
