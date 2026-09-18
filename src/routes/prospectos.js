@@ -3027,19 +3027,7 @@ if (chatwootConversationId) {
       { headers },
     );
 
-    await axios.post(
-      `${chatwootBase}/conversations/${chatwootConversationId}/messages`,
-      {
-        content:
-          "✅ Cliente confirmado en Prospectos.\n\n" +
-          "Este cliente ya se encuentra activo. " +
-          "La atención operativa debe realizarse desde el canal de Soporte.",
-        message_type: "outgoing",
-        private: true,
-      },
-      { headers },
-    );
-
+    
     await axios.post(
       `${chatwootBase}/conversations/${chatwootConversationId}/toggle_status`,
       {
