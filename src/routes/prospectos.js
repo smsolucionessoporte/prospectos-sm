@@ -629,10 +629,15 @@ router.post(
       });
     }
 
-    const origenProspecto =
-      origen === "google"
-        ? "google-pos-cliente"
-        : "meta-pos-cliente";
+    const origenProspecto = esProspectoInterno
+      ? "prospecto-interno"
+      : esAuditarOrigen
+        ? "sin-identificar"
+        : getControlOrigin(labels) === "google"
+          ? "google"
+          : getControlOrigin(labels) === "meta"
+            ? "meta"
+            : "manual";
 
     try {
       // 1. Corregir estadísticas / Control.
