@@ -247,15 +247,32 @@ router.post(
       }
 
       // Control / estadísticas
-      await pool.query(
+      const controlActual = await pool.query(
         `
-        UPDATE control_ventas
-        SET vendedor_id = $2,
-            actualizado_en = NOW()
+        SELECT vendedor_id
+        FROM control_ventas
         WHERE chatwoot_conversation_id = $1
+        LIMIT 1
         `,
-        [chatwoot_conversation_id, usuarioId],
+        [chatwoot_conversation_id],
       );
+
+      const vendedorAnterior =
+        controlActual.rows[0]?.vendedor_id ?? null;
+
+      if (vendedorAnterior !== usuarioId) {
+        await pool.query(
+          `
+          UPDATE control_ventas
+          SET vendedor_id = $2,
+              fecha_derivacion = NOW(),
+              fecha_primera_respuesta_vendedor = NULL,
+              actualizado_en = NOW()
+          WHERE chatwoot_conversation_id = $1
+          `,
+          [chatwoot_conversation_id, usuarioId],
+        );
+      }
 
       return res.json({
         ok: true,
