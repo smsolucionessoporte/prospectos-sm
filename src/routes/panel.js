@@ -1413,31 +1413,31 @@ paramsResumenVendedores,
           </td>
 
           <td class="control-number" data-label="Demo coordinada">
-            ${r.demos_coordinadas}
-            <div class="control-table-percent">
-              ${porcentajeEmbudo(r.demos_coordinadas, r.derivados)}%
-            </div>
+          <strong>${r.demos_coordinadas}</strong>
+          <span class="control-table-percent">
+            (${porcentajeEmbudo(r.demos_coordinadas, r.derivados)}%)
+          </span>
           </td>
 
           <td class="control-number" data-label="Demo realizada">
-            ${r.demos_realizadas}
-            <div class="control-table-percent">
-              ${porcentajeEmbudo(r.demos_realizadas, r.demos_coordinadas)}%
-            </div>
+            <strong>${r.demos_realizadas}</strong>
+            <span class="control-table-percent">
+            ${porcentajeEmbudo(r.demos_realizadas, r.derivados)}%            
+            </span>
           </td>
 
           <td class="control-number" data-label="Confirmados">
-            ${r.confirmados}
-            <div class="control-table-percent">
-              ${porcentajeEmbudo(r.confirmados, r.derivados)}%
-            </div>
+            <strong>${r.confirmados}</strong>
+            <span class="control-table-percent">
+              (${porcentajeEmbudo(r.confirmados, r.derivados)}%)
+            </span>
           </td>
 
           <td class="control-number" data-label="Perdidos">
-            ${r.perdidos}
-            <div class="control-table-percent">
-              ${porcentajeEmbudo(r.perdidos, r.derivados)}%
-            </div>
+            <strong>${r.perdidos}</strong>
+            <span class="control-table-percent">
+              (${porcentajeEmbudo(r.perdidos, r.derivados)}%)
+            </span>
           </td>
         </tr>
       `)
@@ -1620,7 +1620,7 @@ ${esAdminControl ? `
       </h2>
 
       <p>
-       Resumen de todos los contactos derivados.
+      Resumen de todos los contactos derivados. Los porcentajes indican qué proporción del total derivado a cada vendedor llegó a cada etapa.
       </p>
     </div>
   </div>
