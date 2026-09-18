@@ -1173,6 +1173,113 @@ const filtroUsuarioControl = esAdminControl
       consultas_erroneas: 0, no_avanzaron: 0, derivados: 0,
     };
 
+    const paramsEmbudo = [...params];
+
+      let filtroVendedorEmbudo = "TRUE";
+
+      if (esVendedorControl) {
+        paramsEmbudo.push(usuarioControl.id);
+
+        filtroVendedorEmbudo = `
+          COALESCE(p.demo_responsable, p.creado_por) = $${paramsEmbudo.length}
+        `;
+      }
+
+      const embudoVendedores = await pool.query(
+        `
+        WITH vendedores AS (
+          SELECT DISTINCT
+            u.id,
+            u.nombre
+          FROM usuarios u
+          WHERE u.activo = true
+            AND u.rol IN ('vendedor', 'admin')
+        ),
+
+        datos AS (
+          SELECT
+            v.id AS vendedor_id,
+            v.nombre AS vendedor,
+
+            cv.id AS control_id,
+            p.id AS prospecto_id,
+
+            EXISTS (
+              SELECT 1
+              FROM historial_estados h
+              WHERE h.prospecto_id = p.id
+                AND h.estado_nuevo = 'demo_coordinada'
+            ) AS paso_demo_coordinada,
+
+            EXISTS (
+              SELECT 1
+              FROM historial_estados h
+              WHERE h.prospecto_id = p.id
+                AND h.estado_nuevo = 'demo_realizada'
+            ) AS paso_demo_realizada,
+
+            EXISTS (
+              SELECT 1
+              FROM historial_estados h
+              WHERE h.prospecto_id = p.id
+                AND h.estado_nuevo = 'confirmado'
+            ) AS paso_confirmado,
+
+            EXISTS (
+              SELECT 1
+              FROM historial_estados h
+              WHERE h.prospecto_id = p.id
+                AND h.estado_nuevo = 'perdido'
+            ) AS paso_perdido
+
+          FROM control_ventas cv
+
+          LEFT JOIN prospectos p
+            ON p.chatwoot_conversation_id =
+              cv.chatwoot_conversation_id
+
+          JOIN vendedores v
+            ON v.id = COALESCE(
+              p.demo_responsable,
+              p.creado_por,
+              cv.vendedor_id
+            )
+
+          WHERE ${filtro}
+            AND cv.derivado = true
+            AND ${filtroVendedorEmbudo}
+        )
+
+        SELECT
+          vendedor_id,
+          vendedor,
+
+          COUNT(*)::int AS derivados,
+
+          COUNT(*) FILTER (
+            WHERE paso_demo_coordinada
+          )::int AS demos_coordinadas,
+
+          COUNT(*) FILTER (
+            WHERE paso_demo_realizada
+          )::int AS demos_realizadas,
+
+          COUNT(*) FILTER (
+            WHERE paso_confirmado
+          )::int AS confirmados,
+
+          COUNT(*) FILTER (
+            WHERE paso_perdido
+          )::int AS perdidos
+
+        FROM datos
+
+        GROUP BY vendedor_id, vendedor
+        ORDER BY vendedor
+        `,
+        paramsEmbudo,
+      );
+
     // Identifica rendimiento de los usuarios del grupo comercial
     const rendimiento = await pool.query(
       `
@@ -1282,6 +1389,51 @@ const filtroUsuarioControl = esAdminControl
       const resto = n % 60;
       return resto ? `${horas} h ${resto} min` : `${horas} h`;
     };
+
+    const porcentajeEmbudo = (cantidad, total) =>
+      total > 0
+        ? Math.round((Number(cantidad) / Number(total)) * 100)
+        : 0;
+
+    const filasEmbudo = embudoVendedores.rows
+      .map((r) => `
+        <tr>
+          <td class="control-seller-name">${esc(r.vendedor)}</td>
+
+          <td class="control-number">
+            ${r.derivados}
+          </td>
+
+          <td class="control-number">
+            ${r.demos_coordinadas}
+            <div class="control-table-percent">
+              ${porcentajeEmbudo(r.demos_coordinadas, r.derivados)}%
+            </div>
+          </td>
+
+          <td class="control-number">
+            ${r.demos_realizadas}
+            <div class="control-table-percent">
+              ${porcentajeEmbudo(r.demos_realizadas, r.demos_coordinadas)}%
+            </div>
+          </td>
+
+          <td class="control-number">
+            ${r.confirmados}
+            <div class="control-table-percent">
+              ${porcentajeEmbudo(r.confirmados, r.derivados)}%
+            </div>
+          </td>
+
+          <td class="control-number">
+            ${r.perdidos}
+            <div class="control-table-percent">
+              ${porcentajeEmbudo(r.perdidos, r.derivados)}%
+            </div>
+          </td>
+        </tr>
+      `)
+      .join("");
 
     const filasRendimiento = rendimiento.rows.map((r) => `
       <tr>
@@ -1437,6 +1589,50 @@ ${esAdminControl ? `
     </div>
   </div>
 `}
+
+<div class="control-section">
+  <div class="control-section-header">
+    <div>
+      <h2>
+        ${esAdminControl
+          ? "Seguimiento comercial por vendedor"
+          : "Mi seguimiento comercial"}
+      </h2>
+
+      <p>
+        Evolución de los contactos derivados durante el período seleccionado.
+      </p>
+    </div>
+  </div>
+
+  <div class="control-performance-wrap">
+    <table class="control-performance-table">
+      <thead>
+        <tr>
+          <th>${esAdminControl ? "Vendedor" : "Responsable"}</th>
+          <th>Derivados</th>
+          <th>Demo coordinada</th>
+          <th>Demo realizada</th>
+          <th>Confirmados</th>
+          <th>Perdidos</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${
+          filasEmbudo ||
+          `
+            <tr>
+              <td colspan="6" class="control-empty">
+                No hay actividad comercial para este período.
+              </td>
+            </tr>
+          `
+        }
+      </tbody>
+    </table>
+  </div>
+</div>
 
 ${esAdminControl ? `
   <div class="control-section">
