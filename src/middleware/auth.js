@@ -37,16 +37,14 @@ ${u ? `
     <span class="nav-title">SM Soluciones</span>
   </div>
   <div class="nav-links">
-      ${
-        req?.session?.usuario?.rol !== "control"
-          ? `<a href="/panel" class="nav-link">
-              <i class="ti ti-layout-dashboard"></i>
-              Panel
-            </a>`
-          : ""
-      }        
-      <i class="ti ti-layout-dashboard"></i> Panel
-      </a>
+            ${
+              req?.session?.usuario?.rol !== "control"
+                ? `<a href="/panel" class="nav-link">
+                    <i class="ti ti-layout-dashboard"></i>
+                    Panel
+                  </a>`
+                : ""
+            }
 
         ${u.rol === "admin" || u.rol === "vendedor" ? `
           <a
