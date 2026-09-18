@@ -47,10 +47,9 @@ async function main() {
     ORDER BY id ASC
   `);
 
-  let revisados = 0;
-  let correctos = 0;
+  let etiquetadas = 0;
+  let correctas = 0;
   let diferencias = 0;
-  let sinEtiquetaOrigen = 0;
   let conflictos = 0;
   let errores = 0;
 
@@ -74,8 +73,15 @@ async function main() {
       const hasMeta =
         normalized.includes("meta-pos-cliente");
 
-      revisados++;
+      // Esta auditoría solo revisa conversaciones
+      // que tengan una etiqueta de origen en Chatwoot.
+      if (!hasGoogle && !hasMeta) {
+        continue;
+      }
 
+      etiquetadas++;
+
+      // No debería tener ambas etiquetas.
       if (hasGoogle && hasMeta) {
         conflictos++;
 
@@ -91,33 +97,20 @@ async function main() {
         continue;
       }
 
-      let expectedOrigin = null;
+      const expectedOrigin =
+        hasGoogle ? "google" : "meta";
 
-      if (hasGoogle) {
-        expectedOrigin = "google-pos-cliente";
-      }
+      // Soportamos también históricos que hayan guardado
+      // el nombre técnico de la etiqueta como origen.
+      const actualOrigin =
+        row.origen === "google-pos-cliente"
+          ? "google"
+          : row.origen === "meta-pos-cliente"
+            ? "meta"
+            : row.origen;
 
-      if (hasMeta) {
-        expectedOrigin = "meta-pos-cliente";
-      }
-
-      if (!expectedOrigin) {
-        sinEtiquetaOrigen++;
-
-        resultados.push({
-          prospecto: row.id,
-          conversacion: conversationId,
-          contacto: row.contacto,
-          actual: row.origen || "NULL",
-          esperado: "SIN ETIQUETA META/GOOGLE",
-          etiquetas: labels.join(", "),
-        });
-
-        continue;
-      }
-
-      if (row.origen === expectedOrigin) {
-        correctos++;
+      if (actualOrigin === expectedOrigin) {
+        correctas++;
         continue;
       }
 
@@ -152,22 +145,20 @@ async function main() {
     "\n===== AUDITORÍA CHATWOOT → PROSPECTOS ====="
   );
 
-  console.log(`Prospectos revisados: ${revisados}`);
-  console.log(`Correctos: ${correctos}`);
-  console.log(`Diferencias: ${diferencias}`);
   console.log(
-    `Sin etiqueta Meta/Google: ${sinEtiquetaOrigen}`
+    `Conversaciones etiquetadas revisadas: ${etiquetadas}`
   );
+  console.log(`Correctas: ${correctas}`);
+  console.log(`Diferencias reales: ${diferencias}`);
   console.log(`Conflictos: ${conflictos}`);
   console.log(`Errores: ${errores}`);
 
   if (resultados.length) {
     console.log("\n===== REVISAR =====\n");
-
     console.table(resultados);
   } else {
     console.log(
-      "\nTodos los Prospectos coinciden con Chatwoot."
+      "\nTodas las conversaciones etiquetadas coinciden con Prospectos."
     );
   }
 }
