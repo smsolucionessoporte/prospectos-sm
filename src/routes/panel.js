@@ -46,7 +46,7 @@ const ORIGEN_LABEL = {
   "meta-pos-cliente": "📱 Meta",
   "google-pos-cliente": "🌐 Google",
 
-  "prospecto-interno": "💬 Interno",
+  "prospecto-interno": "🤝 Referido / Interno",  
   manual: "Manual",
 };
 

@@ -1319,7 +1319,7 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
                 google: "🌐 Google",
                 "meta-pos-cliente": "📱 Meta",
                 "google-pos-cliente": "🌐 Google",
-                "prospecto-interno": "💬 Interno"
+                "prospecto-interno": "🤝 Referido / Interno"
               }           
                 [p.origen] || "—"}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ""}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} — ${esc(p.demo_resp_nombre || "—")}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ""}</span></div>` : ""}
@@ -3039,7 +3039,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
       otro: "Sin identificar",
       "meta-pos-cliente": "📱 Meta",
       "google-pos-cliente": "🌐 Google",
-      "prospecto-interno": "💬 Interno"
+      "prospecto-interno": "🤝 Referido / Interno"
     };
 
     const origenLabel =
