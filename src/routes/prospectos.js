@@ -3021,15 +3021,18 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
       "Cajón de dinero",
     ];
 
+    const origenLabels = {
+      manual: "Manual",
+      meta: "📱 Meta",
+      google: "🌐 Google",
+      otro: "Sin identificar",
+      "meta-pos-cliente": "📱 Meta",
+      "google-pos-cliente": "🌐 Google",
+      "prospecto-interno": "💬 Interno"
+    };
+
     const origenLabel =
-      {
-        manual: "Manual",
-        meta: "📱 Meta",
-        google: "🌐 Google",
-        "meta-pos-cliente": "📱 Meta",
-        "google-pos-cliente": "🌐 Google",
-        "prospecto-interno": "💬 Interno"
-      }
+      origenLabels[p.origen] || p.origen || "Sin identificar";
     const responsableNombre = p.demo_resp_nombre || p.creado_por_nombre || "—";
 
     res.send(
@@ -3273,11 +3276,38 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
             <div class="grid2">
               <div class="field">
                 <label>Estado actual</label>
-                <input
-                  type="text"
-                  value="${esc(ESTADOS_LABEL[p.estado] || p.estado)}"
-                  disabled
-                >
+                ${
+                req.session.usuario.rol === "admin"
+                  ? `
+                    <select name="estado">
+                      ${[
+                        ["prospecto", "Prospecto"],
+                        ["demo_coordinada", "Demo coordinada"],
+                        ["demo_realizada", "Demo realizada"],
+                        ["confirmado", "Confirmado"],
+                        ["perdido", "Perdido"],
+                      ]
+                        .map(
+                          ([value, label]) => `
+                            <option
+                              value="${value}"
+                              ${p.estado === value ? "selected" : ""}
+                            >
+                              ${label}
+                            </option>
+                          `,
+                        )
+                        .join("")}
+                    </select>
+                  `
+                  : `
+                    <input
+                      type="text"
+                      value="${esc(ESTADOS_LABEL[p.estado] || p.estado)}"
+                      disabled
+                    >
+                  `
+              }
               </div>
             </div>
 
@@ -3604,6 +3634,19 @@ router.post("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
     const actual = curRows[0];
 
+    let cambioEstado = null;
+
+    if (
+      req.session.usuario.rol === "admin" &&
+      req.body.estado &&
+      req.body.estado !== actual.estado
+    ) {
+      cambioEstado = {
+        anterior: actual.estado,
+        nuevo: req.body.estado,
+      };
+    }
+
     // Detectar si se modificó la fecha/hora de una demo ya coordinada
     const fechaDemoAnterior = actual.demo_fecha
       ? formatearDateTimeLocalAR(actual.demo_fecha)
@@ -3667,16 +3710,13 @@ let cambioResponsable = null;
       actual.estado,
     );
 
-      /*
-      * IMPORTANTE:
-      * Editar NO cambia:
-      * - estado
-      * - motivo de pérdida
-      * - fecha de confirmación
-      *
-      * El responsable puede ser modificado únicamente por un administrador.
-      * La fecha de una demo coordinada puede ser reprogramada desde Editar.
-      */
+    /*
+    * IMPORTANTE:
+    * - El estado puede ser corregido manualmente solo por un administrador.
+    * - El motivo de pérdida y la fecha de confirmación no se modifican desde Editar.
+    * - El responsable puede ser modificado únicamente por un administrador.
+    * - La fecha de una demo coordinada puede ser reprogramada desde Editar.
+    */
 
     const modulos = demoHecha
       ? Array.isArray(b.modulos)
@@ -3775,6 +3815,51 @@ let cambioResponsable = null;
         req.params.id,
       ],
     );
+
+          if (cambioEstado) {
+        const estadosPermitidos = [
+          "prospecto",
+          "demo_coordinada",
+          "demo_realizada",
+          "confirmado",
+          "perdido",
+        ];
+
+        if (!estadosPermitidos.includes(cambioEstado.nuevo)) {
+          return res.status(400).send("Estado no válido");
+        }
+
+        await pool.query(
+          `
+          UPDATE prospectos
+          SET estado = $1,
+              actualizado_en = NOW()
+          WHERE id = $2
+          `,
+          [cambioEstado.nuevo, req.params.id],
+        );
+
+        await pool.query(
+          `
+          INSERT INTO historial_estados
+            (
+              prospecto_id,
+              estado_anterior,
+              estado_nuevo,
+              usuario_id,
+              nota
+            )
+          VALUES ($1, $2, $3, $4, $5)
+          `,
+          [
+            req.params.id,
+            cambioEstado.anterior,
+            cambioEstado.nuevo,
+            req.session.usuario.id,
+            "Estado corregido manualmente desde edición",
+          ],
+        );
+      }
 
         if (cambioResponsable) {
       if (cambioResponsable.usaDemoResponsable) {

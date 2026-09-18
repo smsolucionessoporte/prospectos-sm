@@ -775,9 +775,95 @@ router.get("/panel", requireAuth, async (req, res) => {
         }
 
         }
-        @media (max-width: 720px) {
-          .filter-row-search { flex-direction: column; align-items: stretch; }
+          @media (max-width: 900px) {
+        .filter-periodo-row {
+          flex-wrap: wrap;
+          align-items: stretch;
         }
+
+        .periodo-title {
+          width: 100%;
+        }
+
+        .periodo-field {
+          flex: 1 1 220px;
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .periodo-field input[type="date"] {
+          width: 100%;
+        }
+
+        .periodo-siempre {
+          flex: 1 1 140px;
+        }
+
+        .filter-row-search {
+          flex-wrap: wrap;
+        }
+
+        .filter-row-search .search-wrap {
+          flex: 1 1 100%;
+        }
+
+        .filter-row-search .btn {
+          flex: 1 1 160px;
+        }
+      }
+
+      @media (max-width: 600px) {
+        .filter-bar {
+          padding: 12px;
+        }
+
+        .filter-periodo-row {
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .periodo-title,
+        .periodo-field,
+        .periodo-siempre {
+          width: 100%;
+        }
+
+        .periodo-field {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .periodo-field input[type="date"] {
+          width: 100%;
+        }
+
+        .filter-row-search {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .filter-row-search .search-wrap,
+        .filter-row-search .btn {
+          width: 100%;
+          flex: 1 1 auto;
+        }
+
+        .modal-box {
+          width: calc(100% - 24px);
+          max-width: none;
+          padding: 18px;
+        }
+
+        .filter-row-estados {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .estado-check {
+          width: 100%;
+        }
+      }
 
 
       
@@ -1090,12 +1176,14 @@ const filtroUsuarioControl = esAdminControl
     // Identifica rendimiento de los usuarios del grupo comercial
     const rendimiento = await pool.query(
       `
-      WITH vendedores(id, nombre, orden) AS (
-        VALUES
-          (12, 'Giuliano Carabajal', 1),
-          (8,  'Rafael Altadonna', 2),
-          (7,  'Daniel Gonzalez', 3),
-          (11, 'Tomas Parcel', 4)
+      WITH vendedores AS (
+        SELECT
+          u.id,
+          u.nombre,
+          ROW_NUMBER() OVER (ORDER BY u.nombre)::int AS orden
+        FROM usuarios u
+        WHERE u.activo = true
+          AND u.rol = 'vendedor'
       )
       SELECT
         v.nombre AS vendedor,
@@ -1154,12 +1242,10 @@ const filtroUsuarioControl = esAdminControl
         p.telefono,
         FLOOR(EXTRACT(EPOCH FROM (NOW() - cv.fecha_derivacion)) / 60)::int AS minutos_espera
       FROM control_ventas cv
-      JOIN (VALUES
-        (12, 'Giuliano Carabajal'),
-        (8,  'Rafael Altadonna'),
-        (7,  'Daniel Gonzalez'),
-        (11, 'Tomas Parcel')
-      ) AS v(id, nombre) ON v.id = cv.vendedor_id
+            JOIN usuarios v
+        ON v.id = cv.vendedor_id
+      AND v.activo = true
+      AND v.rol = 'vendedor'
        -- Datos del prospecto
       LEFT JOIN prospectos p
         ON p.chatwoot_conversation_id = cv.chatwoot_conversation_id

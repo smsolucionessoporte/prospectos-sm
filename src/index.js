@@ -51,7 +51,7 @@ async function start() {
     });
     iniciarRecordatorios();
     iniciarRecordatoriosRelevamiento();
-    iniciarResumenDiario();
+    //iniciarResumenDiario();
   } catch (err) {
     console.error('Error al iniciar:', err);
     process.exit(1);
