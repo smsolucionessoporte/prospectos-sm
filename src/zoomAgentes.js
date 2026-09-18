@@ -4,7 +4,6 @@ const AGENTE_ZOOM = {
   7: "danielgonzalezf98@gmail.com",         // Daniel
   8: "rafaelaltadonna@gmail.com",           // Rafael
   10: "romanfontanetcasas@gmail.com",        // Román
-  11: "tomassmsoluciones@gmail.com",         // Tomás
   12: "giuliano69carabajal@gmail.com",       // Giuliano
 };
 

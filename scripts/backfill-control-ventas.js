@@ -10,8 +10,6 @@ const VENDEDORES = new Map([
   ["giuliano carabajal", { nombre: "Giuliano Carabajal", usuarioId: 12 }],
   ["rafael altadonna", { nombre: "Rafael Altadonna", usuarioId: 8 }],
   ["daniel gonzalez", { nombre: "Daniel Gonzalez", usuarioId: 7 }],
-  ["tomas parcel", { nombre: "Tomas Parcel", usuarioId: 11 }],
-  ["tomás parcel", { nombre: "Tomas Parcel", usuarioId: 11 }],
 ]);
 
 if (!CHATWOOT_URL || !TOKEN) {
@@ -186,7 +184,6 @@ function esConversacionInterna(c) {
     "rafael altadonna",
     "giuliano carabajal",
     "daniel gonzalez",
-    "tomas parcel",
     "sm ventas (group)",
   ];
 
