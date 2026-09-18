@@ -601,6 +601,81 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
   }
 });
 
+// ─── SINCRONIZAR ORIGEN DESDE ETIQUETAS DE CHATWOOT ──────────────────────────
+router.post(
+  "/api/prospectos/origen-chatwoot",
+  express.json(),
+  async (req, res) => {
+    const apiKey = req.headers["x-api-key"];
+
+    if (apiKey !== process.env.AUTOMATION_API_KEY) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const {
+      chatwoot_conversation_id,
+      origen,
+    } = req.body;
+
+    if (!chatwoot_conversation_id) {
+      return res.status(400).json({
+        error: "Falta chatwoot_conversation_id",
+      });
+    }
+
+    if (!["google", "meta"].includes(origen)) {
+      return res.status(400).json({
+        error: "Origen no válido",
+      });
+    }
+
+    const origenProspecto =
+      origen === "google"
+        ? "google-pos-cliente"
+        : "meta-pos-cliente";
+
+    try {
+      // 1. Corregir estadísticas / Control.
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET origen = $2,
+            actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+        `,
+        [chatwoot_conversation_id, origen],
+      );
+
+      // 2. Si ya existe Prospecto, corregir también su origen.
+      // No crea un Prospecto nuevo.
+      await pool.query(
+        `
+        UPDATE prospectos
+        SET origen = $2,
+            actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+        `,
+        [chatwoot_conversation_id, origenProspecto],
+      );
+
+      return res.json({
+        ok: true,
+        chatwoot_conversation_id,
+        origen,
+      });
+    } catch (err) {
+      console.error(
+        "Error sincronizando origen desde Chatwoot:",
+        err,
+      );
+
+      return res.status(500).json({
+        error: "Error interno",
+      });
+    }
+  },
+);
+
 // ─── CONTROL COMERCIAL DESDE CHATWOOT ────────────────────────────────────────
 router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
   const apiKey = req.headers["x-api-key"];
