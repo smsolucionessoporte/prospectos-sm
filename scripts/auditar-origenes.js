@@ -135,15 +135,18 @@ async function main() {
     );
   }
 
-  const { rows } = await pool.query(`
+    const { rows } = await pool.query(`
     SELECT
-      id,
-      chatwoot_conversation_id,
-      origen,
-      fecha_ingreso
+        id,
+        chatwoot_conversation_id,
+        origen,
+        fecha_ingreso,
+        clasificacion
     FROM control_ventas
+    WHERE origen = 'otro'
+        OR origen IS NULL
     ORDER BY fecha_ingreso ASC
-  `);
+    `);
 
   let revisadas = 0;
   let correctas = 0;
