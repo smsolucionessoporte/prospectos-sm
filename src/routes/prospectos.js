@@ -1,4 +1,5 @@
 const express = require("express");
+const axios = require("axios");
 const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
@@ -2874,12 +2875,23 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
       } = req.body;
       try {
         const { rows } = await pool.query(
-          "SELECT estado, telefono, demo_responsable FROM prospectos WHERE id=$1",
-          [req.params.id],
-        );
-        const estadoAnterior = rows[0]?.estado;
-        const telefono = rows[0]?.telefono;
-        const demoResponsable = rows[0]?.demo_responsable;
+          `
+            SELECT
+              estado,
+              telefono,
+              demo_responsable,
+              chatwoot_conversation_id
+            FROM prospectos
+            WHERE id=$1
+            `,
+            [req.params.id],
+          );
+
+          const estadoAnterior = rows[0]?.estado;
+          const telefono = rows[0]?.telefono;
+          const demoResponsable = rows[0]?.demo_responsable;
+          const chatwootConversationId =
+          rows[0]?.chatwoot_conversation_id;
         const extra = {};
         if (estado === "confirmado") {
           // Separamos los módulos contratados por coma, igual que en el relevamiento (array de strings)
@@ -2973,6 +2985,75 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
           texto: "El prospecto quedó confirmado como cliente.",
         },
       ];
+
+      // ---------------------------------------------------------
+// CHATWOOT: MARCAR COMO CLIENTE ACTIVO
+// ---------------------------------------------------------
+
+if (chatwootConversationId) {
+  try {
+    const chatwootBase =
+      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}`;
+
+    const headers = {
+      api_access_token: process.env.CHATWOOT_API_TOKEN,
+    };
+
+    const { data: labelsData } = await axios.get(
+      `${chatwootBase}/conversations/${chatwootConversationId}/labels`,
+      { headers },
+    );
+
+    const etiquetasActuales = Array.isArray(labelsData)
+      ? labelsData
+      : Array.isArray(labelsData?.payload)
+        ? labelsData.payload
+        : Array.isArray(labelsData?.labels)
+          ? labelsData.labels
+          : [];
+
+    const etiquetasNuevas = Array.from(
+      new Set([
+        ...etiquetasActuales,
+        "cliente-activo",
+      ]),
+    );
+
+    await axios.post(
+      `${chatwootBase}/conversations/${chatwootConversationId}/labels`,
+      {
+        labels: etiquetasNuevas,
+      },
+      { headers },
+    );
+
+    await axios.post(
+      `${chatwootBase}/conversations/${chatwootConversationId}/messages`,
+      {
+        content:
+          "✅ Cliente confirmado en Prospectos.\n\n" +
+          "Este cliente ya se encuentra activo. " +
+          "La atención operativa debe realizarse desde el canal de Soporte.",
+        message_type: "outgoing",
+        private: true,
+      },
+      { headers },
+    );
+
+    await axios.post(
+      `${chatwootBase}/conversations/${chatwootConversationId}/toggle_status`,
+      {
+        status: "resolved",
+      },
+      { headers },
+    );
+  } catch (chatwootErr) {
+    console.error(
+      "ERROR actualizando cliente confirmado en Chatwoot:",
+      chatwootErr.response?.data || chatwootErr.message,
+    );
+  }
+}
 
       // ---------------------------------------------------------
       // 1. BIENVENIDA AL CLIENTE
