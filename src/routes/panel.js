@@ -50,8 +50,12 @@ const ORIGEN_LABEL = {
   manual: "Manual",
 };
 
-router.get("/panel", requireAuth, async (req, res) => {
-  try {
+  router.get(
+    "/panel",
+    requireAuth,
+    requireRol("admin", "vendedor", "soporte"),
+    async (req, res) => {
+      try {
     const { buscar, desde, hasta, filtrado } = req.query;
 
     const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
@@ -1091,12 +1095,16 @@ function renderControlStatCard({
 
 
 // Control: admin + vendedores
-router.get("/control", requireAuth, requireRol("admin", "vendedor"), async (req, res) => {
+router.get("/control", requireAuth, requireRol("admin", "vendedor", "control"), async (req, res) => {
     try {
     // Usuario actual
     const usuarioControl = req.session.usuario;
-    const esAdminControl = usuarioControl.rol === "admin";
-    const esVendedorControl = usuarioControl.rol === "vendedor";
+    const esAdminControl =
+      usuarioControl.rol === "admin" ||
+      usuarioControl.rol === "control";
+
+    const esVendedorControl =
+      usuarioControl.rol === "vendedor";
     const periodo = req.query.periodo || "30";
     let desde = null;
     let hasta = null;
