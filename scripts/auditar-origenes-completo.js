@@ -5,9 +5,9 @@ const CHATWOOT_URL = process.env.CHATWOOT_URL;
 const CHATWOOT_ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID;
 const CHATWOOT_API_TOKEN = process.env.CHATWOOT_API_TOKEN;
 
-async function getLabels(conversationId) {
+async function getConversation(conversationId) {
   const response = await axios.get(
-    `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/labels`,
+    `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}`,
     {
       headers: {
         api_access_token: CHATWOOT_API_TOKEN,
@@ -15,13 +15,7 @@ async function getLabels(conversationId) {
     },
   );
 
-  const data = response.data;
-
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data.payload)) return data.payload;
-  if (Array.isArray(data.labels)) return data.labels;
-
-  return [];
+  return response.data;
 }
 
 function normalizarOrigenProspecto(origen) {
@@ -156,8 +150,21 @@ async function main() {
 
   for (const conversationId of conversationIds) {
     try {
-      const labels = await getLabels(conversationId);
+const conversation = await getConversation(conversationId);
 
+const inboxId =
+  conversation?.inbox_id ??
+  conversation?.inbox?.id ??
+  null;
+
+// whatsapp-ventas
+if (Number(inboxId) !== Number(process.env.CHATWOOT_INBOX_ID_VENTAS)) {
+  continue;
+}
+
+const labels = Array.isArray(conversation.labels)
+  ? conversation.labels
+  : [];
       const deteccion =
         detectarOrigenEtiquetas(labels);
 
