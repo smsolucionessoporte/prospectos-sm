@@ -685,3 +685,82 @@ textarea { resize: vertical; min-height: 72px; }
   opacity: 0.65;
   margin-bottom: 2px;
 }
+
+/* Control de ventas - responsive mobile */
+@media (max-width: 700px) {
+  .control-performance-wrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .control-performance-table {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .control-performance-table thead {
+    display: none;
+  }
+
+  .control-performance-table,
+  .control-performance-table tbody,
+  .control-performance-table tr,
+  .control-performance-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .control-performance-table tr {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border: 1px solid #eaecf0;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .control-performance-table td,
+  .control-performance-table td:first-child {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 9px 0;
+    border-bottom: 1px solid #f2f4f7;
+    text-align: right;
+  }
+
+  .control-performance-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .control-performance-table td::before {
+    content: attr(data-label);
+    flex: 1;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: #667085;
+  }
+
+  .control-performance-table .control-seller-name {
+    font-size: 15px;
+  }
+
+  .control-table-percent {
+    margin-left: 6px;
+  }
+
+  .control-section {
+    padding: 12px;
+  }
+
+  .control-section-header {
+    gap: 10px;
+  }
+
+  .control-alert-count {
+    flex: 0 0 auto;
+  }
+}

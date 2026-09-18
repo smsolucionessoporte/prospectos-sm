@@ -1173,112 +1173,121 @@ const filtroUsuarioControl = esAdminControl
       consultas_erroneas: 0, no_avanzaron: 0, derivados: 0,
     };
 
-    const paramsEmbudo = [...params];
+const paramsEmbudo = [];
 
-      let filtroVendedorEmbudo = "TRUE";
+let filtroVendedorEmbudo = "TRUE";
 
-      if (esVendedorControl) {
-        paramsEmbudo.push(usuarioControl.id);
+if (esVendedorControl) {
+  paramsEmbudo.push(usuarioControl.id);
 
-        filtroVendedorEmbudo = `
-          COALESCE(p.demo_responsable, p.creado_por) = $${paramsEmbudo.length}
-        `;
-      }
+  filtroVendedorEmbudo = `
+    COALESCE(p.demo_responsable, p.creado_por, cv.vendedor_id)
+      = $${paramsEmbudo.length}
+  `;
+}
 
-      const embudoVendedores = await pool.query(
-        `
-        WITH vendedores AS (
-          SELECT DISTINCT
-            u.id,
-            u.nombre
-          FROM usuarios u
-          WHERE u.activo = true
-            AND u.rol IN ('vendedor', 'admin')
-        ),
+const embudoVendedores = await pool.query(
+  `
+  WITH vendedores AS (
+    SELECT DISTINCT
+      u.id,
+      u.nombre
+    FROM usuarios u
+    WHERE u.activo = true
+      AND u.rol IN ('vendedor', 'admin')
+  ),
 
-        datos AS (
-          SELECT
-            v.id AS vendedor_id,
-            v.nombre AS vendedor,
+  datos AS (
+    SELECT
+      v.id AS vendedor_id,
+      v.nombre AS vendedor,
 
-            cv.id AS control_id,
-            p.id AS prospecto_id,
+      cv.id AS control_id,
+      p.id AS prospecto_id,
 
-            EXISTS (
-              SELECT 1
-              FROM historial_estados h
-              WHERE h.prospecto_id = p.id
-                AND h.estado_nuevo = 'demo_coordinada'
-            ) AS paso_demo_coordinada,
+      EXISTS (
+        SELECT 1
+        FROM historial_estados h
+        WHERE h.prospecto_id = p.id
+          AND h.estado_nuevo = 'demo_coordinada'
+      ) AS paso_demo_coordinada,
 
-            EXISTS (
-              SELECT 1
-              FROM historial_estados h
-              WHERE h.prospecto_id = p.id
-                AND h.estado_nuevo = 'demo_realizada'
-            ) AS paso_demo_realizada,
+      EXISTS (
+        SELECT 1
+        FROM historial_estados h
+        WHERE h.prospecto_id = p.id
+          AND h.estado_nuevo = 'demo_realizada'
+      ) AS paso_demo_realizada,
 
-            EXISTS (
-              SELECT 1
-              FROM historial_estados h
-              WHERE h.prospecto_id = p.id
-                AND h.estado_nuevo = 'confirmado'
-            ) AS paso_confirmado,
+      EXISTS (
+        SELECT 1
+        FROM historial_estados h
+        WHERE h.prospecto_id = p.id
+          AND h.estado_nuevo = 'confirmado'
+      ) AS paso_confirmado,
 
-            EXISTS (
-              SELECT 1
-              FROM historial_estados h
-              WHERE h.prospecto_id = p.id
-                AND h.estado_nuevo = 'perdido'
-            ) AS paso_perdido
+      EXISTS (
+        SELECT 1
+        FROM historial_estados h
+        WHERE h.prospecto_id = p.id
+          AND h.estado_nuevo = 'perdido'
+      ) AS paso_perdido
 
-          FROM control_ventas cv
+    FROM control_ventas cv
 
-          LEFT JOIN prospectos p
-            ON p.chatwoot_conversation_id =
-              cv.chatwoot_conversation_id
+    LEFT JOIN prospectos p
+      ON p.chatwoot_conversation_id =
+         cv.chatwoot_conversation_id
 
-          JOIN vendedores v
-            ON v.id = COALESCE(
-              p.demo_responsable,
-              p.creado_por,
-              cv.vendedor_id
-            )
+    JOIN vendedores v
+      ON v.id = COALESCE(
+        p.demo_responsable,
+        p.creado_por,
+        cv.vendedor_id
+      )
 
-          WHERE ${filtro}
-            AND cv.derivado = true
-            AND ${filtroVendedorEmbudo}
-        )
+    WHERE cv.derivado = true
+      AND ${filtroVendedorEmbudo}
+  )
 
-        SELECT
-          vendedor_id,
-          vendedor,
+  SELECT
+    vendedor_id,
+    vendedor,
 
-          COUNT(*)::int AS derivados,
+    COUNT(*)::int AS derivados,
 
-          COUNT(*) FILTER (
-            WHERE paso_demo_coordinada
-          )::int AS demos_coordinadas,
+    COUNT(*) FILTER (
+      WHERE paso_demo_coordinada
+    )::int AS demos_coordinadas,
 
-          COUNT(*) FILTER (
-            WHERE paso_demo_realizada
-          )::int AS demos_realizadas,
+    COUNT(*) FILTER (
+      WHERE paso_demo_realizada
+    )::int AS demos_realizadas,
 
-          COUNT(*) FILTER (
-            WHERE paso_confirmado
-          )::int AS confirmados,
+    COUNT(*) FILTER (
+      WHERE paso_confirmado
+    )::int AS confirmados,
 
-          COUNT(*) FILTER (
-            WHERE paso_perdido
-          )::int AS perdidos
+    COUNT(*) FILTER (
+      WHERE paso_perdido
+    )::int AS perdidos
 
-        FROM datos
+  FROM datos
 
-        GROUP BY vendedor_id, vendedor
-        ORDER BY vendedor
-        `,
-        paramsEmbudo,
-      );
+  GROUP BY vendedor_id, vendedor
+  ORDER BY vendedor
+  `,
+  paramsEmbudo,
+);
+
+const paramsResumenVendedores = [];
+
+const filtroUsuarioResumen = esAdminControl
+  ? "TRUE"
+  : (() => {
+      paramsResumenVendedores.push(usuarioControl.id);
+      return `v.id = $${paramsResumenVendedores.length}`;
+    })();
 
     // Identifica rendimiento de los usuarios del grupo comercial
     const rendimiento = await pool.query(
@@ -1329,14 +1338,12 @@ const filtroUsuarioControl = esAdminControl
 
       LEFT JOIN control_ventas cv
         ON cv.vendedor_id = v.id
-      AND ${filtro}
 
-      WHERE ${filtroUsuarioControl}
-
+        WHERE ${filtroUsuarioResumen}
         GROUP BY v.id, v.nombre, v.orden
         ORDER BY v.orden
           `,
-    paramsControl,
+        paramsResumenVendedores,
         );
 
     const alertasCandidatas = await pool.query(
@@ -1357,15 +1364,14 @@ const filtroUsuarioControl = esAdminControl
       LEFT JOIN prospectos p
         ON p.chatwoot_conversation_id = cv.chatwoot_conversation_id
         
-      WHERE ${filtro}
-        AND ${filtroUsuarioControl} -- vendedor: solo lo suyo
+        WHERE ${filtroUsuarioResumen}
         AND cv.derivado = true
         AND cv.fecha_derivacion IS NOT NULL
         AND cv.fecha_primera_respuesta_vendedor IS NULL
       ORDER BY cv.fecha_derivacion ASC
       LIMIT 100
       `,
-      paramsControl,
+paramsResumenVendedores,
     );
 
     // "Necesitan atención" debe representar pendientes actuales
@@ -1398,34 +1404,36 @@ const filtroUsuarioControl = esAdminControl
     const filasEmbudo = embudoVendedores.rows
       .map((r) => `
         <tr>
-          <td class="control-seller-name">${esc(r.vendedor)}</td>
+          <td class="control-seller-name" data-label="Vendedor">
+            ${esc(r.vendedor)}
+          </td>
 
-          <td class="control-number">
+          <td class="control-number" data-label="Derivados">
             ${r.derivados}
           </td>
 
-          <td class="control-number">
+          <td class="control-number" data-label="Demo coordinada">
             ${r.demos_coordinadas}
             <div class="control-table-percent">
               ${porcentajeEmbudo(r.demos_coordinadas, r.derivados)}%
             </div>
           </td>
 
-          <td class="control-number">
+          <td class="control-number" data-label="Demo realizada">
             ${r.demos_realizadas}
             <div class="control-table-percent">
               ${porcentajeEmbudo(r.demos_realizadas, r.demos_coordinadas)}%
             </div>
           </td>
 
-          <td class="control-number">
+          <td class="control-number" data-label="Confirmados">
             ${r.confirmados}
             <div class="control-table-percent">
               ${porcentajeEmbudo(r.confirmados, r.derivados)}%
             </div>
           </td>
 
-          <td class="control-number">
+          <td class="control-number" data-label="Perdidos">
             ${r.perdidos}
             <div class="control-table-percent">
               ${porcentajeEmbudo(r.perdidos, r.derivados)}%
@@ -1435,17 +1443,29 @@ const filtroUsuarioControl = esAdminControl
       `)
       .join("");
 
-    const filasRendimiento = rendimiento.rows.map((r) => `
-      <tr>
-        <td class="control-seller-name">${r.vendedor}</td>
-        <td class="control-number">${r.derivados}</td>
-        <td class="control-number">${r.respondidos}</td>
-        <td>${r.pendientes}</td>
-        <td>
-          <strong>${formatearMinutos(r.promedio_minutos)}</strong>
-        </td>
-      </tr>
-    `).join("");
+      const filasRendimiento = rendimiento.rows.map((r) => `
+        <tr>
+          <td class="control-seller-name" data-label="Vendedor">
+            ${esc(r.vendedor)}
+          </td>
+
+          <td class="control-number" data-label="Derivados">
+            ${r.derivados}
+          </td>
+
+          <td class="control-number" data-label="Respondidos">
+            ${r.respondidos}
+          </td>
+
+          <td class="control-number" data-label="Pendientes">
+            ${r.pendientes}
+          </td>
+
+          <td data-label="Promedio respuesta">
+            <strong>${formatearMinutos(r.promedio_minutos)}</strong>
+          </td>
+        </tr>
+      `).join("");
 
     const filasAlertas = alertasActuales.length
       ? alertasActuales.map((a) => `
@@ -1468,7 +1488,7 @@ const filtroUsuarioControl = esAdminControl
       : `
           <div class="control-empty">
             <i class="ti ti-circle-check"></i>
-            No hay derivaciones pendientes de respuesta para este período.
+            No hay derivaciones pendientes de respuesta.
           </div>
         `;
 
@@ -1600,7 +1620,7 @@ ${esAdminControl ? `
       </h2>
 
       <p>
-        Evolución de los contactos derivados durante el período seleccionado.
+       Resumen de todos los contactos derivados.
       </p>
     </div>
   </div>
@@ -1640,7 +1660,7 @@ ${esAdminControl ? `
       <div>
         <h2>Respuesta de vendedores</h2>
         <p>
-          Tiempo desde la derivación hasta la primera respuesta del vendedor.
+          Rendimiento acumulado desde la derivación hasta la primera respuesta.
         </p>
       </div>
     </div>
