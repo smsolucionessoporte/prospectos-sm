@@ -743,15 +743,7 @@ router.post(
       });
     }
 
-    const origenProspecto = esProspectoInterno
-      ? "prospecto-interno"
-      : esAuditarOrigen
-        ? "sin-identificar"
-        : getControlOrigin(labels) === "google"
-          ? "google"
-          : getControlOrigin(labels) === "meta"
-            ? "meta"
-            : "manual";
+const origenProspecto = origen;
 
     try {
       // 1. Corregir estadísticas / Control.
