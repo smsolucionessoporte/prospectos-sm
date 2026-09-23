@@ -1254,7 +1254,7 @@ router.post("/prospectos", requireAuth, async (req, res) => {
 
 // ─── ELIMINAR PROSPECTO (solo usuario id 6) ───────────────────────────────────
 router.post("/prospectos/:id/eliminar", requireAuth, async (req, res) => {
-  if (req.session.usuario.id !== 6) {
+  if (req.session.usuario.rol !== "admin") {
     return res.status(403).send("No autorizado");
   }
   try {
@@ -1400,6 +1400,27 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
     acciones.push(
       `<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`,
     );
+
+    // Eliminar prospecto — disponible únicamente para Marisol (usuario id 6)
+if (req.session.usuario.rol === "admin") {
+    acciones.push(`
+    <form
+      method="POST"
+      action="/prospectos/${p.id}/eliminar"
+      style="display:inline"
+      onsubmit="return confirm(
+        '¿Estás segura de que querés eliminar este prospecto?\\n\\n' +
+        'Se eliminará de SM Prospectos junto con su historial.\\n' +
+        'Esta acción no elimina el contacto ni la conversación de Chatwoot.\\n\\n' +
+        'Esta acción no se puede deshacer.'
+      )"
+    >
+      <button type="submit" class="btn btn-danger">
+        <i class="ti ti-trash"></i> Eliminar prospecto
+      </button>
+    </form>
+  `);
+}
 
     // Sección de relevamiento (si existe)
     const relHtml = p.relevamiento_fecha
