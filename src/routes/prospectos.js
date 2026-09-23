@@ -1172,10 +1172,7 @@ router.post("/prospectos", requireAuth, async (req, res) => {
     email,
     rubro,
     rubro_otro,
-    nota_prospecto,
-    propuesta_monto_inicial,
-    propuesta_cuotas,
-    propuesta_monto_mantenimiento,
+    nota_prospecto
   } = req.body;
   try {
     const variantes = normalizarTelefono(telefono);
@@ -3762,6 +3759,34 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
             </div>
           </div>
 
+                    <!-- PLAN OFRECIDO -->
+          <div class="form-section">
+            <div class="section-title-row">
+              <i class="ti ti-package"></i>
+              <span>Plan ofrecido</span>
+            </div>
+
+            <div class="field">
+              <label>Plan ofrecido</label>
+
+              <select name="plan_ofrecido">
+                <option value="">— Sin definir —</option>
+                <option value="Emprendedor" ${p.plan_ofrecido === "Emprendedor" ? "selected" : ""}>
+                  Emprendedor
+                </option>
+                <option value="VPlus" ${p.plan_ofrecido === "VPlus" ? "selected" : ""}>
+                  VPlus
+                </option>
+                <option value="VPlus oferta" ${p.plan_ofrecido === "VPlus oferta" ? "selected" : ""}>
+                  VPlus oferta
+                </option>
+                <option value="Professional Plus" ${p.plan_ofrecido === "Professional Plus" ? "selected" : ""}>
+                  Professional Plus
+                </option>
+              </select>
+            </div>
+          </div>
+
           <!-- CIERRE / OBSERVACIONES -->
           <div class="form-section">
             <div class="section-title-row">
@@ -4069,26 +4094,22 @@ let cambioResponsable = null;
 
         nota_prospecto=$7,
 
-        propuesta_monto_inicial=$8,
-        propuesta_cuotas=$9,
-        propuesta_monto_mantenimiento=$10,
+        nivel_interes=$8,
 
-        nivel_interes=$11,
+        modulos=$9,
+        sistema_actual=$10,
+        tiempo_sistema=$11,
 
-        modulos=$12,
-        sistema_actual=$13,
-        tiempo_sistema=$14,
+        problema_sistema=$12,
+        necesidades=$13,
+        cant_productos=$14,
+        cant_ventas=$15,
 
-        problema_sistema=$15,
-        necesidades=$16,
-        cant_productos=$17,
-        cant_ventas=$18,
+        equipamiento=$16,
+        equip_observaciones=$17,
 
-        equipamiento=$19,
-        equip_observaciones=$20,
-
-        obs_generales=$21,
-        condiciones_comerciales=$22,
+        obs_generales=$18,
+        condiciones_comerciales=$19,
 
         actualizado_en=NOW()
 
