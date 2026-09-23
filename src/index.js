@@ -50,7 +50,7 @@ async function start() {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
     iniciarRecordatorios();
-    iniciarRecordatoriosRelevamiento();
+    //iniciarRecordatoriosRelevamiento();
     //iniciarResumenDiario();
   } catch (err) {
     console.error('Error al iniciar:', err);
