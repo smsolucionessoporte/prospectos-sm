@@ -266,8 +266,6 @@ router.post(
           `
           UPDATE control_ventas
           SET vendedor_id = $2,
-              fecha_derivacion = NOW(),
-              fecha_primera_respuesta_vendedor = NULL,
               actualizado_en = NOW()
           WHERE chatwoot_conversation_id = $1
           `,
