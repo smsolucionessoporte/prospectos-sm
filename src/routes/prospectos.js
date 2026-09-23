@@ -4080,7 +4080,7 @@ let cambioResponsable = null;
           : []
       : actual.equipamiento;
 
-    await pool.query(
+        await pool.query(
       `
       UPDATE prospectos SET
 
@@ -4111,9 +4111,11 @@ let cambioResponsable = null;
         obs_generales=$18,
         condiciones_comerciales=$19,
 
+        plan_ofrecido=$20,
+
         actualizado_en=NOW()
 
-      WHERE id=$23
+      WHERE id=$21
     `,
       [
         b.nombre_negocio || null,
@@ -4126,24 +4128,16 @@ let cambioResponsable = null;
 
         b.nota_prospecto || null,
 
-        b.propuesta_monto_inicial || null,
-        b.propuesta_cuotas || null,
-        b.propuesta_monto_mantenimiento || null,
-
         demoHecha ? b.nivel_interes || null : actual.nivel_interes,
 
         modulos,
 
         demoHecha ? b.sistema_actual : actual.sistema_actual,
-
         demoHecha ? b.tiempo_sistema : actual.tiempo_sistema,
 
         demoHecha ? b.problema_sistema : actual.problema_sistema,
-
         demoHecha ? b.necesidades : actual.necesidades,
-
         demoHecha ? b.cant_productos : actual.cant_productos,
-
         demoHecha ? b.cant_ventas : actual.cant_ventas,
 
         equipamiento,
@@ -4151,8 +4145,9 @@ let cambioResponsable = null;
         demoHecha ? b.equip_observaciones : actual.equip_observaciones,
 
         demoHecha ? b.obs_generales : actual.obs_generales,
-
         demoHecha ? b.condiciones_comerciales : actual.condiciones_comerciales,
+
+        b.plan_ofrecido || null,
 
         req.params.id,
       ],
