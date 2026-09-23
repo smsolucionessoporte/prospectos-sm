@@ -261,17 +261,17 @@ router.post(
       const vendedorAnterior =
         controlActual.rows[0]?.vendedor_id ?? null;
 
-      if (vendedorAnterior !== usuarioId) {
-        await pool.query(
-          `
-          UPDATE control_ventas
-          SET vendedor_id = $2,
-              actualizado_en = NOW()
-          WHERE chatwoot_conversation_id = $1
-          `,
-          [chatwoot_conversation_id, usuarioId],
-        );
-      }
+if (vendedorAnterior !== usuarioId) {
+  await pool.query(
+    `
+    UPDATE control_ventas
+    SET vendedor_id = $2,
+        actualizado_en = NOW()
+    WHERE chatwoot_conversation_id = $1
+    `,
+    [chatwoot_conversation_id, usuarioId],
+  );
+}
 
       return res.json({
         ok: true,
@@ -1383,7 +1383,7 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
       `<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`,
     );
 
-    // Eliminar prospecto — disponible únicamente para Marisol (usuario id 6)
+// ELIMINAR PROSPECTO (solo administradores)
 if (req.session.usuario.rol === "admin") {
     acciones.push(`
     <form
