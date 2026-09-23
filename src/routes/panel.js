@@ -216,6 +216,7 @@ const ORIGEN_LABEL = {
                     </td>
                     <td>${esc(p.telefono || "—")}</td>
                     <td>${esc(p.rubro || "—")}</td>
+                    <td>${esc(p.plan_ofrecido || "—")}</td>
                     <td><span class="badge-estado ${est.color}">${est.label}</span></td>
                     <td class="text-muted">${PROXIMA_ACCION[p.estado] || "—"}</td>          
                     <td class="text-muted">${ORIGEN_LABEL[p.origen] || "—"}</td>
@@ -307,6 +308,27 @@ const ORIGEN_LABEL = {
                   : ""
               }
 
+                            <!-- ELIMINAR: solo administradores -->
+              ${
+                req.session.usuario.rol === "admin"
+                  ? `
+                    <form
+                      method="POST"
+                      action="/prospectos/${p.id}/eliminar"
+                      style="display:inline"
+                      onsubmit="return confirm('¿Eliminar este prospecto?\\n\\nSe eliminará de SM Prospectos junto con su historial.\\nNo se eliminará el contacto ni la conversación de Chatwoot.\\n\\nEsta acción no se puede deshacer.')"
+                    >
+                      <button
+                        type="submit"
+                        class="btn-icon"
+                        title="Eliminar prospecto"
+                      >
+                        <i class="ti ti-trash"></i>
+                      </button>
+                    </form>
+                  `
+                  : ""
+              }
             </div>
           </td>
         </tr>
@@ -318,7 +340,7 @@ const ORIGEN_LABEL = {
     const filasHtml =
       rows.length === 0
         ? `
-      <tr><td colspan="9" class="empty-row">
+        <tr><td colspan="10" class="empty-row">
         <i class="ti ti-users-group"></i>
         <span>No hay prospectos${buscar ? " con esa búsqueda" : ""}</span>
       </td></tr>
@@ -463,6 +485,7 @@ const ORIGEN_LABEL = {
               <th>Nombre</th>
               <th>Teléfono</th>
               <th>Rubro</th>
+              <th>Plan ofrecido</th>
               <th>Estado</th>
               <th>Próxima acción</th>
               <th>Origen</th>

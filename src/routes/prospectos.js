@@ -1131,27 +1131,7 @@ router.get("/prospectos/nuevo", requireAuth, (req, res) => {
           </div>
         </div>
 
-            <div class="form-section">
-          <div class="section-title-row">
-            <i class="ti ti-file-invoice"></i>
-            <span>Propuesta comercial <span class="opc">(opcional)</span></span>
-          </div>
-          <div class="grid2">
-            <div class="field">
-              <label for="propuesta_monto_inicial">Monto inicial</label>
-              <input type="number" step="0.01" id="propuesta_monto_inicial" name="propuesta_monto_inicial" placeholder="Ej: 150000">
-            </div>
-            <div class="field">
-              <label for="propuesta_cuotas">Cantidad de cuotas</label>
-              <input type="number" id="propuesta_cuotas" name="propuesta_cuotas" placeholder="Ej: 3">
-            </div>
-          </div>
-          <div class="field">
-            <label for="propuesta_monto_mantenimiento">Monto mantenimiento</label>
-            <input type="number" step="0.01" id="propuesta_monto_mantenimiento" name="propuesta_monto_mantenimiento" placeholder="Ej: 15000">
-          </div>
-        </div>
-
+            
         <div class="form-section">
           <div class="section-title-row">
             <i class="ti ti-note"></i>
@@ -1219,8 +1199,18 @@ router.post("/prospectos", requireAuth, async (req, res) => {
 
     const result = await pool.query(
       `
-      INSERT INTO prospectos (nombre_negocio, contacto, telefono, email, rubro, rubro_otro, nota_prospecto, propuesta_monto_inicial, propuesta_cuotas, propuesta_monto_mantenimiento, creado_por)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
+      INSERT INTO prospectos (
+        nombre_negocio,
+        contacto,
+        telefono,
+        email,
+        rubro,
+        rubro_otro,
+        nota_prospecto,
+        creado_por
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING id
     `,
       [
         nombre_negocio || null,
@@ -1230,9 +1220,6 @@ router.post("/prospectos", requireAuth, async (req, res) => {
         rubro,
         rubro_otro,
         nota_prospecto || null,
-        propuesta_monto_inicial || null,
-        propuesta_cuotas || null,
-        propuesta_monto_mantenimiento || null,
         req.session.usuario.id,
       ],
     );
@@ -1547,19 +1534,22 @@ if (req.session.usuario.rol === "admin") {
               </div>
             </div>
             ${
-              p.propuesta_monto_inicial ||
-              p.propuesta_cuotas ||
-              p.propuesta_monto_mantenimiento
+              p.plan_ofrecido
                 ? `
-            <div class="detail-section">
-              <div class="section-title-row"><i class="ti ti-file-invoice"></i><span>Propuesta comercial</span></div>
-              <div class="detail-grid">
-                <div class="detail-item"><span class="detail-label">Monto inicial</span><span class="detail-val">${p.propuesta_monto_inicial ? "$" + Number(p.propuesta_monto_inicial).toLocaleString("es-AR") : "—"}</span></div>
-                <div class="detail-item"><span class="detail-label">Cuotas</span><span class="detail-val">${p.propuesta_cuotas || "—"}</span></div>
-                <div class="detail-item"><span class="detail-label">Mantenimiento</span><span class="detail-val">${p.propuesta_monto_mantenimiento ? "$" + Number(p.propuesta_monto_mantenimiento).toLocaleString("es-AR") : "—"}</span></div>
-              </div>
-            </div>
-            `
+                  <div class="detail-section">
+                    <div class="section-title-row">
+                      <i class="ti ti-package"></i>
+                      <span>Plan ofrecido</span>
+                    </div>
+
+                    <div class="detail-grid">
+                      <div class="detail-item">
+                        <span class="detail-label">Plan</span>
+                        <span class="detail-val">${esc(p.plan_ofrecido)}</span>
+                      </div>
+                    </div>
+                  </div>
+                `
                 : ""
             }
 
@@ -2580,6 +2570,38 @@ router.get("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
           </div>
         </div>
 
+                <div class="form-section">
+          <div class="section-title-row">
+            <i class="ti ti-package"></i>
+            <span>Plan ofrecido</span>
+            <span class="badge-req">obligatorio</span>
+          </div>
+
+          <div class="chips-group">
+            ${[
+              "Emprendedor",
+              "VPlus",
+              "VPlus oferta",
+              "Professional Plus",
+            ]
+              .map(
+                (plan) => `
+                  <label class="chip-label">
+                    <input
+                      type="radio"
+                      name="plan_ofrecido"
+                      value="${plan}"
+                      ${p.plan_ofrecido === plan ? "checked" : ""}
+                      required
+                    >
+                    <span class="chip">${plan}</span>
+                  </label>
+                `,
+              )
+              .join("")}
+          </div>
+        </div>
+
         <div class="form-section">
           <div class="section-title-row"><i class="ti ti-clipboard-check"></i><span>Interés y próximos pasos</span><span class="badge-opt">opcional</span></div>
           <div class="field">
@@ -2629,6 +2651,16 @@ router.get("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
 
 router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
   const b = req.body;
+    const PLANES_VALIDOS = [
+    "Emprendedor",
+    "VPlus",
+    "VPlus oferta",
+    "Professional Plus",
+  ];
+
+  if (!PLANES_VALIDOS.includes(b.plan_ofrecido)) {
+    return res.status(400).send("Seleccioná un plan ofrecido válido");
+  }
   const OBJECIONES = [
     "Precio / presupuesto",
     "Resistencia al cambio",
@@ -2683,9 +2715,10 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
         equipamiento = $10, equip_observaciones = $11,
         objeciones = $12, obj_detalle = $13,
         nivel_interes = $14, obs_generales = $15,
-        relevamiento_completado_por = $16, relevamiento_fecha = NOW(),
+        plan_ofrecido = $16,
+        relevamiento_completado_por = $17, relevamiento_fecha = NOW(),
         actualizado_en = NOW()
-      WHERE id = $17
+        WHERE id = $18
     `,
       [
         b.rubro,
@@ -2703,6 +2736,7 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
         b.obj_detalle,
         b.nivel_interes,
         b.obs_generales,
+        b.plan_ofrecido,
         req.session.usuario.id,
         req.params.id,
       ],
@@ -2732,6 +2766,13 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
     const p = prospRows[0];
     const demoResponsable = p.demo_responsable;
 
+    const { rows: responsableRows } = await pool.query(
+        "SELECT nombre FROM usuarios WHERE id=$1",
+        [demoResponsable],
+      );
+
+      const nombreResponsableDemo =
+        responsableRows[0]?.nombre || "Sin asignar";
     // ---------------------------------------------------------
     // 1. MENSAJE POST-DEMO AL CLIENTE
     // ---------------------------------------------------------
@@ -2813,6 +2854,7 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
         `📋 Demo realizada: *${nombreParaGrupo}*\n\n` +
         `📞 Tel: ${p.telefono || "—"}\n` +
         `🏬 Rubro: ${p.rubro || "—"}${p.rubro_otro ? ` (${p.rubro_otro})` : ""}\n` +
+        `📦 Plan ofrecido: ${p.plan_ofrecido || "—"}\n` +
         `⭐ Módulos: ${(p.modulos || []).join(", ") || "—"}\n` +
         `🛠️ Equipamiento: ${(p.equipamiento || []).join(", ") || "—"}${p.equip_observaciones ? ` — ${p.equip_observaciones}` : ""}\n` +
           `🔥 Interés: ${
@@ -3157,6 +3199,7 @@ if (chatwootConversationId) {
           `📞 Tel: ${full.telefono || "—"}\n` +
           `📧 Email: ${full.email || "—"}\n` +
           `🏬 Rubro: ${full.rubro || "—"}${full.rubro_otro ? ` (${full.rubro_otro})` : ""}\n\n` +
+          `📦 Plan ofrecido: ${full.plan_ofrecido || "—"}\n\n` +
           `⭐ Módulos contratados: ${(full.modulos_contratados || []).join(", ") || "—"}\n` +
           `🛠️ Equipamiento: ${(full.equipamiento || []).join(", ") || "—"}${full.equip_observaciones ? ` — ${full.equip_observaciones}` : ""}\n\n` +
           `👨‍💼 Vendedor a cargo: ${nombreResponsable}\n` +
@@ -3510,48 +3553,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
             </div>
           </div>
 
-          <!-- PROPUESTA -->
-          <div class="form-section">
-            <div class="section-title-row">
-              <i class="ti ti-file-invoice"></i>
-              <span>
-                Propuesta comercial
-                <span class="opc">(opcional)</span>
-              </span>
-            </div>
-
-            <div class="grid2">
-              <div class="field">
-                <label>Monto inicial</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  name="propuesta_monto_inicial"
-                  value="${p.propuesta_monto_inicial ?? ""}"
-                >
-              </div>
-
-              <div class="field">
-                <label>Cantidad de cuotas</label>
-                <input
-                  type="number"
-                  name="propuesta_cuotas"
-                  value="${p.propuesta_cuotas ?? ""}"
-                >
-              </div>
-            </div>
-
-            <div class="field">
-              <label>Monto mantenimiento</label>
-              <input
-                type="number"
-                step="0.01"
-                name="propuesta_monto_mantenimiento"
-                value="${p.propuesta_monto_mantenimiento ?? ""}"
-              >
-            </div>
-          </div>
-
+          
           <!-- NOTAS -->
           <div class="form-section">
             <div class="section-title-row">

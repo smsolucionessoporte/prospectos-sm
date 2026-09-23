@@ -77,6 +77,7 @@ ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS nota_prospecto TEXT;
 ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS origen VARCHAR(100);
 ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS chatwoot_conversation_id BIGINT;
 ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS recordatorio_relevamiento_enviado BOOLEAN DEFAULT false;
+ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS plan_ofrecido VARCHAR(30);
 CREATE INDEX IF NOT EXISTS idx_prospectos_chatwoot_conversation_id
   ON prospectos(chatwoot_conversation_id);
 
