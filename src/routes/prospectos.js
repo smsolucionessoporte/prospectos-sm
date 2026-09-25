@@ -874,23 +874,53 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
       );
     }
 
-    if (evento === "consulta_erronea") {
-      await pool.query(
-        `
-        UPDATE control_ventas
-        SET
-          respondio_cliente = TRUE,
-          fecha_primera_respuesta_cliente =
-            COALESCE(fecha_primera_respuesta_cliente, NOW()),
-          clasificacion = 'consulta_erronea',
-          fecha_clasificacion = NOW(),
-          actualizado_en = NOW()
-        WHERE chatwoot_conversation_id = $1
-        `,
-        [chatwoot_conversation_id],
-      );
-    }
+if (evento === "consulta_erronea") {
+  const client = await pool.connect();
 
+  try {
+    await client.query("BEGIN");
+
+    // Una consulta errónea nunca debe quedar contabilizada como derivada
+    // ni asociada a un vendedor.
+    await client.query(
+      `
+      UPDATE control_ventas
+      SET
+        respondio_cliente = TRUE,
+        fecha_primera_respuesta_cliente =
+          COALESCE(fecha_primera_respuesta_cliente, NOW()),
+        clasificacion = 'consulta_erronea',
+        fecha_clasificacion =
+          COALESCE(fecha_clasificacion, NOW()),
+        derivado = FALSE,
+        fecha_derivacion = NULL,
+        vendedor_id = NULL,
+        vendedor_nombre = NULL,
+        fecha_primera_respuesta_vendedor = NULL,
+        actualizado_en = NOW()
+      WHERE chatwoot_conversation_id = $1
+      `,
+      [chatwoot_conversation_id],
+    );
+
+    // Si llegó a crearse un prospecto antes de detectar que la consulta
+    // era errónea, eliminarlo del circuito comercial.
+    await client.query(
+      `
+      DELETE FROM prospectos
+      WHERE chatwoot_conversation_id = $1
+      `,
+      [chatwoot_conversation_id],
+    );
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
     if (evento === "no_interesado") {
       await pool.query(
         `
@@ -926,8 +956,9 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
           vendedor_nombre =
             COALESCE($3, vendedor_nombre),
           actualizado_en = NOW()
-        WHERE chatwoot_conversation_id = $1
-        `,
+          WHERE chatwoot_conversation_id = $1
+            AND COALESCE(clasificacion, '') <> 'consulta_erronea'
+          `,
         [
           chatwoot_conversation_id,
           usuarioLocal,
