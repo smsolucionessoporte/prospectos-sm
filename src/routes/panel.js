@@ -1011,12 +1011,20 @@ function controlBreakdownTooltip(label, breakdown) {
   return `${label}\n${lines.join("\n")}`;
 }
 
+function formatConversionRate(cantidad, total) {
+  const n = Number(cantidad || 0);
+  const d = Number(total || 0);
+  if (!d) return "0,0%";
+  return `${((n / d) * 100).toFixed(1).replace(".", ",")}%`;
+}
+
 function renderFlipResultCard({
   title,
   value,
   description,
   cardClass,
   breakdown,
+  denominators = null,
   prefix = "",
 }) {
   return `
@@ -1047,17 +1055,17 @@ function renderFlipResultCard({
 
           <div class="control-origin-row">
             <span>📱 Meta</span>
-            <strong>${breakdown.meta || 0}</strong>
+            <strong>${denominators ? `${breakdown.meta || 0} de ${denominators.meta || 0} → ${formatConversionRate(breakdown.meta, denominators.meta)}` : (breakdown.meta || 0)}</strong>
           </div>
 
           <div class="control-origin-row">
             <span>🌐 Google</span>
-            <strong>${breakdown.google || 0}</strong>
+            <strong>${denominators ? `${breakdown.google || 0} de ${denominators.google || 0} → ${formatConversionRate(breakdown.google, denominators.google)}` : (breakdown.google || 0)}</strong>
           </div>
 
           <div class="control-origin-row">
             <span>❔ Sin identificar</span>
-            <strong>${breakdown.otro || 0}</strong>
+            <strong>${denominators ? `${breakdown.otro || 0} de ${denominators.otro || 0} → ${formatConversionRate(breakdown.otro, denominators.otro)}` : (breakdown.otro || 0)}</strong>
           </div>
 
           <div class="control-flip-hint">
@@ -1170,11 +1178,32 @@ const filtroUsuarioControl = esAdminControl
 
     const resumen = await pool.query(
       `
+      WITH base AS (
+        SELECT
+          cv.*,
+          EXISTS (
+            SELECT 1
+            FROM prospectos p
+            WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+              AND (
+                p.demo_fecha IS NOT NULL
+                OR p.estado IN ('demo_coordinada', 'demo_realizada')
+                OR EXISTS (
+                  SELECT 1
+                  FROM historial_estados h
+                  WHERE h.prospecto_id = p.id
+                    AND h.estado_nuevo IN ('demo_coordinada', 'demo_realizada')
+                )
+              )
+          ) AS llego_demo
+        FROM control_ventas cv
+        WHERE ${filtro}
+      )
       SELECT
         COUNT(*)::int AS entraron,
         COUNT(*) FILTER (WHERE cv.origen = 'meta')::int AS meta,
         COUNT(*) FILTER (WHERE cv.origen = 'google')::int AS google,
-        COUNT(*) FILTER (WHERE origen = 'otro')::int AS sin_identificar,
+        COUNT(*) FILTER (WHERE COALESCE(cv.origen, 'otro') = 'otro')::int AS sin_identificar,
         COUNT(*) FILTER (WHERE cv.respondio_cliente = false)::int AS no_respondieron,
         COUNT(*) FILTER (WHERE cv.clasificacion = 'consulta_erronea')::int AS consultas_erroneas,
         COUNT(*) FILTER (
@@ -1183,6 +1212,10 @@ const filtroUsuarioControl = esAdminControl
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
         )::int AS no_avanzaron,        
         COUNT(*) FILTER (WHERE cv.derivado = true)::int AS derivados,
+        COUNT(*) FILTER (WHERE cv.llego_demo = true)::int AS llegaron_demo,
+        COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'meta')::int AS llegaron_demo_meta,
+        COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'google')::int AS llegaron_demo_google,
+        COUNT(*) FILTER (WHERE cv.llego_demo = true AND COALESCE(cv.origen, 'otro') = 'otro')::int AS llegaron_demo_otro,
         -- Desglose por origen: no respondieron
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = false
@@ -1196,7 +1229,7 @@ const filtroUsuarioControl = esAdminControl
 
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = false
-            AND cv.origen = 'otro'
+            AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS no_respondieron_otro,
 
         -- Desglose por origen: consultas erróneas
@@ -1212,7 +1245,7 @@ const filtroUsuarioControl = esAdminControl
 
         COUNT(*) FILTER (
           WHERE cv.clasificacion = 'consulta_erronea'
-            AND cv.origen = 'otro'
+            AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS consultas_erroneas_otro,
 
         -- Desglose por origen: no avanzaron
@@ -1234,7 +1267,7 @@ const filtroUsuarioControl = esAdminControl
           WHERE cv.respondio_cliente = true
             AND cv.derivado = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
-            AND cv.origen = 'otro'
+            AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS no_avanzaron_otro,
 
         -- Desglose por origen: derivados
@@ -1250,17 +1283,17 @@ const filtroUsuarioControl = esAdminControl
 
         COUNT(*) FILTER (
           WHERE cv.derivado = true
-            AND cv.origen = 'otro'
+            AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS derivados_otro
-      FROM control_ventas cv
-      WHERE ${filtro}
+      FROM base cv
       `,
       params,
     );
 
     const stats = resumen.rows[0] || {
-      entraron: 0, meta: 0, google: 0, no_respondieron: 0,
-      consultas_erroneas: 0, no_avanzaron: 0, derivados: 0,
+      entraron: 0, meta: 0, google: 0, sin_identificar: 0, no_respondieron: 0,
+      consultas_erroneas: 0, no_avanzaron: 0, derivados: 0, llegaron_demo: 0,
+      llegaron_demo_meta: 0, llegaron_demo_google: 0, llegaron_demo_otro: 0,
     };
 
 const paramsEmbudo = [];
@@ -1632,7 +1665,7 @@ ${esAdminControl ? `
   <!-- ADMIN: resultado -->
   <div class="control-mini-title">Resultado del contacto</div>
 
- <div class="control-stats-grid control-stats-grid-four">
+ <div class="control-stats-grid control-stats-grid-five">
 
   ${renderFlipResultCard({
     title: "No respondieron",
@@ -1680,6 +1713,23 @@ ${esAdminControl ? `
       meta: stats.derivados_meta,
       google: stats.derivados_google,
       otro: stats.derivados_otro,
+    },
+  })}
+
+  ${renderFlipResultCard({
+    title: "Llegaron a demo",
+    value: stats.llegaron_demo || 0,
+    description: `${porcentaje(stats.llegaron_demo || 0, stats.entraron)}% del total · Alguna vez llegaron a etapa demo`,
+    cardClass: "control-stat-highlight stat-demo",
+    breakdown: {
+      meta: stats.llegaron_demo_meta,
+      google: stats.llegaron_demo_google,
+      otro: stats.llegaron_demo_otro,
+    },
+    denominators: {
+      meta: stats.meta,
+      google: stats.google,
+      otro: stats.sin_identificar || 0,
     },
   })}
 

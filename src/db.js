@@ -136,6 +136,9 @@ CREATE INDEX IF NOT EXISTS idx_control_ventas_origen
 CREATE INDEX IF NOT EXISTS idx_control_ventas_vendedor
   ON control_ventas(vendedor_id);
 
+ALTER TABLE control_ventas
+  ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(50);
+
 CREATE INDEX IF NOT EXISTS idx_control_ventas_derivacion
   ON control_ventas(fecha_derivacion);
 

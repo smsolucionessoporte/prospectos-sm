@@ -797,6 +797,7 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
     chatwoot_conversation_id,
     evento,
     origen,
+    origen_detalle,
     vendedor_id,
     vendedor_nombre,
   } = req.body;
@@ -830,9 +831,10 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
       INSERT INTO control_ventas (
         chatwoot_conversation_id,
         origen,
+        origen_detalle,
         fecha_ingreso
       )
-      VALUES ($1, $2, NOW())
+      VALUES ($1, $2, $3, NOW())
 
       ON CONFLICT (chatwoot_conversation_id)
       DO UPDATE SET
@@ -851,11 +853,16 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
             EXCLUDED.origen
           )
         END,
+        origen_detalle = COALESCE(
+          EXCLUDED.origen_detalle,
+          control_ventas.origen_detalle
+        ),
         actualizado_en = NOW()
       `,
       [
         chatwoot_conversation_id,
         origen || null,
+        origen_detalle || null,
       ],
     );
 
