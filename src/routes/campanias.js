@@ -44,9 +44,13 @@ function buildEligibility({ origen, desde, hasta }, startIndex = 1) {
   const params = [];
   let index = startIndex;
 
-  if (origen && ['meta', 'google', 'otro'].includes(origen)) {
-    where.push(`cv.origen = $${index++}`);
-    params.push(origen);
+  if (origen && ['meta', 'google', 'web', 'otro'].includes(origen)) {
+    if (origen === 'otro') {
+      where.push(`COALESCE(cv.origen, 'otro') = 'otro'`);
+    } else {
+      where.push(`cv.origen = $${index++}`);
+      params.push(origen);
+    }
   }
   if (desde) {
     where.push(`cv.fecha_ingreso >= $${index++}::date`);
@@ -150,7 +154,8 @@ router.get(
                   <option value="">Todos</option>
                   <option value="meta">Meta</option>
                   <option value="google">Google</option>
-                  <option value="otro">Otro</option>
+                  <option value="web">Web</option>
+                  <option value="otro">Sin identificar</option>
                 </select>
               </div>
               <div class="field">
@@ -253,7 +258,7 @@ router.post(
   async (req, res) => {
     const nombre = String(req.body.nombre || '').trim();
     const mensaje = String(req.body.mensaje || '').trim();
-    const origen = ['meta', 'google', 'otro'].includes(req.body.origen) ? req.body.origen : null;
+    const origen = ['meta', 'google', 'web', 'otro'].includes(req.body.origen) ? req.body.origen : null;
     const desde = /^\d{4}-\d{2}-\d{2}$/.test(req.body.desde || '') ? req.body.desde : null;
     const hasta = /^\d{4}-\d{2}-\d{2}$/.test(req.body.hasta || '') ? req.body.hasta : null;
 

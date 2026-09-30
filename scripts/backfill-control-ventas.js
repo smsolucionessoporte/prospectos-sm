@@ -39,8 +39,9 @@ function normalizar(valor = "") {
 
 function detectarOrigen(labels = []) {
   const l = labels.map(normalizar);
-  if (l.includes("meta-pos-cliente")) return "meta";
-  if (l.includes("google-pos-cliente")) return "google";
+  if (l.includes("meta")) return "meta";
+  if (l.includes("google")) return "google";
+  if (l.includes("web")) return "web";
   return "otro";
 }
 
@@ -365,6 +366,7 @@ async function main() {
   let errores = 0;
   let meta = 0;
   let google = 0;
+  let web = 0;
   let derivadas = 0;
   let conTiempo = 0;
   let consultasErroneas = 0;
@@ -385,6 +387,7 @@ async function main() {
       procesadas++;
       if (r.origen === "meta") meta++;
       if (r.origen === "google") google++;
+      if (r.origen === "web") web++;
       if (r.derivado) derivadas++;
       if (r.tiempoConfiable) conTiempo++;
       if (r.clasificacion === "consulta_erronea") consultasErroneas++;
@@ -415,6 +418,7 @@ async function main() {
       COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE origen='meta')::int AS meta,
       COUNT(*) FILTER (WHERE origen='google')::int AS google,
+      COUNT(*) FILTER (WHERE origen='web')::int AS web,
       COUNT(*) FILTER (WHERE clasificacion='consulta_erronea')::int AS consultas_erroneas,
       COUNT(*) FILTER (
         WHERE respondio_cliente = true
@@ -434,6 +438,7 @@ async function main() {
   console.log(`Errores: ${errores}`);
   console.log(`Meta detectadas: ${meta}`);
   console.log(`Google detectadas: ${google}`);
+  console.log(`Web detectadas: ${web}`);
   console.log(`Derivadas detectadas: ${derivadas}`);
   console.log(`Derivaciones con hora confiable: ${conTiempo}`);
   console.log(`Consultas erróneas detectadas: ${consultasErroneas}`);

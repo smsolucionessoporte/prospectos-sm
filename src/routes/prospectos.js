@@ -735,7 +735,7 @@ router.post(
       });
     }
 
-    if (!["google", "meta"].includes(origen)) {
+    if (!["google", "meta", "web"].includes(origen)) {
       return res.status(400).json({
         error: "Origen no válido",
       });
@@ -748,11 +748,15 @@ const origenProspecto = origen;
       await pool.query(
         `
         UPDATE control_ventas
-        SET origen = $2,
+        SET origen_detalle = CASE
+              WHEN origen IS DISTINCT FROM $2 THEN $3
+              ELSE origen_detalle
+            END,
+            origen = $2,
             actualizado_en = NOW()
         WHERE chatwoot_conversation_id = $1
         `,
-        [chatwoot_conversation_id, origen],
+        [chatwoot_conversation_id, origen, `${origen}_label`],
       );
 
       // 2. Si ya existe Prospecto, corregir también su origen.
@@ -840,11 +844,11 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
       DO UPDATE SET
         origen = CASE
           -- Si ya identificamos Meta o Google, nunca degradarlo a "otro".
-          WHEN control_ventas.origen IN ('meta', 'google')
+          WHEN control_ventas.origen IN ('meta', 'google', 'web')
             THEN control_ventas.origen
 
           -- Si estaba vacío/otro y ahora conseguimos un origen real, mejorarlo.
-          WHEN EXCLUDED.origen IN ('meta', 'google')
+          WHEN EXCLUDED.origen IN ('meta', 'google', 'web')
             THEN EXCLUDED.origen
 
           -- En cualquier otro caso conservar lo que ya teníamos.
@@ -1543,9 +1547,9 @@ if (req.session.usuario.rol === "admin") {
               {
                 manual: "Manual",
                 meta: "📱 Meta",
-                google: "🌐 Google",
-                "meta-pos-cliente": "📱 Meta",
-                "google-pos-cliente": "🌐 Google",
+                google: "🔎 Google",
+                web: "🌐 Web",
+                otro: "❔ Sin identificar",
                 "prospecto-interno": "🤝 Referido / Interno"
               }           
                 [p.origen] || "—"}</span></div>
@@ -3386,10 +3390,9 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
     const origenLabels = {
       manual: "Manual",
       meta: "📱 Meta",
-      google: "🌐 Google",
-      otro: "Sin identificar",
-      "meta-pos-cliente": "📱 Meta",
-      "google-pos-cliente": "🌐 Google",
+      google: "🔎 Google",
+      web: "🌐 Web",
+      otro: "❔ Sin identificar",
       "prospecto-interno": "🤝 Referido / Interno"
     };
 
@@ -3492,10 +3495,11 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                   req.session.usuario.rol === "admin"
                     ? `
                       <select name="origen">
-                        <option value="google" ${p.origen === "google" || p.origen === "google-pos-cliente" ? "selected" : ""}>Google</option>
-                        <option value="meta" ${p.origen === "meta" || p.origen === "meta-pos-cliente" ? "selected" : ""}>Meta</option>
+                        <option value="google" ${p.origen === "google" ? "selected" : ""}>Google</option>
+                        <option value="meta" ${p.origen === "meta" ? "selected" : ""}>Meta</option>
+                        <option value="web" ${p.origen === "web" ? "selected" : ""}>Web</option>
                         <option value="prospecto-interno" ${p.origen === "prospecto-interno" ? "selected" : ""}>Referido / Interno</option>
-                        <option value="sin-identificar" ${p.origen === "sin-identificar" ? "selected" : ""}>Sin identificar</option>
+                        <option value="otro" ${p.origen === "otro" ? "selected" : ""}>Sin identificar</option>
                       </select>
                     `
                     : `
@@ -4005,8 +4009,9 @@ if (
   const origenesValidos = [
     "google",
     "meta",
+    "web",
+    "otro",
     "prospecto-interno",
-    "sin-identificar",
   ];
 
   if (!origenesValidos.includes(b.origen)) {
@@ -4247,6 +4252,19 @@ let cambioResponsable = null;
     `,
     [nuevoOrigen, req.params.id],
   );
+
+  if (["meta", "google", "web", "otro"].includes(nuevoOrigen)) {
+    await pool.query(
+      `
+      UPDATE control_ventas
+      SET origen = $1,
+          origen_detalle = $2,
+          actualizado_en = NOW()
+      WHERE chatwoot_conversation_id = $3
+      `,
+      [nuevoOrigen, `${nuevoOrigen}_manual`, actual.chatwoot_conversation_id],
+    );
+  }
 
   await pool.query(
     `

@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS control_ventas (
 
   CHECK (
     origen IS NULL OR
-    origen IN ('meta', 'google', 'otro')
+    origen IN ('meta', 'google', 'web', 'otro')
   ),
 
   CHECK (
@@ -138,6 +138,36 @@ CREATE INDEX IF NOT EXISTS idx_control_ventas_vendedor
 
 ALTER TABLE control_ventas
   ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(50);
+
+-- Normalización de origen. La constraint anterior no contemplaba Web.
+ALTER TABLE control_ventas
+  DROP CONSTRAINT IF EXISTS control_ventas_origen_check;
+
+ALTER TABLE control_ventas
+  ADD CONSTRAINT control_ventas_origen_check
+  CHECK (origen IS NULL OR origen IN ('meta', 'google', 'web', 'otro'));
+
+-- Backfill idempotente: los contactos que ya habíamos identificado como
+-- web mediante origen_detalle dejan de quedar mezclados en "otro".
+UPDATE control_ventas
+SET origen = 'web',
+    actualizado_en = NOW()
+WHERE origen = 'otro'
+  AND origen_detalle IN ('web_organic', 'web_direct', 'web_metadata', 'web_text', 'web_label');
+
+-- Normalizar valores históricos de Prospectos y alinear los contactos Web
+-- existentes con Control de Ventas.
+UPDATE prospectos SET origen = 'meta' WHERE origen = 'meta-pos-cliente';
+UPDATE prospectos SET origen = 'google' WHERE origen = 'google-pos-cliente';
+UPDATE prospectos SET origen = 'otro' WHERE origen = 'sin-identificar';
+
+UPDATE prospectos p
+SET origen = 'web',
+    actualizado_en = NOW()
+FROM control_ventas cv
+WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+  AND cv.origen = 'web'
+  AND COALESCE(p.origen, 'manual') NOT IN ('prospecto-interno');
 
 CREATE INDEX IF NOT EXISTS idx_control_ventas_derivacion
   ON control_ventas(fecha_derivacion);

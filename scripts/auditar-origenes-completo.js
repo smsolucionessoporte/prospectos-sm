@@ -13,8 +13,8 @@ const headers = {
 };
 
 function normalizarOrigenProspecto(origen) {
-  if (origen === "google-pos-cliente") return "google";
-  if (origen === "meta-pos-cliente") return "meta";
+  if (origen === "google") return "google";
+  if (origen === "meta") return "meta";
   return origen;
 }
 
@@ -23,8 +23,9 @@ function detectarOrigen(labels) {
     String(x).toLowerCase(),
   );
 
-  const google = normalized.includes("google-pos-cliente");
-  const meta = normalized.includes("meta-pos-cliente");
+  const google = normalized.includes("google");
+  const meta = normalized.includes("meta");
+  const web = normalized.includes("web");
   const interno = normalized.includes("prospecto-interno");
   const auditar = normalized.includes("auditar-origen");
 
@@ -32,23 +33,32 @@ function detectarOrigen(labels) {
    * Google/Meta + auditar es un conflicto corregible:
    * ya conocemos el origen, por lo que auditar debe eliminarse.
    */
-  if (google && auditar && !meta && !interno) {
+  if (google && auditar && !meta && !web && !interno) {
     return {
       tipo: "conflicto-auditar",
       origen: "google",
     };
   }
 
-  if (meta && auditar && !google && !interno) {
+  if (meta && auditar && !google && !web && !interno) {
     return {
       tipo: "conflicto-auditar",
       origen: "meta",
     };
   }
 
+
+  if (web && auditar && !google && !meta && !interno) {
+    return {
+      tipo: "conflicto-auditar",
+      origen: "web",
+    };
+  }
+
   const origenesDefinitivos = [
     google ? "google" : null,
     meta ? "meta" : null,
+    web ? "web" : null,
     interno ? "prospecto-interno" : null,
   ].filter(Boolean);
 
@@ -65,6 +75,10 @@ function detectarOrigen(labels) {
 
   if (meta) {
     return { tipo: "definitivo", origen: "meta" };
+  }
+
+  if (web) {
+    return { tipo: "definitivo", origen: "web" };
   }
 
   if (interno) {

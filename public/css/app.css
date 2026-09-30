@@ -658,6 +658,11 @@ textarea { resize: vertical; min-height: 72px; }
   background: #ecfeff;
 }
 
+.control-stat-card.stat-web {
+  border-top: 4px solid #0284c7;
+  background: #f0f9ff;
+}
+
 .control-stat-card.stat-no-response {
   border-top: 4px solid #f59e0b;
   background: #fffbeb;

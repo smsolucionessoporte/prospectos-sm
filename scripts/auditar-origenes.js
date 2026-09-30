@@ -42,12 +42,21 @@ function detectByText(content) {
   }
 
   if (
+    text.includes("google ads") ||
+    text.includes("adwords") ||
+    text.includes("anuncio de google") ||
+    text.includes("publicidad de google")
+  ) {
+    return "google";
+  }
+
+  if (
     text.includes("sitio web") ||
     text.includes("pagina web") ||
     /\bweb\b/.test(text) ||
     text.includes("sitio")
   ) {
-    return "google";
+    return "web";
   }
 
   return "otro";
@@ -109,17 +118,23 @@ function detectOrigin(labels, firstMessage) {
   );
 
   const hasMeta =
-    normalizedLabels.includes("meta-pos-cliente");
+    normalizedLabels.includes("meta");
 
   const hasGoogle =
-    normalizedLabels.includes("google-pos-cliente");
+    normalizedLabels.includes("google");
 
-  if (hasMeta && hasGoogle) {
+  const hasWeb =
+    normalizedLabels.includes("web");
+
+  const explicitOrigins = [hasMeta, hasGoogle, hasWeb].filter(Boolean).length;
+
+  if (explicitOrigins > 1) {
     return "conflicto";
   }
 
   if (hasMeta) return "meta";
   if (hasGoogle) return "google";
+  if (hasWeb) return "web";
 
   return detectByText(firstMessage);
 }

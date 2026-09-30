@@ -25,8 +25,8 @@ async function getLabels(conversationId) {
 }
 
 function normalizarOrigenProspectos(origen) {
-  if (origen === "google-pos-cliente") return "google";
-  if (origen === "meta-pos-cliente") return "meta";
+  if (origen === "google") return "google";
+  if (origen === "meta") return "meta";
   return origen;
 }
 
@@ -74,10 +74,13 @@ async function main() {
       );
 
       const hasGoogle =
-        normalized.includes("google-pos-cliente");
+        normalized.includes("google");
 
       const hasMeta =
-        normalized.includes("meta-pos-cliente");
+        normalized.includes("meta");
+
+      const hasWeb =
+        normalized.includes("web");
 
       const hasInterno =
         normalized.includes("prospecto-interno");
@@ -90,6 +93,7 @@ async function main() {
       const categorias = [
         hasGoogle ? "google" : null,
         hasMeta ? "meta" : null,
+        hasWeb ? "web" : null,
         hasInterno ? "interno" : null,
         hasAuditar ? "auditar" : null,
       ].filter(Boolean);

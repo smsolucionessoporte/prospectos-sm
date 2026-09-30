@@ -40,13 +40,10 @@ function puedeCerrar(usuarioSesion, prospecto) {
 // Origen: valores nuevos + históricos
 const ORIGEN_LABEL = {
   meta: "📱 Meta",
-  google: "🌐 Google",
-  otro: "—",
-
-  "meta-pos-cliente": "📱 Meta",
-  "google-pos-cliente": "🌐 Google",
-
-  "prospecto-interno": "🤝 Referido / Interno",  
+  google: "🔎 Google",
+  web: "🌐 Web",
+  otro: "❔ Sin identificar",
+  "prospecto-interno": "🤝 Referido / Interno",
   manual: "Manual",
 };
 
@@ -999,6 +996,10 @@ function controlBreakdownTooltip(label, breakdown) {
     lines.push(`Google: ${breakdown.google}`);
   }
 
+  if ((breakdown.web || 0) > 0) {
+    lines.push(`Web: ${breakdown.web}`);
+  }
+
   if ((breakdown.otro || 0) > 0) {
     lines.push(`Sin identificar: ${breakdown.otro}`);
   }
@@ -1059,8 +1060,13 @@ function renderFlipResultCard({
           </div>
 
           <div class="control-origin-row">
-            <span>🌐 Google</span>
+            <span>🔎 Google</span>
             <strong>${denominators ? `${breakdown.google || 0} de ${denominators.google || 0} → ${formatConversionRate(breakdown.google, denominators.google)}` : (breakdown.google || 0)}</strong>
+          </div>
+
+          <div class="control-origin-row">
+            <span>🌐 Web</span>
+            <strong>${denominators ? `${breakdown.web || 0} de ${denominators.web || 0} → ${formatConversionRate(breakdown.web, denominators.web)}` : (breakdown.web || 0)}</strong>
           </div>
 
           <div class="control-origin-row">
@@ -1203,6 +1209,7 @@ const filtroUsuarioControl = esAdminControl
         COUNT(*)::int AS entraron,
         COUNT(*) FILTER (WHERE cv.origen = 'meta')::int AS meta,
         COUNT(*) FILTER (WHERE cv.origen = 'google')::int AS google,
+        COUNT(*) FILTER (WHERE cv.origen = 'web')::int AS web,
         COUNT(*) FILTER (WHERE COALESCE(cv.origen, 'otro') = 'otro')::int AS sin_identificar,
         COUNT(*) FILTER (WHERE cv.respondio_cliente = false)::int AS no_respondieron,
         COUNT(*) FILTER (WHERE cv.clasificacion = 'consulta_erronea')::int AS consultas_erroneas,
@@ -1215,6 +1222,7 @@ const filtroUsuarioControl = esAdminControl
         COUNT(*) FILTER (WHERE cv.llego_demo = true)::int AS llegaron_demo,
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'meta')::int AS llegaron_demo_meta,
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'google')::int AS llegaron_demo_google,
+        COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'web')::int AS llegaron_demo_web,
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND COALESCE(cv.origen, 'otro') = 'otro')::int AS llegaron_demo_otro,
         -- Desglose por origen: no respondieron
         COUNT(*) FILTER (
@@ -1226,6 +1234,11 @@ const filtroUsuarioControl = esAdminControl
           WHERE cv.respondio_cliente = false
             AND cv.origen = 'google'
         )::int AS no_respondieron_google,
+
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = false
+            AND cv.origen = 'web'
+        )::int AS no_respondieron_web,
 
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = false
@@ -1242,6 +1255,11 @@ const filtroUsuarioControl = esAdminControl
           WHERE cv.clasificacion = 'consulta_erronea'
             AND cv.origen = 'google'
         )::int AS consultas_erroneas_google,
+
+        COUNT(*) FILTER (
+          WHERE cv.clasificacion = 'consulta_erronea'
+            AND cv.origen = 'web'
+        )::int AS consultas_erroneas_web,
 
         COUNT(*) FILTER (
           WHERE cv.clasificacion = 'consulta_erronea'
@@ -1267,6 +1285,13 @@ const filtroUsuarioControl = esAdminControl
           WHERE cv.respondio_cliente = true
             AND cv.derivado = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
+            AND cv.origen = 'web'
+        )::int AS no_avanzaron_web,
+
+        COUNT(*) FILTER (
+          WHERE cv.respondio_cliente = true
+            AND cv.derivado = false
+            AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
             AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS no_avanzaron_otro,
 
@@ -1283,6 +1308,11 @@ const filtroUsuarioControl = esAdminControl
 
         COUNT(*) FILTER (
           WHERE cv.derivado = true
+            AND cv.origen = 'web'
+        )::int AS derivados_web,
+
+        COUNT(*) FILTER (
+          WHERE cv.derivado = true
             AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS derivados_otro
       FROM base cv
@@ -1291,9 +1321,9 @@ const filtroUsuarioControl = esAdminControl
     );
 
     const stats = resumen.rows[0] || {
-      entraron: 0, meta: 0, google: 0, sin_identificar: 0, no_respondieron: 0,
+      entraron: 0, meta: 0, google: 0, web: 0, sin_identificar: 0, no_respondieron: 0,
       consultas_erroneas: 0, no_avanzaron: 0, derivados: 0, llegaron_demo: 0,
-      llegaron_demo_meta: 0, llegaron_demo_google: 0, llegaron_demo_otro: 0,
+      llegaron_demo_meta: 0, llegaron_demo_google: 0, llegaron_demo_web: 0, llegaron_demo_otro: 0,
     };
 
 const paramsEmbudo = [];
@@ -1636,7 +1666,7 @@ ${esAdminControl ? `
   <!-- ADMIN: origen -->
   <div class="control-mini-title">Origen de los contactos</div>
 
-  <div class="control-stats-grid control-stats-grid-four">
+  <div class="control-stats-grid control-stats-grid-five">
     <div class="control-stat-card stat-total">
       <div class="control-stat-value">${stats.entraron}</div>
       <div class="control-stat-title">Entraron</div>
@@ -1653,6 +1683,12 @@ ${esAdminControl ? `
       <div class="control-stat-value">${stats.google}</div>
       <div class="control-stat-title">Google</div>
       <div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div>
+    </div>
+
+    <div class="control-stat-card stat-web">
+      <div class="control-stat-value">${stats.web || 0}</div>
+      <div class="control-stat-title">Web</div>
+      <div class="control-stat-desc">${porcentaje(stats.web || 0, stats.entraron)}% del total</div>
     </div>
 
     <div class="control-stat-card stat-other">
@@ -1675,7 +1711,14 @@ ${esAdminControl ? `
     breakdown: {
       meta: stats.no_respondieron_meta,
       google: stats.no_respondieron_google,
+      web: stats.no_respondieron_web,
       otro: stats.no_respondieron_otro,
+    },
+    denominators: {
+      meta: stats.meta,
+      google: stats.google,
+      web: stats.web || 0,
+      otro: stats.sin_identificar || 0,
     },
   })}
 
@@ -1688,7 +1731,14 @@ ${esAdminControl ? `
     breakdown: {
       meta: stats.consultas_erroneas_meta,
       google: stats.consultas_erroneas_google,
+      web: stats.consultas_erroneas_web,
       otro: stats.consultas_erroneas_otro,
+    },
+    denominators: {
+      meta: stats.meta,
+      google: stats.google,
+      web: stats.web || 0,
+      otro: stats.sin_identificar || 0,
     },
   })}
 
@@ -1700,7 +1750,14 @@ ${esAdminControl ? `
     breakdown: {
       meta: stats.no_avanzaron_meta,
       google: stats.no_avanzaron_google,
+      web: stats.no_avanzaron_web,
       otro: stats.no_avanzaron_otro,
+    },
+    denominators: {
+      meta: stats.meta,
+      google: stats.google,
+      web: stats.web || 0,
+      otro: stats.sin_identificar || 0,
     },
   })}
 
@@ -1712,7 +1769,14 @@ ${esAdminControl ? `
     breakdown: {
       meta: stats.derivados_meta,
       google: stats.derivados_google,
+      web: stats.derivados_web,
       otro: stats.derivados_otro,
+    },
+    denominators: {
+      meta: stats.meta,
+      google: stats.google,
+      web: stats.web || 0,
+      otro: stats.sin_identificar || 0,
     },
   })}
 
@@ -1724,11 +1788,13 @@ ${esAdminControl ? `
     breakdown: {
       meta: stats.llegaron_demo_meta,
       google: stats.llegaron_demo_google,
+      web: stats.llegaron_demo_web,
       otro: stats.llegaron_demo_otro,
     },
     denominators: {
       meta: stats.meta,
       google: stats.google,
+      web: stats.web || 0,
       otro: stats.sin_identificar || 0,
     },
   })}
