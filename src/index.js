@@ -7,6 +7,8 @@ const { pool, runMigrations } = require('./db');
 const authRoutes = require('./routes/auth');
 const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
+const campaniasRoutes = require('./routes/campanias');
+const { iniciarProcesadorCampanias } = require('./routes/campanias');
 const { enviarPorChatwoot, enviarAvisoInterno, formatearFechaAR } = require('./zoomChatwoot');
 const { responsableCierre } = require('./routes/prospectos');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
@@ -38,6 +40,7 @@ app.use(session({
 app.use(authRoutes);
 app.use(panelRoutes);
 app.use(prospectosRoutes);
+app.use(campaniasRoutes);
 
 // Redirigir raíz al panel
 app.get('/', (req, res) => res.redirect('/panel'));
@@ -50,6 +53,7 @@ async function start() {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
     iniciarRecordatorios();
+    await iniciarProcesadorCampanias();
     //iniciarRecordatoriosRelevamiento();
     //iniciarResumenDiario();
   } catch (err) {

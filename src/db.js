@@ -138,6 +138,43 @@ CREATE INDEX IF NOT EXISTS idx_control_ventas_vendedor
 
 CREATE INDEX IF NOT EXISTS idx_control_ventas_derivacion
   ON control_ventas(fecha_derivacion);
+
+CREATE TABLE IF NOT EXISTS campanias (
+  id BIGSERIAL PRIMARY KEY,
+  nombre VARCHAR(150) NOT NULL,
+  mensaje TEXT NOT NULL,
+  segmento VARCHAR(50) NOT NULL DEFAULT 'no_respondieron',
+  origen_filtro VARCHAR(30),
+  desde_filtro DATE,
+  hasta_filtro DATE,
+  estado VARCHAR(30) NOT NULL DEFAULT 'pendiente'
+    CHECK (estado IN ('pendiente','enviando','completada','completada_con_errores')),
+  total_destinatarios INTEGER NOT NULL DEFAULT 0,
+  enviados INTEGER NOT NULL DEFAULT 0,
+  omitidos INTEGER NOT NULL DEFAULT 0,
+  errores INTEGER NOT NULL DEFAULT 0,
+  creado_por INTEGER REFERENCES usuarios(id),
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  iniciado_en TIMESTAMPTZ,
+  finalizado_en TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS campania_destinatarios (
+  id BIGSERIAL PRIMARY KEY,
+  campania_id BIGINT NOT NULL REFERENCES campanias(id) ON DELETE CASCADE,
+  chatwoot_conversation_id BIGINT NOT NULL,
+  estado VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+    CHECK (estado IN ('pendiente','procesando','enviado','omitido','error')),
+  detalle TEXT,
+  enviado_en TIMESTAMPTZ,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (campania_id, chatwoot_conversation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_campanias_estado
+  ON campanias(estado, creado_en);
+CREATE INDEX IF NOT EXISTS idx_campania_destinatarios_pendientes
+  ON campania_destinatarios(campania_id, estado, id);
 `;
 
 async function runMigrations() {

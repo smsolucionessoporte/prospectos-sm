@@ -46,6 +46,13 @@ ${u ? `
                 : ""
             }
 
+        ${u.rol === "admin" ? `
+          <a href="/campanias" class="nav-link${req.path.startsWith("/campanias") ? " active" : ""}">
+            <i class="ti ti-speakerphone"></i>
+            Campañas
+          </a>
+        ` : ""}
+
         ${u.rol === "admin" || u.rol === "vendedor" ? `
           <a
             href="/control"

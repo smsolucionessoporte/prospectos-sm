@@ -78,6 +78,55 @@ async function enviarMensajePorConversationId(conversationId, mensaje) {
   );
 }
 
+async function obtenerEstadoConversacionChatwoot(conversationId) {
+  const headers = { api_access_token: process.env.CHATWOOT_API_TOKEN };
+  try {
+    const [{ data: conversation }, { data: labelsData }] = await Promise.all([
+      axios.get(
+        `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}`,
+        { headers }
+      ),
+      axios.get(
+        `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/labels`,
+        { headers }
+      ).catch(() => ({ data: { payload: [] } }))
+    ]);
+
+    return {
+      status: conversation?.status || null,
+      labels: Array.isArray(labelsData?.payload)
+        ? labelsData.payload
+        : Array.isArray(conversation?.labels)
+          ? conversation.labels
+          : []
+    };
+  } catch (error) {
+    if (error.response?.status === 404) return null;
+    throw error;
+  }
+}
+
+async function enviarCampaniaPorConversationId(conversationId, mensaje, campaniaId) {
+  const headers = {
+    'content-type': 'application/json',
+    api_access_token: process.env.CHATWOOT_API_TOKEN
+  };
+
+  await axios.post(
+    `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
+    {
+      content: mensaje,
+      message_type: 'outgoing',
+      private: false,
+      content_attributes: {
+        sm_prospectos_campaign: true,
+        campania_id: Number(campaniaId)
+      }
+    },
+    { headers }
+  );
+}
+
 const BOT_INBOX_ID = Number(process.env.BOT_INBOX_ID);
 
 async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
@@ -296,4 +345,13 @@ const chatwootAgentId = Number(
 
 
 
-module.exports = { crearReunionZoom, enviarPorChatwoot, formatearFechaAR, enviarMensajePorConversationId, normalizarTelefono, enviarAvisoInterno };
+module.exports = {
+  crearReunionZoom,
+  enviarPorChatwoot,
+  formatearFechaAR,
+  enviarMensajePorConversationId,
+  normalizarTelefono,
+  enviarAvisoInterno,
+  obtenerEstadoConversacionChatwoot,
+  enviarCampaniaPorConversationId,
+};

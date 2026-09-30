@@ -854,3 +854,7 @@ textarea { resize: vertical; min-height: 72px; }
     padding: 16px;
   }
 }
+/* ── Campañas ────────────────────────────────────────────────────────────── */
+.alert-success { background: var(--green-bg); color: var(--green); border: 1px solid #bbf7d0; }
+#campania-form { margin-bottom: 22px; }
+#campania-form textarea { min-height: 150px; }
