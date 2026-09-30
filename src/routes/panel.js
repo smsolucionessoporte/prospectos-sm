@@ -1056,22 +1056,22 @@ function renderFlipResultCard({
 
           <div class="control-origin-row">
             <span>📱 Meta</span>
-            <strong>${denominators ? `${breakdown.meta || 0} de ${denominators.meta || 0} → ${formatConversionRate(breakdown.meta, denominators.meta)}` : (breakdown.meta || 0)}</strong>
+            <strong>${denominators ? `${breakdown.meta || 0} · ${formatConversionRate(breakdown.meta, denominators.meta)}` : (breakdown.meta || 0)}</strong>
           </div>
 
           <div class="control-origin-row">
             <span>🔎 Google</span>
-            <strong>${denominators ? `${breakdown.google || 0} de ${denominators.google || 0} → ${formatConversionRate(breakdown.google, denominators.google)}` : (breakdown.google || 0)}</strong>
+            <strong>${denominators ? `${breakdown.google || 0} · ${formatConversionRate(breakdown.google, denominators.google)}` : (breakdown.google || 0)}</strong>
           </div>
 
           <div class="control-origin-row">
             <span>🌐 Web</span>
-            <strong>${denominators ? `${breakdown.web || 0} de ${denominators.web || 0} → ${formatConversionRate(breakdown.web, denominators.web)}` : (breakdown.web || 0)}</strong>
+            <strong>${denominators ? `${breakdown.web || 0} · ${formatConversionRate(breakdown.web, denominators.web)}` : (breakdown.web || 0)}</strong>
           </div>
 
           <div class="control-origin-row">
             <span>❔ Sin identificar</span>
-            <strong>${denominators ? `${breakdown.otro || 0} de ${denominators.otro || 0} → ${formatConversionRate(breakdown.otro, denominators.otro)}` : (breakdown.otro || 0)}</strong>
+            <strong>${denominators ? `${breakdown.otro || 0} · ${formatConversionRate(breakdown.otro, denominators.otro)}` : (breakdown.otro || 0)}</strong>
           </div>
 
           <div class="control-flip-hint">
