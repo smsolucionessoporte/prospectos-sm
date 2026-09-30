@@ -1701,7 +1701,7 @@ ${esAdminControl ? `
   <!-- ADMIN: resultado -->
   <div class="control-mini-title">Resultado del contacto</div>
 
- <div class="control-stats-grid control-stats-grid-five">
+ <div class="control-stats-grid control-stats-grid-five control-results-grid">
 
   ${renderFlipResultCard({
     title: "No respondieron",
