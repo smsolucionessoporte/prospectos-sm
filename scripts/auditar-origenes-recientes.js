@@ -97,7 +97,8 @@ function detectFromEvidence(conversation, messages) {
     first_sender: first?.sender,
   });
 
-  const metadata = normalizeText(metadataSignals.join(" "));
+  const metadataRaw = metadataSignals.join(" ");
+  const metadata = normalizeText(metadataRaw);
   const text = normalizeText(firstText);
 
   const isOrganic = /\b(organic|organico|organica|seo)\b/.test(metadata);
@@ -105,31 +106,38 @@ function detectFromEvidence(conversation, messages) {
   const hasMeta = /\b(meta|facebook|instagram|fbclid|fb ads|facebook ads|instagram ads)\b/.test(metadata);
   const hasGoogle = /\b(google|adwords|google ads|gclid|gbraid|wbraid)\b/.test(metadata);
   const hasPaidMedium = /\b(cpc|ppc|paid|paidsearch|paid search|ads|ad)\b/.test(metadata);
-  const hasWeb = /\b(web|website|browser|landing|referrer|referer|page url|page_url)\b/.test(metadata);
+  const hasGoogleClickId = /\b(gclid|gbraid|wbraid)\b/.test(metadata);
+  const explicitWebSource = /(?:source|utm_source|origin)\s*=\s*(?:web|website|sitio)(?:\b|$)/i.test(metadataRaw);
 
+  // Evidencia fuerte: metadata/referral/click-id. El texto libre y las etiquetas
+  // históricas no deben reclasificar por sí solos Google <-> Web.
   if (hasMeta) {
-    return { origin: "meta", detail: "meta_metadata", source: "metadata", firstText, labels };
+    return { origin: "meta", detail: "meta_metadata", source: "metadata", confidence: "strong", firstText, labels };
   }
 
   if (
     hasGoogle &&
     !isOrganic &&
     !isDirect &&
-    (hasPaidMedium || /\b(gclid|gbraid|wbraid|adwords|google ads)\b/.test(metadata))
+    (hasGoogleClickId || hasPaidMedium || /\b(adwords|google ads)\b/.test(metadata))
   ) {
-    return { origin: "google", detail: "google_ads_metadata", source: "metadata", firstText, labels };
+    return { origin: "google", detail: "google_ads_metadata", source: "metadata", confidence: "strong", firstText, labels };
   }
 
   if (isOrganic) {
-    return { origin: "web", detail: "web_organic", source: "metadata", firstText, labels };
+    return { origin: "web", detail: "web_organic", source: "metadata", confidence: "strong", firstText, labels };
   }
 
   if (isDirect) {
-    return { origin: "web", detail: "web_direct", source: "metadata", firstText, labels };
+    return { origin: "web", detail: "web_direct", source: "metadata", confidence: "strong", firstText, labels };
   }
 
-  if (hasWeb || hasGoogle) {
-    return { origin: "web", detail: "web_metadata", source: "metadata", firstText, labels };
+  if (explicitWebSource) {
+    return { origin: "web", detail: "web_metadata", source: "metadata", confidence: "strong", firstText, labels };
+  }
+
+  if (hasGoogle) {
+    return { origin: null, detail: "google_metadata_unverified", source: "metadata", confidence: "weak", firstText, labels };
   }
 
   if (
@@ -140,11 +148,11 @@ function detectFromEvidence(conversation, messages) {
     text.includes("vi el anuncio") ||
     text.includes("vengo desde meta")
   ) {
-    return { origin: "meta", detail: "meta_text", source: "text", firstText, labels };
+    return { origin: "meta", detail: "meta_text", source: "text", confidence: "medium", firstText, labels };
   }
 
   if (/\b(google ads|adwords|anuncio de google|publicidad de google)\b/.test(text)) {
-    return { origin: "google", detail: "google_ads_text", source: "text", firstText, labels };
+    return { origin: "google", detail: "google_ads_text", source: "text", confidence: "medium", firstText, labels };
   }
 
   if (
@@ -153,7 +161,7 @@ function detectFromEvidence(conversation, messages) {
     /\bweb\b/.test(text) ||
     text.includes("sitio")
   ) {
-    return { origin: "web", detail: "web_text", source: "text", firstText, labels };
+    return { origin: null, detail: "web_text_unverified", source: "text", confidence: "weak", firstText, labels };
   }
 
   const explicitOrigins = ["meta", "google", "web"].filter((origin) =>
@@ -175,6 +183,7 @@ function detectFromEvidence(conversation, messages) {
       origin,
       detail: `${origin}_label`,
       source: "label",
+      confidence: "label",
       firstText,
       labels,
     };
@@ -184,6 +193,7 @@ function detectFromEvidence(conversation, messages) {
     origin: "otro",
     detail: "unknown",
     source: "unknown",
+    confidence: "weak",
     firstText,
     labels,
   };
@@ -323,8 +333,13 @@ async function main() {
 
   const changes = [];
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
     const conversationId = Number(row.chatwoot_conversation_id);
+
+    if (index === 0 || (index + 1) % 50 === 0 || index + 1 === rows.length) {
+      console.log(`Revisando ${index + 1}/${rows.length}...`);
+    }
 
     try {
       const [conversation, messages] = await Promise.all([
@@ -355,29 +370,27 @@ async function main() {
 
       revisadas++;
 
-      if (detected.origin === "otro") {
+      if (!detected.origin || detected.origin === "otro") {
         desconocidas++;
-        if (!row.origen || row.origen === "otro") {
-          iguales++;
-          continue;
-        }
+        continue;
+      }
 
-        changes.push({
-          conversacion: conversationId,
-          actual: row.origen || "NULL",
-          detectado: "SIN EVIDENCIA",
-          detalle: "unknown",
-          accion: "NO TOCAR",
-          etiquetas: (detected.labels || []).join(", "),
-          mensaje: String(detected.firstText || "").slice(0, 90),
-        });
+      // Una etiqueta histórica no es evidencia independiente para reemplazar un
+      // origen ya informado. Sólo sirve para completar registros NULL/otro.
+      if (
+        detected.source === "label" &&
+        row.origen &&
+        row.origen !== "otro"
+      ) {
+        desconocidas++;
         continue;
       }
 
       const sameOrigin = row.origen === detected.origin;
-      const sameDetail = row.origen_detalle === detected.detail;
 
-      if (sameOrigin && sameDetail) {
+      // Para la auditoría de origen, si el origen coincide no proponemos cambios
+      // sólo para alterar origen_detalle con evidencia débil/mediana.
+      if (sameOrigin) {
         iguales++;
         continue;
       }
