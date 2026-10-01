@@ -634,8 +634,8 @@ textarea { resize: vertical; min-height: 72px; }
 }
 
 .control-stat-card.stat-confirmed {
-  border-top: 4px solid #15803d;
-  background: #ecfdf3;
+  border-top: 4px solid #059669;
+  background: #ecfdf5;
 }
 
 .control-stat-card.stat-other {
@@ -836,9 +836,10 @@ textarea { resize: vertical; min-height: 72px; }
 #campania-form { margin-bottom: 22px; }
 #campania-form textarea { min-height: 150px; }
 
-/* Control de ventas: grilla de resultados y reverso compacto */
+/* Control de ventas: 6 resultados en dos filas de 3 para que las cards
+   mantengan ancho suficiente también al mostrar el detalle por origen. */
 .control-results-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
