@@ -1143,33 +1143,39 @@ router.get("/control", requireAuth, requireRol("admin", "vendedor", "control"), 
     const esVendedorControl =
       usuarioControl.rol === "vendedor";
     const periodo = req.query.periodo || "30";
-    let desde = null;
-    let hasta = null;
 
-    if (periodo === "hoy") {
-      desde = new Date();
-      desde.setHours(0, 0, 0, 0);
-    } else if (periodo === "7") {
-      desde = new Date();
-      desde.setDate(desde.getDate() - 7);
-    } else if (periodo === "30") {
-      desde = new Date();
-      desde.setDate(desde.getDate() - 30);
-    } else if (periodo === "personalizado") {
-      desde = req.query.desde ? new Date(`${req.query.desde}T00:00:00`) : null;
-      hasta = req.query.hasta ? new Date(`${req.query.hasta}T23:59:59`) : null;
-    }
+    // Los períodos de Control son días calendario de Argentina.
+    // No usamos new Date()/setHours() porque Railway corre en UTC y, desde las
+    // 21:00 de Argentina, eso hacía que "Hoy" empezara a contar el día siguiente.
+    const fechaIngresoArgentina =
+      `(cv.fecha_ingreso AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`;
+    const hoyArgentina =
+      `(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`;
 
     const condiciones = [];
     const params = [];
-    if (desde) {
-      params.push(desde);
-      condiciones.push(`cv.fecha_ingreso >= $${params.length}`);
+
+    if (periodo === "hoy") {
+      condiciones.push(`${fechaIngresoArgentina} = ${hoyArgentina}`);
+    } else if (periodo === "7") {
+      condiciones.push(
+        `${fechaIngresoArgentina} BETWEEN (${hoyArgentina} - 6) AND ${hoyArgentina}`,
+      );
+    } else if (periodo === "30") {
+      condiciones.push(
+        `${fechaIngresoArgentina} BETWEEN (${hoyArgentina} - 29) AND ${hoyArgentina}`,
+      );
+    } else if (periodo === "personalizado") {
+      if (req.query.desde) {
+        params.push(req.query.desde);
+        condiciones.push(`${fechaIngresoArgentina} >= $${params.length}::date`);
+      }
+      if (req.query.hasta) {
+        params.push(req.query.hasta);
+        condiciones.push(`${fechaIngresoArgentina} <= $${params.length}::date`);
+      }
     }
-    if (hasta) {
-      params.push(hasta);
-      condiciones.push(`cv.fecha_ingreso <= $${params.length}`);
-    }
+
     const filtro = condiciones.length ? condiciones.join(" AND ") : "TRUE";
 
     // Filtro del usuario en Control
