@@ -1207,7 +1207,21 @@ const filtroUsuarioControl = esAdminControl
                     AND h.estado_nuevo IN ('demo_coordinada', 'demo_realizada')
                 )
               )
-          ) AS llego_demo
+          ) AS llego_demo,
+          EXISTS (
+            SELECT 1
+            FROM prospectos p
+            WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+              AND (
+                p.estado = 'confirmado'
+                OR EXISTS (
+                  SELECT 1
+                  FROM historial_estados h
+                  WHERE h.prospecto_id = p.id
+                    AND h.estado_nuevo = 'confirmado'
+                )
+              )
+          ) AS confirmado
         FROM control_ventas cv
         WHERE ${filtro}
       )
@@ -1230,6 +1244,11 @@ const filtroUsuarioControl = esAdminControl
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'google')::int AS llegaron_demo_google,
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'web')::int AS llegaron_demo_web,
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND COALESCE(cv.origen, 'otro') = 'otro')::int AS llegaron_demo_otro,
+        COUNT(*) FILTER (WHERE cv.confirmado = true)::int AS confirmados,
+        COUNT(*) FILTER (WHERE cv.confirmado = true AND cv.origen = 'meta')::int AS confirmados_meta,
+        COUNT(*) FILTER (WHERE cv.confirmado = true AND cv.origen = 'google')::int AS confirmados_google,
+        COUNT(*) FILTER (WHERE cv.confirmado = true AND cv.origen = 'web')::int AS confirmados_web,
+        COUNT(*) FILTER (WHERE cv.confirmado = true AND COALESCE(cv.origen, 'otro') = 'otro')::int AS confirmados_otro,
         -- Desglose por origen: no respondieron
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = false
@@ -1328,8 +1347,9 @@ const filtroUsuarioControl = esAdminControl
 
     const stats = resumen.rows[0] || {
       entraron: 0, meta: 0, google: 0, web: 0, sin_identificar: 0, no_respondieron: 0,
-      consultas_erroneas: 0, no_avanzaron: 0, derivados: 0, llegaron_demo: 0,
+      consultas_erroneas: 0, no_avanzaron: 0, derivados: 0, llegaron_demo: 0, confirmados: 0,
       llegaron_demo_meta: 0, llegaron_demo_google: 0, llegaron_demo_web: 0, llegaron_demo_otro: 0,
+      confirmados_meta: 0, confirmados_google: 0, confirmados_web: 0, confirmados_otro: 0,
     };
 
 const paramsEmbudo = [];
@@ -1796,6 +1816,25 @@ ${esAdminControl ? `
       google: stats.llegaron_demo_google,
       web: stats.llegaron_demo_web,
       otro: stats.llegaron_demo_otro,
+    },
+    denominators: {
+      meta: stats.meta,
+      google: stats.google,
+      web: stats.web || 0,
+      otro: stats.sin_identificar || 0,
+    },
+  })}
+
+  ${renderFlipResultCard({
+    title: "Confirmados",
+    value: stats.confirmados || 0,
+    description: `${porcentaje(stats.confirmados || 0, stats.entraron)}% del total · Confirmaron la contratación`,
+    cardClass: "control-stat-highlight stat-confirmed",
+    breakdown: {
+      meta: stats.confirmados_meta,
+      google: stats.confirmados_google,
+      web: stats.confirmados_web,
+      otro: stats.confirmados_otro,
     },
     denominators: {
       meta: stats.meta,

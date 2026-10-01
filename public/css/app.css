@@ -633,6 +633,11 @@ textarea { resize: vertical; min-height: 72px; }
   background: #f0fdf4;
 }
 
+.control-stat-card.stat-confirmed {
+  border-top: 4px solid #15803d;
+  background: #ecfdf3;
+}
+
 .control-stat-card.stat-other {
   border-top: 4px solid #64748b;
   background: #f8fafc;
@@ -833,7 +838,7 @@ textarea { resize: vertical; min-height: 72px; }
 
 /* Control de ventas: grilla de resultados y reverso compacto */
 .control-results-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
 }
 
