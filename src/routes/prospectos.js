@@ -266,6 +266,10 @@ if (vendedorAnterior !== usuarioId) {
     `
     UPDATE control_ventas
     SET vendedor_id = $2,
+        fecha_inicio_espera_vendedor = CASE
+          WHEN fecha_inicio_espera_vendedor IS NOT NULL THEN NOW()
+          ELSE NULL
+        END,
         actualizado_en = NOW()
     WHERE chatwoot_conversation_id = $1
     `,
@@ -659,6 +663,7 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
       SET
         vendedor_id = $2,
         vendedor_nombre = $3,
+        fecha_inicio_espera_vendedor = NOW(),
         actualizado_en = NOW()
       WHERE chatwoot_conversation_id = $1
       `,
@@ -818,6 +823,8 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
     "consulta_erronea",
     "no_interesado",
     "derivacion",
+    "espera_vendedor",
+    "cancelar_espera_vendedor",
     "respuesta_vendedor",
   ];
 
@@ -908,6 +915,7 @@ if (evento === "consulta_erronea") {
         vendedor_id = NULL,
         vendedor_nombre = NULL,
         fecha_primera_respuesta_vendedor = NULL,
+        fecha_inicio_espera_vendedor = NULL,
         actualizado_en = NOW()
       WHERE chatwoot_conversation_id = $1
       `,
@@ -942,6 +950,7 @@ if (evento === "consulta_erronea") {
             COALESCE(fecha_primera_respuesta_cliente, NOW()),
           clasificacion = 'no_interesado',
           fecha_clasificacion = NOW(),
+          fecha_inicio_espera_vendedor = NULL,
           actualizado_en = NOW()
         WHERE chatwoot_conversation_id = $1
         `,
@@ -966,6 +975,8 @@ if (evento === "consulta_erronea") {
             COALESCE($2, vendedor_id),
           vendedor_nombre =
             COALESCE($3, vendedor_nombre),
+          fecha_inicio_espera_vendedor =
+            COALESCE(fecha_inicio_espera_vendedor, NOW()),
           actualizado_en = NOW()
           WHERE chatwoot_conversation_id = $1
             AND COALESCE(clasificacion, '') <> 'consulta_erronea'
@@ -978,6 +989,35 @@ if (evento === "consulta_erronea") {
       );
     }
 
+    if (evento === "espera_vendedor") {
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET
+          fecha_inicio_espera_vendedor =
+            COALESCE(fecha_inicio_espera_vendedor, NOW()),
+          actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+          AND derivado = TRUE
+          AND COALESCE(clasificacion, '') <> 'consulta_erronea'
+        `,
+        [chatwoot_conversation_id],
+      );
+    }
+
+    if (evento === "cancelar_espera_vendedor") {
+      await pool.query(
+        `
+        UPDATE control_ventas
+        SET
+          fecha_inicio_espera_vendedor = NULL,
+          actualizado_en = NOW()
+        WHERE chatwoot_conversation_id = $1
+        `,
+        [chatwoot_conversation_id],
+      );
+    }
+
     if (evento === "respuesta_vendedor") {
       await pool.query(
         `
@@ -985,6 +1025,7 @@ if (evento === "consulta_erronea") {
         SET
           fecha_primera_respuesta_vendedor =
             COALESCE(fecha_primera_respuesta_vendedor, NOW()),
+          fecha_inicio_espera_vendedor = NULL,
           actualizado_en = NOW()
         WHERE chatwoot_conversation_id = $1
           AND derivado = TRUE

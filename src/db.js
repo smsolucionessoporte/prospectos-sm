@@ -139,6 +139,26 @@ CREATE INDEX IF NOT EXISTS idx_control_ventas_vendedor
 ALTER TABLE control_ventas
   ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(50);
 
+-- Momento desde el que el vendedor actualmente asignado tiene una respuesta pendiente.
+-- Es independiente de fecha_derivacion para no perder la historia original al reasignar.
+ALTER TABLE control_ventas
+  ADD COLUMN IF NOT EXISTS fecha_inicio_espera_vendedor TIMESTAMPTZ;
+
+-- Backfill idempotente para pendientes históricos. actualizado_en refleja la última
+-- sincronización/asignación disponible y evita heredar horas del responsable anterior.
+UPDATE control_ventas
+SET fecha_inicio_espera_vendedor = GREATEST(
+      fecha_derivacion,
+      COALESCE(actualizado_en, fecha_derivacion)
+    )
+WHERE fecha_inicio_espera_vendedor IS NULL
+  AND derivado = TRUE
+  AND fecha_derivacion IS NOT NULL
+  AND fecha_primera_respuesta_vendedor IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_control_ventas_espera_vendedor
+  ON control_ventas(fecha_inicio_espera_vendedor);
+
 -- Normalización de origen. La constraint anterior no contemplaba Web.
 ALTER TABLE control_ventas
   DROP CONSTRAINT IF EXISTS control_ventas_origen_check;

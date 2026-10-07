@@ -3,6 +3,7 @@ const axios = require("axios");
 const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
+const { businessMinutesBetween } = require("../salesBusinessTime");
 
 const ESTADOS = {
   prospecto: { label: "Prospecto", color: "gray" },
@@ -1496,8 +1497,7 @@ const filtroUsuarioResumen = esAdminControl
 
         COUNT(cv.id) FILTER (
           WHERE cv.derivado = true
-            AND cv.fecha_derivacion IS NOT NULL
-            AND cv.fecha_primera_respuesta_vendedor IS NULL
+            AND cv.fecha_inicio_espera_vendedor IS NOT NULL
         )::int AS pendientes,
 
         ROUND(AVG(
@@ -1531,9 +1531,9 @@ const filtroUsuarioResumen = esAdminControl
         cv.chatwoot_conversation_id,
         v.nombre AS vendedor,
         cv.fecha_derivacion,
+        cv.fecha_inicio_espera_vendedor,
         p.contacto,
-        p.telefono,
-        FLOOR(EXTRACT(EPOCH FROM (NOW() - cv.fecha_derivacion)) / 60)::int AS minutos_espera
+        p.telefono
       FROM control_ventas cv
             JOIN usuarios v
         ON v.id = cv.vendedor_id
@@ -1545,16 +1545,18 @@ const filtroUsuarioResumen = esAdminControl
         
         WHERE ${filtroUsuarioResumen}
         AND cv.derivado = true
-        AND cv.fecha_derivacion IS NOT NULL
-        AND cv.fecha_primera_respuesta_vendedor IS NULL
-      ORDER BY cv.fecha_derivacion ASC
+        AND cv.fecha_inicio_espera_vendedor IS NOT NULL
+      ORDER BY cv.fecha_inicio_espera_vendedor ASC
       LIMIT 100
       `,
 paramsResumenVendedores,
     );
 
-    // "Necesitan atención" debe representar pendientes actuales
-    const alertasActuales = alertasCandidatas.rows;
+    // "Necesitan atención" usa el mismo horario laboral que el bot (9-17, lun-vie).
+    const alertasActuales = alertasCandidatas.rows.map((alerta) => ({
+      ...alerta,
+      minutos_espera: businessMinutesBetween(alerta.fecha_inicio_espera_vendedor),
+    }));
 
     const pendientesPorVendedor = new Map();
     for (const a of alertasActuales) {
@@ -1661,7 +1663,7 @@ paramsResumenVendedores,
               Responsable: ${esc(a.vendedor)}
             </div>
             </div>
-            <div class="control-alert-time">${tiempo(a.minutos_espera)} sin respuesta</div>
+            <div class="control-alert-time">${tiempo(a.minutos_espera)} laborales sin respuesta</div>
           </div>
         `).join("")
       : `
@@ -1939,7 +1941,7 @@ ${esAdminControl ? `
         <div class="control-section-header">
           <div>
             <h2><i class="ti ti-bell"></i> Necesitan atención</h2>
-            <p>Derivaciones que todavía no recibieron respuesta del vendedor.</p>
+            <p>Conversaciones asignadas con un mensaje pendiente de respuesta. El tiempo se reinicia al reasignar.</p>
           </div>
           <span class="control-alert-count">${alertasActuales.length}</span>
         </div>
