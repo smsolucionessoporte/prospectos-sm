@@ -318,6 +318,24 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
   try {
     const creadoPor = AGENTE_CHATWOOT_ID[chatwoot_agent_id] || null;
 
+    // Esta ruta es exclusiva de automatizaciones de Chatwoot.
+    // Nunca registrar como "manual" un alta automática por falta de origen:
+    // si todavía no se pudo identificar, debe quedar como "otro".
+    const origenNormalizado = [
+      "meta",
+      "google",
+      "web",
+      "otro",
+      "prospecto-interno",
+    ].includes(origen)
+      ? origen
+      : "otro";
+
+    const rubroNormalizado =
+      typeof rubro === "string" && rubro.trim()
+        ? rubro.trim()
+        : null;
+
     // 1. Buscar primero por conversación de Chatwoot.
     if (chatwoot_conversation_id) {
       const { rows: porConversacion } = await pool.query(
@@ -339,7 +357,11 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
                 telefono = COALESCE($3, telefono),
                 creado_por = COALESCE($4, creado_por),
                 rubro = COALESCE($5, rubro),
-                origen = COALESCE($6, origen),
+                origen = CASE
+                  WHEN $6 IN ('meta', 'google', 'web', 'prospecto-interno') THEN $6
+                  WHEN origen IS NULL OR BTRIM(origen) = '' THEN $6
+                  ELSE origen
+                END,
                 actualizado_en = NOW()
             WHERE id = $1`,
         [
@@ -347,8 +369,8 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
           nombre_contacto || null,
           telefono || null,
           creadoPor,
-          rubro || null,
-          origen || null,
+          rubroNormalizado,
+          origenNormalizado,
         ],        
         );
 
@@ -388,6 +410,12 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
              creado_por = COALESCE($3, creado_por),
              chatwoot_conversation_id =
                COALESCE(chatwoot_conversation_id, $4),
+             rubro = COALESCE($5, rubro),
+             origen = CASE
+               WHEN $6 IN ('meta', 'google', 'web', 'prospecto-interno') THEN $6
+               WHEN origen IS NULL OR BTRIM(origen) = '' THEN $6
+               ELSE origen
+             END,
              actualizado_en = NOW()
          WHERE id = $1`,
         [
@@ -395,6 +423,8 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
           nombre_contacto || null,
           creadoPor,
           chatwoot_conversation_id || null,
+          rubroNormalizado,
+          origenNormalizado,
         ],
       );
 
@@ -435,10 +465,10 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
             null,                              // nombre_negocio
             nombre_contacto || null,           // contacto
             telefono,                          // telefono
-            rubro || "Otro",                   // rubro
+            rubroNormalizado || "Otro",          // rubro
             null,                              // nota_prospecto
             creadoPor,                         // creado_por
-            origen || "manual",                // origen
+            origenNormalizado,                 // origen
             chatwoot_conversation_id || null,  // chatwoot_conversation_id
           ],
         );
@@ -463,6 +493,12 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
               SET contacto = COALESCE($2, contacto),
                   telefono = COALESCE($3, telefono),
                   creado_por = COALESCE($4, creado_por),
+                  rubro = COALESCE($5, rubro),
+                  origen = CASE
+                    WHEN $6 IN ('meta', 'google', 'web', 'prospecto-interno') THEN $6
+                    WHEN origen IS NULL OR BTRIM(origen) = '' THEN $6
+                    ELSE origen
+                  END,
                   actualizado_en = NOW()
               WHERE id = $1`,
               [
@@ -470,6 +506,8 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
                 nombre_contacto || null,
                 telefono || null,
                 creadoPor,
+                rubroNormalizado,
+                origenNormalizado,
               ],
             );
 
