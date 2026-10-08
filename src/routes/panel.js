@@ -993,12 +993,9 @@ function controlBreakdownTooltip(label, breakdown) {
     lines.push(`Meta: ${breakdown.meta}`);
   }
 
-  if ((breakdown.google || 0) > 0) {
-    lines.push(`Google: ${breakdown.google}`);
-  }
-
-  if ((breakdown.web || 0) > 0) {
-    lines.push(`Web: ${breakdown.web}`);
+  const googleWeb = (Number(breakdown.google) || 0) + (Number(breakdown.web) || 0);
+  if (googleWeb > 0) {
+    lines.push(`Google / Web: ${googleWeb}`);
   }
 
   if ((breakdown.otro || 0) > 0) {
@@ -1061,13 +1058,13 @@ function renderFlipResultCard({
           </div>
 
           <div class="control-origin-row">
-            <span>🔎 Google</span>
-            <strong>${denominators ? `${breakdown.google || 0} · ${formatConversionRate(breakdown.google, denominators.google)}` : (breakdown.google || 0)}</strong>
-          </div>
-
-          <div class="control-origin-row">
-            <span>🌐 Web</span>
-            <strong>${denominators ? `${breakdown.web || 0} · ${formatConversionRate(breakdown.web, denominators.web)}` : (breakdown.web || 0)}</strong>
+            <span>🔎🌐 Google / Web</span>
+            <strong>${denominators
+              ? `${(Number(breakdown.google) || 0) + (Number(breakdown.web) || 0)} · ${formatConversionRate(
+                  (Number(breakdown.google) || 0) + (Number(breakdown.web) || 0),
+                  (Number(denominators.google) || 0) + (Number(denominators.web) || 0),
+                )}`
+              : ((Number(breakdown.google) || 0) + (Number(breakdown.web) || 0))}</strong>
           </div>
 
           <div class="control-origin-row">
@@ -1731,7 +1728,7 @@ ${esAdminControl ? `
   <!-- ADMIN: origen -->
   <div class="control-mini-title">Origen de los contactos</div>
 
-  <div class="control-stats-grid control-stats-grid-five">
+  <div class="control-stats-grid control-stats-grid-four">
     <div class="control-stat-card stat-total">
       <div class="control-stat-value">${stats.entraron}</div>
       <div class="control-stat-title">Entraron</div>
@@ -1741,19 +1738,13 @@ ${esAdminControl ? `
     <div class="control-stat-card stat-meta">
       <div class="control-stat-value">${stats.meta}</div>
       <div class="control-stat-title">Meta</div>
-      <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total</div>
+      <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total · Detectado desde botón/enlace de WhatsApp, Instagram o Facebook</div>
     </div>
 
     <div class="control-stat-card stat-google">
-      <div class="control-stat-value">${stats.google}</div>
-      <div class="control-stat-title">Google</div>
-      <div class="control-stat-desc">${porcentaje(stats.google, stats.entraron)}% del total</div>
-    </div>
-
-    <div class="control-stat-card stat-web">
-      <div class="control-stat-value">${stats.web || 0}</div>
-      <div class="control-stat-title">Web</div>
-      <div class="control-stat-desc">${porcentaje(stats.web || 0, stats.entraron)}% del total</div>
+      <div class="control-stat-value">${(Number(stats.google) || 0) + (Number(stats.web) || 0)}</div>
+      <div class="control-stat-title">Google / Web</div>
+      <div class="control-stat-desc">${porcentaje((Number(stats.google) || 0) + (Number(stats.web) || 0), stats.entraron)}% del total · Detectado desde el sitio web, por publicidad o ingreso directo</div>
     </div>
 
     <div class="control-stat-card stat-other">
