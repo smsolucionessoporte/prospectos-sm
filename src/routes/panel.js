@@ -1191,7 +1191,7 @@ const filtroUsuarioControl = esAdminControl
 
     const resumen = await pool.query(
       `
-      WITH base AS (
+      WITH base_pre AS (
         SELECT
           cv.*,
           EXISTS (
@@ -1225,6 +1225,16 @@ const filtroUsuarioControl = esAdminControl
           ) AS confirmado
         FROM control_ventas cv
         WHERE ${filtro}
+      ),
+      base AS (
+        SELECT
+          base_pre.*,
+          (
+            COALESCE(base_pre.derivado, false) = true
+            OR base_pre.llego_demo = true
+            OR base_pre.confirmado = true
+          ) AS derivado_efectivo
+        FROM base_pre
       )
       SELECT
         COUNT(*)::int AS entraron,
@@ -1236,10 +1246,10 @@ const filtroUsuarioControl = esAdminControl
         COUNT(*) FILTER (WHERE cv.clasificacion = 'consulta_erronea')::int AS consultas_erroneas,
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = true
-            AND cv.derivado = false
+            AND cv.derivado_efectivo = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
         )::int AS no_avanzaron,        
-        COUNT(*) FILTER (WHERE cv.derivado = true)::int AS derivados,
+        COUNT(*) FILTER (WHERE cv.derivado_efectivo = true)::int AS derivados,
         COUNT(*) FILTER (WHERE cv.llego_demo = true)::int AS llegaron_demo,
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'meta')::int AS llegaron_demo_meta,
         COUNT(*) FILTER (WHERE cv.llego_demo = true AND cv.origen = 'google')::int AS llegaron_demo_google,
@@ -1295,50 +1305,50 @@ const filtroUsuarioControl = esAdminControl
         -- Desglose por origen: no avanzaron
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = true
-            AND cv.derivado = false
+            AND cv.derivado_efectivo = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
             AND cv.origen = 'meta'
         )::int AS no_avanzaron_meta,
 
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = true
-            AND cv.derivado = false
+            AND cv.derivado_efectivo = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
             AND cv.origen = 'google'
         )::int AS no_avanzaron_google,
 
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = true
-            AND cv.derivado = false
+            AND cv.derivado_efectivo = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
             AND cv.origen = 'web'
         )::int AS no_avanzaron_web,
 
         COUNT(*) FILTER (
           WHERE cv.respondio_cliente = true
-            AND cv.derivado = false
+            AND cv.derivado_efectivo = false
             AND COALESCE(cv.clasificacion, '') <> 'consulta_erronea'
             AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS no_avanzaron_otro,
 
         -- Desglose por origen: derivados
         COUNT(*) FILTER (
-          WHERE cv.derivado = true
+          WHERE cv.derivado_efectivo = true
             AND cv.origen = 'meta'
         )::int AS derivados_meta,
 
         COUNT(*) FILTER (
-          WHERE cv.derivado = true
+          WHERE cv.derivado_efectivo = true
             AND cv.origen = 'google'
         )::int AS derivados_google,
 
         COUNT(*) FILTER (
-          WHERE cv.derivado = true
+          WHERE cv.derivado_efectivo = true
             AND cv.origen = 'web'
         )::int AS derivados_web,
 
         COUNT(*) FILTER (
-          WHERE cv.derivado = true
+          WHERE cv.derivado_efectivo = true
             AND COALESCE(cv.origen, 'otro') = 'otro'
         )::int AS derivados_otro
       FROM base cv
@@ -1377,40 +1387,54 @@ const embudoVendedores = await pool.query(
       AND u.rol IN ('vendedor', 'admin')
   ),
 
-  datos AS (
+  datos_base AS (
     SELECT
       v.id AS vendedor_id,
       v.nombre AS vendedor,
 
       cv.id AS control_id,
+      cv.derivado AS derivado_registrado,
       p.id AS prospecto_id,
 
-      EXISTS (
-        SELECT 1
-        FROM historial_estados h
-        WHERE h.prospecto_id = p.id
-          AND h.estado_nuevo = 'demo_coordinada'
+      (
+        p.demo_fecha IS NOT NULL
+        OR p.estado IN ('demo_coordinada', 'demo_realizada')
+        OR EXISTS (
+          SELECT 1
+          FROM historial_estados h
+          WHERE h.prospecto_id = p.id
+            AND h.estado_nuevo IN ('demo_coordinada', 'demo_realizada')
+        )
       ) AS paso_demo_coordinada,
 
-      EXISTS (
-        SELECT 1
-        FROM historial_estados h
-        WHERE h.prospecto_id = p.id
-          AND h.estado_nuevo = 'demo_realizada'
+      (
+        p.estado = 'demo_realizada'
+        OR EXISTS (
+          SELECT 1
+          FROM historial_estados h
+          WHERE h.prospecto_id = p.id
+            AND h.estado_nuevo = 'demo_realizada'
+        )
       ) AS paso_demo_realizada,
 
-      EXISTS (
-        SELECT 1
-        FROM historial_estados h
-        WHERE h.prospecto_id = p.id
-          AND h.estado_nuevo = 'confirmado'
+      (
+        p.estado = 'confirmado'
+        OR EXISTS (
+          SELECT 1
+          FROM historial_estados h
+          WHERE h.prospecto_id = p.id
+            AND h.estado_nuevo = 'confirmado'
+        )
       ) AS paso_confirmado,
 
-      EXISTS (
-        SELECT 1
-        FROM historial_estados h
-        WHERE h.prospecto_id = p.id
-          AND h.estado_nuevo = 'perdido'
+      (
+        p.estado = 'perdido'
+        OR EXISTS (
+          SELECT 1
+          FROM historial_estados h
+          WHERE h.prospecto_id = p.id
+            AND h.estado_nuevo = 'perdido'
+        )
       ) AS paso_perdido
 
     FROM control_ventas cv
@@ -1426,30 +1450,43 @@ const embudoVendedores = await pool.query(
         cv.vendedor_id
       )
 
-    WHERE cv.derivado = true
-      AND ${filtroVendedorEmbudo}
+    WHERE ${filtroVendedorEmbudo}
+  ),
+
+  datos AS (
+    SELECT
+      datos_base.*,
+      (
+        COALESCE(derivado_registrado, false) = true
+        OR paso_demo_coordinada = true
+        OR paso_demo_realizada = true
+        OR paso_confirmado = true
+      ) AS derivado_efectivo
+    FROM datos_base
   )
 
   SELECT
     vendedor_id,
     vendedor,
 
-    COUNT(*)::int AS derivados,
+    COUNT(*) FILTER (
+      WHERE derivado_efectivo
+    )::int AS derivados,
 
     COUNT(*) FILTER (
-      WHERE paso_demo_coordinada
+      WHERE derivado_efectivo AND paso_demo_coordinada
     )::int AS demos_coordinadas,
 
     COUNT(*) FILTER (
-      WHERE paso_demo_realizada
+      WHERE derivado_efectivo AND paso_demo_realizada
     )::int AS demos_realizadas,
 
     COUNT(*) FILTER (
-      WHERE paso_confirmado
+      WHERE derivado_efectivo AND paso_confirmado
     )::int AS confirmados,
 
     COUNT(*) FILTER (
-      WHERE paso_perdido
+      WHERE derivado_efectivo AND paso_perdido
     )::int AS perdidos
 
   FROM datos
