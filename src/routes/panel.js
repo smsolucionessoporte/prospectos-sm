@@ -1738,7 +1738,7 @@ ${esAdminControl ? `
     <div class="control-stat-card stat-meta">
       <div class="control-stat-value">${stats.meta}</div>
       <div class="control-stat-title">Meta</div>
-      <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total · Detectado desde botón/enlace de WhatsApp, Instagram o Facebook</div>
+      <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total · Detectado desde botón/enlace de Instagram o Facebook</div>
     </div>
 
     <div class="control-stat-card stat-google">
