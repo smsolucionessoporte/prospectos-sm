@@ -1151,90 +1151,83 @@ router.post(
   "/api/prospectos/estado-chatwoot",
   express.json(),
   async (req, res) => {
-    const apiKey = req.headers["x-api-key"];
-
-    if (apiKey !== process.env.AUTOMATION_API_KEY) {
+    if (!process.env.AUTOMATION_API_KEY || req.headers["x-api-key"] !== process.env.AUTOMATION_API_KEY) {
       return res.status(401).json({ error: "No autorizado" });
     }
 
-    const { chatwoot_conversation_id, estado } = req.body;
-
-    if (!chatwoot_conversation_id) {
-      return res.status(400).json({ error: "Falta chatwoot_conversation_id" });
+    const chatwootConversationId = Number(req.body?.chatwoot_conversation_id);
+    const { estado } = req.body || {};
+    if (!Number.isSafeInteger(chatwootConversationId) || chatwootConversationId <= 0) {
+      return res.status(400).json({ error: "Falta chatwoot_conversation_id válido" });
     }
-
     if (!["prospecto", "sin_respuesta"].includes(estado)) {
       return res.status(400).json({ error: "Estado no permitido" });
     }
 
+    const db = await pool.connect();
     try {
-      const { rows } = await pool.query(
-        `SELECT id, estado
-       FROM prospectos
-       WHERE chatwoot_conversation_id = $1
-       LIMIT 1`,
-        [chatwoot_conversation_id],
+      await db.query("BEGIN");
+      // El bloqueo evita duplicar la reactivación cuando llegan dos webhooks
+      // del mismo contacto o se modifica el estado simultáneamente.
+      const { rows } = await db.query(
+        `SELECT id, estado, motivo_perdida
+           FROM prospectos
+          WHERE chatwoot_conversation_id = $1
+          ORDER BY actualizado_en DESC NULLS LAST, id DESC
+          LIMIT 1 FOR UPDATE`,
+        [chatwootConversationId],
       );
-
       if (!rows.length) {
+        await db.query("ROLLBACK");
         return res.status(404).json({ error: "Prospecto no encontrado" });
       }
 
       const prospecto = rows[0];
-
-      if (prospecto.estado === estado) {
+      // No degradar confirmaciones, demos ni cierres: solo se permite
+      // reactivar 'perdido' o 'sin_respuesta' a 'prospecto'.
+      const transicionValida = estado === "prospecto"
+        ? ["perdido", "sin_respuesta"].includes(prospecto.estado)
+        : prospecto.estado === "prospecto";
+      if (!transicionValida) {
+        await db.query("COMMIT");
         return res.json({
           ok: true,
           actualizado: false,
           id: prospecto.id,
-          estado,
+          estado: prospecto.estado,
         });
       }
 
-      await pool.query(
+      // El motivo anterior se conserva en historial; ya no debe representar
+      // una pérdida vigente ni mezclarse con el siguiente cierre comercial.
+      await db.query(
         `UPDATE prospectos
-       SET estado = $2,
-           actualizado_en = NOW()
-       WHERE id = $1`,
+            SET estado = $2,
+                motivo_perdida = CASE WHEN $2 = 'prospecto' THEN NULL ELSE motivo_perdida END,
+                actualizado_en = NOW()
+          WHERE id = $1`,
         [prospecto.id, estado],
       );
-
-      await pool.query(
-        `INSERT INTO historial_estados (
-         prospecto_id,
-         estado_anterior,
-         estado_nuevo,
-         usuario_id,
-         nota
-       )
-       VALUES ($1, $2, $3, NULL, $4)`,
-        [
-          prospecto.id,
-          prospecto.estado,
-          estado,
-          estado === "sin_respuesta"
-            ? "Marcado automáticamente por Chatwoot después de 3 intentos sin respuesta"
-            : "Reactivado automáticamente porque el prospecto volvió a escribir",
-        ],
+      const nota = estado === "sin_respuesta"
+        ? "Marcado automáticamente después de 3 seguimientos sin respuesta"
+        : "Reactivado automáticamente: volvió a consultar después del cierre" +
+          (prospecto.motivo_perdida ? `. Motivo del cierre anterior: ${prospecto.motivo_perdida}` : "");
+      await db.query(
+        `INSERT INTO historial_estados
+           (prospecto_id, estado_anterior, estado_nuevo, usuario_id, nota)
+         VALUES ($1, $2, $3, NULL, $4)`,
+        [prospecto.id, prospecto.estado, estado, nota],
       );
+      await db.query("COMMIT");
 
-      console.log(
-        "DEBUG estado-chatwoot:",
-        chatwoot_conversation_id,
-        prospecto.estado,
-        "->",
-        estado,
-      );
-
-      return res.json({
-        ok: true,
-        actualizado: true,
-        id: prospecto.id,
-        estado,
-      });
+      console.log("DEBUG estado-chatwoot:", chatwootConversationId, prospecto.estado, "->", estado);
+      return res.json({ ok: true, actualizado: true, id: prospecto.id, estado });
     } catch (err) {
+      await db.query("ROLLBACK").catch(() => {});
       console.error("ERROR estado-chatwoot:", err);
       return res.status(500).json({ error: "Error actualizando prospecto" });
+    } finally {
+      db.release();
     }
   },
 );
