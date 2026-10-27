@@ -832,6 +832,28 @@ const origenProspecto = origen;
   },
 );
 
+// Estado comercial para evitar alertas/reasignaciones de demos o cierres.
+router.get("/api/prospectos/etapa-chatwoot/:conversationId", async (req, res) => {
+  if (!process.env.AUTOMATION_API_KEY || req.headers["x-api-key"] !== process.env.AUTOMATION_API_KEY) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+  const conversationId = Number(req.params.conversationId);
+  if (!Number.isSafeInteger(conversationId) || conversationId <= 0) {
+    return res.status(400).json({ error: "Conversación inválida" });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT estado FROM prospectos WHERE chatwoot_conversation_id = $1
+       ORDER BY actualizado_en DESC NULLS LAST, id DESC LIMIT 1`,
+      [conversationId],
+    );
+    return res.json({ estado: result.rows[0]?.estado ?? null });
+  } catch (error) {
+    console.error("Error leyendo estado comercial:", error);
+    return res.status(500).json({ error: "Error consultando etapa comercial" });
+  }
+});
+
 // ─── CONTROL COMERCIAL DESDE CHATWOOT ────────────────────────────────────────
 router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
   const apiKey = req.headers["x-api-key"];

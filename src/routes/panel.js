@@ -1578,8 +1578,8 @@ const rendimiento = await pool.query(`
   GROUP BY v.id, v.nombre ORDER BY v.nombre
 `, paramsResumenVendedores);
 
-// Las alertas también se acotan por ingreso en el período seleccionado.
-// Incluyen mensajes nuevos de contactos que ya fueron atendidos.
+// Necesitan atención: solamente derivados SIN ninguna respuesta humana.
+// No reabrir alertas por agradecimientos o mensajes posteriores a la atención.
 const alertasCandidatas = await pool.query(`
   SELECT cv.chatwoot_conversation_id,
     v.nombre AS vendedor, cv.fecha_derivacion,
@@ -1596,6 +1596,7 @@ const alertasCandidatas = await pool.query(`
   WHERE ${filtro} AND ${filtroUsuarioResumen}
     AND cv.derivado = TRUE
     AND cv.fecha_inicio_espera_vendedor IS NOT NULL
+    AND cv.fecha_primera_respuesta_vendedor IS NULL
     AND COALESCE(p.estado, 'prospecto') NOT IN ('confirmado', 'perdido')
   ORDER BY cv.fecha_inicio_espera_vendedor ASC
   LIMIT 100
@@ -1878,7 +1879,7 @@ ${esAdminControl ? `
 `}
 
 ${!esAdminControl ? `<div class="control-section">
-  <div class="control-section-header"><div><h2>Necesitan atención</h2><p>Mensajes pendientes de respuesta en el período.</p></div>
+  <div class="control-section-header"><div><h2>Necesitan atención</h2><p>Solo prospectos derivados sin primera atención humana.</p></div>
   <span class="control-alert-count">${alertasActuales.length}</span></div>
   <div class="control-alert-list">${filasAlertas}</div>
 </div>` : ""}

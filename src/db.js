@@ -163,6 +163,16 @@ WHERE fecha_inicio_espera_vendedor IS NULL
   AND fecha_derivacion IS NOT NULL
   AND fecha_primera_respuesta_vendedor IS NULL;
 
+-- Corrección idempotente de esperas antiguas: el SLA ahora finaliza
+-- definitivamente cuando hubo primera atención humana. No modifica estados,
+-- responsables, fecha de ingreso ni historial del prospecto.
+UPDATE control_ventas
+SET fecha_inicio_espera_vendedor = NULL,
+    actualizado_en = NOW()
+WHERE derivado = TRUE
+  AND fecha_primera_respuesta_vendedor IS NOT NULL
+  AND fecha_inicio_espera_vendedor IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_control_ventas_espera_vendedor
   ON control_ventas(fecha_inicio_espera_vendedor);
 
