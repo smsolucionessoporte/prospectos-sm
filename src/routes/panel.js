@@ -1459,7 +1459,7 @@ const gestionQuery = await pool.query(`
       ) AS efectivamente_derivado
     FROM control_ventas cv
     LEFT JOIN LATERAL (
-      SELECT p.estado, p.demo_fecha
+      SELECT p.id, p.estado, p.demo_fecha
       FROM prospectos p
       WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
       ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC
