@@ -46,13 +46,6 @@ ${u ? `
                 : ""
             }
 
-        ${u.rol === "admin" ? `
-          <a href="/campanias" class="nav-link${req.path.startsWith("/campanias") ? " active" : ""}">
-            <i class="ti ti-speakerphone"></i>
-            Campañas
-          </a>
-        ` : ""}
-
         ${u.rol === "admin" || u.rol === "vendedor" ? `
           <a
             href="/control"
@@ -64,6 +57,13 @@ ${u ? `
                 : '<i class="ti ti-chart-bar"></i>'
             }
             Control
+          </a>
+        ` : ""}
+
+                ${u.rol === "admin" ? `
+          <a href="/campanias" class="nav-link${req.path.startsWith("/campanias") ? " active" : ""}">
+            <i class="ti ti-speakerphone"></i>
+            Campañas
           </a>
         ` : ""}
   </div>
