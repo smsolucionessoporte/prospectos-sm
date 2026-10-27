@@ -1473,8 +1473,6 @@ const gestionQuery = await pool.query(`
       WHEN estado_prospecto = 'demo_realizada' THEN 'demo_realizada'
       WHEN estado_prospecto = 'demo_coordinada' OR fecha_demo IS NOT NULL THEN 'demo_coordinada'
       WHEN fecha_primera_respuesta_vendedor IS NULL THEN 'sin_atender'
-      WHEN fecha_inicio_seguimiento_post_atencion IS NOT NULL
-        AND fecha_respuesta_cliente_post_atencion IS NULL THEN 'atendidos_sin_respuesta'
       ELSE 'en_seguimiento'
     END AS etapa
     FROM base
@@ -1485,7 +1483,7 @@ const gestionQuery = await pool.query(`
   GROUP BY etapa
 `, params);
 const gestion = Object.fromEntries([
-  'sin_atender', 'atendidos_sin_respuesta', 'en_seguimiento',
+  'sin_atender', 'en_seguimiento',
   'demo_coordinada', 'demo_realizada', 'confirmados', 'perdidos'
 ].map(etapa => [etapa, 0]));
 for (const fila of gestionQuery.rows) gestion[fila.etapa] = Number(fila.cantidad);
@@ -1820,14 +1818,12 @@ ${esAdminControl ? `
     </div>
     <div class="control-stats-grid control-management-grid">
       ${renderControlStatCard({title:'Sin atender', value:gestion.sin_atender,description:`${formatConversionRate(gestion.sin_atender,totalGestion)} de derivados · Sin primera respuesta humana`,cardClass:'stat-no-response'})}
-      ${renderControlStatCard({title:'Atendidos sin respuesta', value:gestion.atendidos_sin_respuesta,description:`${formatConversionRate(gestion.atendidos_sin_respuesta,totalGestion)} · El vendedor escribió, pero aún no obtuvo una respuesta posterior registrada`,cardClass:'stat-no-advance'})}
-      ${renderControlStatCard({title:'En conversación', value:gestion.en_seguimiento,description:`${formatConversionRate(gestion.en_seguimiento,totalGestion)} · Contactados sin demo; incluye historiales no verificables`,cardClass:'stat-other'})}
+      ${renderControlStatCard({title:'En conversación', value:gestion.en_seguimiento,description:`${formatConversionRate(gestion.en_seguimiento,totalGestion)} · Atendidos por un vendedor, sin otro estado comercial registrado`,cardClass:'stat-other'})}
       ${renderControlStatCard({title:'Demo coordinada', value:gestion.demo_coordinada,description:`${formatConversionRate(gestion.demo_coordinada,totalGestion)} · Pendiente de realizar`,cardClass:'stat-google'})}
       ${renderControlStatCard({title:'Demo realizada', value:gestion.demo_realizada,description:`${formatConversionRate(gestion.demo_realizada,totalGestion)} · Pendiente de cierre`,cardClass:'stat-meta'})}
       ${renderControlStatCard({title:'Confirmados', value:gestion.confirmados,description:`${formatConversionRate(gestion.confirmados,totalGestion)} · Contratación confirmada`,cardClass:'stat-confirmed'})}
       ${renderControlStatCard({title:'Perdidos', value:gestion.perdidos,description:`${formatConversionRate(gestion.perdidos,totalGestion)} · Cierre negativo`,cardClass:'stat-error'})}
     </div>
-    <p class="control-metrics-note">«Atendidos sin respuesta» se registra desde esta actualización, a partir del contacto humano y los mensajes posteriores. Los casos anteriores sin historial suficiente permanecen en «En conversación», para no clasificarlos incorrectamente.</p>
 
     <div class="control-alert-inline">
       <div class="control-section-header">
