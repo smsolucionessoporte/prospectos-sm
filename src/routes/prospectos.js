@@ -3616,7 +3616,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                     : `
                       <input
                         type="text"
-                        value="${esc(ORIGEN_LABEL[p.origen] || p.origen || "—")}"
+                        value="${esc(origenLabel)}"
                         readonly
                       >
                     `
