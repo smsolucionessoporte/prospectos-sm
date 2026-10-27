@@ -267,6 +267,12 @@ if (vendedorAnterior !== usuarioId) {
     UPDATE control_ventas
     SET vendedor_id = $2,
         fecha_inicio_espera_vendedor = CASE
+          WHEN fecha_primera_respuesta_vendedor IS NOT NULL THEN NULL
+          WHEN EXISTS (
+            SELECT 1 FROM prospectos pp
+            WHERE pp.chatwoot_conversation_id = $1
+              AND pp.estado IN ('demo_coordinada', 'demo_realizada', 'confirmado', 'perdido')
+          ) THEN NULL
           WHEN fecha_inicio_espera_vendedor IS NOT NULL THEN NOW()
           ELSE NULL
         END,
@@ -642,6 +648,20 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
 
     const actual = prospectos[0];
 
+    // Una automatización jamás puede reactivar un SLA ni mover un prospecto
+    // con demo coordinada/realizada o un cierre comercial. La reasignación
+    // manual sigue disponible para los responsables autorizados.
+    if (tipo !== "manual" && [
+      "demo_coordinada", "demo_realizada", "confirmado", "perdido",
+    ].includes(actual.estado)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "Reasignación automática bloqueada: prospecto gestionado o cerrado",
+        estado: actual.estado,
+        chatwoot_conversation_id,
+      });
+    }
+
     const { rows: responsables } = await client.query(
       `
       SELECT id, nombre
@@ -703,7 +723,10 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
       SET
         vendedor_id = $2,
         vendedor_nombre = $3,
-        fecha_inicio_espera_vendedor = CASE WHEN $4 = 'manual' THEN NULL ELSE NOW() END,
+        fecha_inicio_espera_vendedor = CASE
+          WHEN $4 = 'manual' OR fecha_primera_respuesta_vendedor IS NOT NULL THEN NULL
+          ELSE NOW()
+        END,
         actualizado_en = NOW()
       WHERE chatwoot_conversation_id = $1
       `,
@@ -1604,9 +1627,9 @@ if (req.session.usuario.rol === "admin") {
       .map(
         (h) => `
       <div class="hist-item">
-        <div class="hist-dot ${ESTADOS_COLOR[h.estado_nuevo] || "gray"}"></div>
+        <div class="hist-dot ${/^Reasignación (manual|automática)/i.test(h.nota || "") ? "gray" : (ESTADOS_COLOR[h.estado_nuevo] || "gray")}"></div>
         <div class="hist-body">
-          <span class="hist-estado">${ESTADOS_LABEL[h.estado_nuevo] || h.estado_nuevo}</span>
+          <span class="hist-estado">${/^Reasignación automática/i.test(h.nota || "") ? "Reasignación automática" : /^Reasignación manual/i.test(h.nota || "") ? "Reasignación manual" : (ESTADOS_LABEL[h.estado_nuevo] || h.estado_nuevo)}</span>
 <span class="hist-meta">${h.usuario_nombre || "Automatización"} · ${new Date(h.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>        ${
           h.nota
             ? `<span class="hist-nota">${esc(h.nota)}</span>`
