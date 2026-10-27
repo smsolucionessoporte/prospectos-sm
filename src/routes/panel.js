@@ -1742,6 +1742,7 @@ const alertasCandidatas = await pool.query(`
           <h1 class="page-title">Control de ventas</h1>
           <p class="page-sub">Seguimiento del canal comercial y atención de prospectos.</p>
         </div>
+        ${req.session.usuario.rol === "admin" ? '<a href="/ventas/reasignar" class="btn btn-secondary"><i class="ti ti-user-share"></i> Reasignar conversación</a>' : ""}
       </div>
 
       <form method="GET" action="/control" class="control-period-form">

@@ -582,6 +582,8 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
     vendedor_id,
     vendedor_nombre,
     vendedor_anterior_nombre,
+    tipo = "automatica",
+    solicitado_por,
   } = req.body;
 
   if (!chatwoot_conversation_id) {
@@ -701,7 +703,7 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
       SET
         vendedor_id = $2,
         vendedor_nombre = $3,
-        fecha_inicio_espera_vendedor = NOW(),
+        fecha_inicio_espera_vendedor = CASE WHEN $4 = 'manual' THEN NULL ELSE NOW() END,
         actualizado_en = NOW()
       WHERE chatwoot_conversation_id = $1
       `,
@@ -709,12 +711,15 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
         chatwoot_conversation_id,
         nuevoResponsable.id,
         vendedor_nombre || nuevoResponsable.nombre,
+        tipo === "manual" ? "manual" : "automatica",
       ],
     );
 
-    const nota =
-      `Reasignación automática por falta de respuesta: ` +
-      `${responsableAnteriorNombre} → ${nuevoResponsable.nombre}`;
+    const nota = tipo === "manual"
+      ? `Reasignación manual solicitada por ${String(solicitado_por || "Administración").slice(0, 120)}: ` +
+        `${responsableAnteriorNombre} → ${nuevoResponsable.nombre}`
+      : `Reasignación automática por falta de respuesta: ` +
+        `${responsableAnteriorNombre} → ${nuevoResponsable.nombre}`;
 
     await client.query(
       `
@@ -1535,6 +1540,9 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
     acciones.push(
       `<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`,
     );
+    if (req.session.usuario.rol === "admin" && p.chatwoot_conversation_id) {
+      acciones.push(`<a href="/ventas/reasignar?conversation=${Number(p.chatwoot_conversation_id)}" class="btn btn-secondary"><i class="ti ti-user-share"></i> Reasignar en Chatwoot</a>`);
+    }
 
 // ELIMINAR PROSPECTO (solo administradores)
 if (req.session.usuario.rol === "admin") {
@@ -1909,6 +1917,84 @@ if (req.session.usuario.rol === "admin") {
   }
 });
 
+// ─── REASIGNACIÓN MANUAL DE CONVERSACIÓN CHATWOOT ───────────────────────────
+async function reasignarConversacionVentas(req, res) {
+  const conversationId = Number(req.body.chatwoot_conversation_id);
+  const assigneeId = Number(req.body.chatwoot_agent_id);
+  if (!Number.isSafeInteger(conversationId) || conversationId <= 0 || !Number.isSafeInteger(assigneeId) || assigneeId <= 0) {
+    return res.status(400).send("Conversación o vendedor no válido");
+  }
+
+  const urlBot = (process.env.SALES_BOT_BASE_URL || "").replace(/\/+$/, "");
+  const apiKey = process.env.SALES_BOT_API_KEY;
+  if (!urlBot || !apiKey) {
+    return res.status(503).send("Faltan SALES_BOT_BASE_URL y SALES_BOT_API_KEY en Railway. No se cambió la asignación.");
+  }
+  try {
+    const { data } = await axios.post(`${urlBot}/api/internal/sales/manual-reassign`,
+      { conversationId, assigneeId,
+        requestedBy: String(req.session.usuario.nombre || "Administración").slice(0, 120) },
+      { headers: { "x-api-key": apiKey, "content-type": "application/json" }, timeout: 20000 });
+    const textos = [
+      { ok: true, texto: `Chatwoot: conversación #${conversationId} asignada a ${data.newAssigneeName}` },
+      { ok: !!data.prospectosSynced, texto: data.prospectosSynced ? "Sincronizado con Prospectos" : "Sincronización pendiente o no existe prospecto vinculado" },
+      { ok: !!data.groupNotified || !data.changed, texto: !data.changed ? "Ya estaba asignado, no se duplicó el aviso" : data.groupNotified ? "Aviso enviado al grupo Ventas" : "Aviso al grupo en reintento" },
+      { ok: !!data.privateNoteSaved || !data.changed, texto: !data.changed ? "No se duplicó nota" : data.privateNoteSaved ? "Nota interna guardada" : "Falló la nota interna" }
+    ];
+    guardarResultadoAccion(req, "Reasignación manual de Ventas", textos);
+    const prospecto = Number(req.body.prospecto_id);
+    return res.redirect(Number.isSafeInteger(prospecto) && prospecto > 0
+      ? `/prospectos/${prospecto}` : "/ventas/reasignar");
+  } catch (error) {
+    const detalle = error.response?.data?.error || error.message;
+    console.error("Error reasignando conversación de ventas:", detalle);
+    return res.status(502).send(`No se pudo confirmar la reasignación: ${esc(detalle)}. Revisá Chatwoot antes de repetir.`);
+  }
+}
+router.get("/ventas/reasignar", requireAuth, requireRol("admin"), async (req, res) => {
+  const urlBot = (process.env.SALES_BOT_BASE_URL || "").replace(/\/+$/, "");
+  const apiKey = process.env.SALES_BOT_API_KEY;
+  let opciones = "";
+  let aviso = "";
+  if (urlBot && apiKey) {
+    try {
+      const { data } = await axios.get(`${urlBot}/api/internal/sales/agents`,
+        { headers: { "x-api-key": apiKey }, timeout: 10000 });
+      opciones = (data.agents || []).map(a => `<option value="${Number(a.id)}">${esc(a.name)}</option>`).join("");
+      if (!opciones) aviso = "No hay vendedores activos configurados en SALES_AGENTS.";
+    } catch (error) {
+      aviso = "No se pudo obtener la lista de vendedores del bot. Revisá la conexión.";
+      console.error("Error consultando vendedores activos:", error.response?.status || error.message);
+    }
+  } else {
+    aviso = "Configurá SALES_BOT_BASE_URL y SALES_BOT_API_KEY en Railway.";
+  }
+  const resultado = req.session.resultadoAccion || null;
+  delete req.session.resultadoAccion;
+  const conversation = Number(req.query.conversation);
+  res.send(layout("Reasignación manual de Ventas", `
+    ${renderResultadoAccion(resultado)}
+    <div class="page-header"><div>
+      <a href="/control" class="back-link">← Volver al Control de Ventas</a>
+      <h1 class="page-title">Reasignar conversación de Ventas</h1>
+      <p class="page-sub">Cambia el responsable en Chatwoot, registra el cambio y avisa al grupo comercial.</p>
+    </div></div>
+    ${aviso ? `<p class="alert alert-warning">${esc(aviso)}</p>` : ""}
+    <form method="POST" action="/ventas/reasignar" class="detail-section" style="max-width:650px;display:grid;gap:16px">
+      <label>ID de conversación de Chatwoot
+        <input type="number" required min="1" name="chatwoot_conversation_id"
+        value="${Number.isSafeInteger(conversation) && conversation > 0 ? conversation : ""}" placeholder="2462">
+      </label>
+      <label>Nuevo vendedor
+        <select required name="chatwoot_agent_id" ${!opciones ? "disabled" : ""}><option value="">Seleccionar responsable</option>${opciones}</select>
+      </label>
+      <p class="page-sub">Solo se muestran los vendedores de SALES_AGENTS. No se envía un mensaje automático al cliente.</p>
+      <button class="btn btn-primary" type="submit" ${!opciones ? "disabled" : ""} onclick="return confirm('¿Confirmar reasignación manual y aviso al grupo?')">Reasignar y notificar</button>
+    </form>
+  `, req));
+});
+router.post("/ventas/reasignar", requireAuth, requireRol("admin"), reasignarConversacionVentas);
+
 // ─── CAMBIAR RESPONSABLE (SOLO ADMIN) ────────────────────────────────────────
 
 router.post(
@@ -1925,6 +2011,17 @@ router.post(
 
     if (!Number.isInteger(responsableId) || responsableId <= 0) {
       return res.status(400).send("Responsable no válido");
+    }
+
+    const { rows: linked } = await pool.query(
+      'SELECT chatwoot_conversation_id FROM prospectos WHERE id=$1', [prospectoId]);
+    if (linked[0]?.chatwoot_conversation_id) {
+      const chatwootAgentId = Number(Object.keys(AGENTE_CHATWOOT_ID).find(
+        agentId => Number(AGENTE_CHATWOOT_ID[agentId]) === responsableId));
+      req.body.chatwoot_conversation_id = linked[0].chatwoot_conversation_id;
+      req.body.chatwoot_agent_id = chatwootAgentId;
+      req.body.prospecto_id = prospectoId;
+      return reasignarConversacionVentas(req, res);
     }
 
     const client = await pool.connect();
@@ -3627,7 +3724,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                 <label>Responsable</label>
 
                 ${
-                  u.rol === "admin"
+                  u.rol === "admin" && !p.chatwoot_conversation_id
                     ? `
                       <select name="responsable_id" required>
                         ${responsablesAdmin
@@ -3645,11 +3742,9 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                       </select>
                     `
                     : `
-                      <input
-                        type="text"
-                        value="${esc(responsableNombre)}"
-                        disabled
-                      >
+                      <input type="text" value="${esc(responsableNombre)}" disabled>
+                      ${u.rol === "admin" && p.chatwoot_conversation_id
+                        ? `<a href="/ventas/reasignar?conversation=${Number(p.chatwoot_conversation_id)}" class="btn btn-secondary">Reasignar en Chatwoot</a>` : ""}
                     `
                 }
               </div>
@@ -4110,6 +4205,9 @@ router.post("/prospectos/:id/editar", requireAuth, async (req, res) => {
     }
 
     const actual = curRows[0];
+    if (actual.chatwoot_conversation_id && req.body.responsable_id) {
+      return res.status(400).send("Para cambiar el responsable de esta conversación usá Reasignar en Chatwoot.");
+    }
 
     let nuevoOrigen = actual.origen;
 
