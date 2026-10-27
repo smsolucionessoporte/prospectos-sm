@@ -54,7 +54,7 @@ const ORIGEN_LABEL = {
     requireRol("admin", "vendedor", "soporte"),
     async (req, res) => {
       try {
-    const { buscar, desde, hasta, filtrado } = req.query;
+    const { buscar, desde, hasta, filtrado, origen } = req.query;
 
     const pagina = Math.max(1, parseInt(req.query.pagina) || 1);
     const porPagina = 20;
@@ -112,6 +112,14 @@ const ORIGEN_LABEL = {
       where.push(`COALESCE(p.demo_responsable, p.creado_por) = $${i++}`);
       params.push(responsable);
     }
+    if (origen) {
+      if (origen === "otro") {
+        where.push(`COALESCE(NULLIF(p.origen, ''), 'otro') = 'otro'`);
+      } else if (Object.prototype.hasOwnProperty.call(ORIGEN_LABEL, origen)) {
+        where.push(`p.origen = $${i++}`);
+        params.push(origen);
+      }
+    }
     if (desdeFiltro) {
       where.push(`p.creado_en >= $${i++}`);
       params.push(desdeFiltro);
@@ -149,6 +157,7 @@ const ORIGEN_LABEL = {
       qs.set("pagina", String(nuevaPagina));
 
       if (buscar) qs.set("buscar", buscar);
+      if (origen) qs.set("origen", origen);
       if (responsable && !vistaRestringida) {
         qs.set("responsable", responsable);
       }
@@ -406,71 +415,43 @@ const ORIGEN_LABEL = {
             </label>
           </div>
 
-          <div class="filter-row-search">
-            <div class="search-wrap">
-              <input
-                type="text"
-                name="buscar"
-                placeholder="Buscar por nombre, contacto o teléfono..."
-                value="${esc(buscar || "")}"
-                class="search-input">
-            </div>
-
-            <button type="button" class="btn btn-secondary" onclick="abrirModalFiltros()">
-              <i class="ti ti-filter"></i>
-              Filtros${filtrosActivosCount > 0 ? ` <span class="filtros-badge">${filtrosActivosCount}</span>` : ""}
-            </button>
-
-            <button type="submit" class="btn btn-primary">
-              <i class="ti ti-search"></i> Buscar
-            </button>
-          </div>
-
-         
-          <div id="modal-filtros" class="modal-overlay">
-            <div class="modal-box">
-              <h3><i class="ti ti-filter"></i> Filtros</h3>
-
-              ${
-                vistaRestringida
-                  ? ""
-                  : `
-              <div class="field">
-                <label>Responsable</label>
-                <select name="responsable" class="filter-select">
-                  <option value="">Todos los responsables</option>
-                  ${responsables.rows
-                    .map(
-                      (u) =>
-                        `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`,
-                    )
-                    .join("")}
+          <div class="filter-inline">
+            <div class="filter-inline-top">
+              <label class="filter-inline-field filter-inline-search">
+                <span><i class="ti ti-search"></i> Buscar prospecto</span>
+                <input type="search" name="buscar" class="search-input"
+                  placeholder="Nombre, contacto o teléfono"
+                  value="${esc(buscar || "")}">
+              </label>
+              ${vistaRestringida ? "" : `
+                <label class="filter-inline-field">
+                  <span><i class="ti ti-user"></i> Responsable</span>
+                  <select name="responsable" class="filter-select">
+                    <option value="">Todos los responsables</option>
+                    ${responsables.rows.map((u) => `<option value="${u.id}" ${String(responsable) === String(u.id) ? "selected" : ""}>${esc(u.nombre)}</option>`).join("")}
+                  </select>
+                </label>`}
+              <label class="filter-inline-field">
+                <span><i class="ti ti-world"></i> Origen</span>
+                <select name="origen" class="filter-select">
+                  <option value="">Todos los orígenes</option>
+                  ${Object.entries(ORIGEN_LABEL).map(([key, label]) => `<option value="${key}" ${origen === key ? "selected" : ""}>${esc(label)}</option>`).join("")}
                 </select>
+              </label>
+            </div>
+            <fieldset class="filter-states-fieldset">
+              <legend><i class="ti ti-adjustments-horizontal"></i> Estados de los prospectos</legend>
+              <div class="filter-row-estados">
+                ${Object.entries(ESTADOS).map(([key, meta]) => `
+                  <label class="estado-check">
+                    <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
+                    ${meta.label}
+                  </label>`).join("")}
               </div>
-              `
-              }
-
-  
-              <div class="field">
-                <label>Estados</label>
-                <div class="filter-row-estados">
-                  ${Object.entries(ESTADOS)
-                    .map(
-                      ([key, meta]) => `
-                    <label class="estado-check">
-                      <input type="checkbox" name="estados" value="${key}" ${estadosSeleccionados.includes(key) ? "checked" : ""}>
-                      ${meta.label}
-                    </label>
-                  `,
-                    )
-                    .join("")}
-                </div>
-              </div>
-
-              <div class="modal-actions">
-                <a href="/panel" class="btn btn-ghost">Limpiar</a>
-                <button type="submit" class="btn btn-secondary">Filtrar</button>
-              </div>
+            </fieldset>
+            <div class="filter-inline-actions">
+              <a href="/panel" class="btn btn-secondary"><i class="ti ti-refresh"></i> Restablecer</a>
+              <button type="submit" class="btn btn-primary"><i class="ti ti-search"></i> Aplicar filtros</button>
             </div>
           </div>
         </form>
@@ -624,6 +605,41 @@ const ORIGEN_LABEL = {
           margin-bottom: 16px;
         }
         .filter-form { display: flex; flex-direction: column; gap: 12px; }
+        .filter-inline { display: grid; gap: 14px; }
+        .filter-inline-top {
+          display: grid;
+          grid-template-columns: minmax(200px, 2fr) repeat(2, minmax(160px, 1fr));
+          gap: 12px;
+          align-items: end;
+        }
+        .filter-inline-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+        .filter-inline-field > span { font-size: 0.83rem; font-weight: 600; color: #475569; }
+        .filter-inline-field .filter-select,
+        .filter-inline-field .search-input {
+          width: 100%; min-width: 0; height: 39px; padding: 8px 11px;
+          border: 1px solid #cbd5e1; border-radius: 8px;
+        }
+        .filter-states-fieldset {
+          border: 1px solid #e2e8f0; border-radius: 9px; padding: 10px 12px 12px;
+          min-width: 0; margin: 0;
+        }
+        .filter-states-fieldset legend { padding: 0 5px; font-size: 0.83rem; color: #475569; font-weight: 600; }
+        .filter-inline-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+        .filter-inline-actions .btn { min-height: 38px; }
+        @media (max-width: 900px) {
+          .filter-inline-top { grid-template-columns: repeat(2, minmax(0,1fr)); }
+          .filter-inline-search { grid-column: 1 / -1; }
+        }
+        @media (max-width: 600px) {
+          .filter-inline-top { grid-template-columns: minmax(0,1fr); }
+          .filter-inline-search { grid-column: auto; }
+          .filter-inline-actions { display: grid; grid-template-columns: 1fr 1fr; }
+          .filter-inline-actions .btn { justify-content: center; padding: 9px 6px; }
+          .filter-row-estados { flex-direction: row !important; flex-wrap: wrap; }
+          .estado-check { width: auto !important; }
+          .filter-inline-field .filter-select, .filter-inline-field .search-input { font-size: 16px; }
+        }
+
 
         .filter-row-search { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
         .filter-row-search .search-wrap { flex: 1 1 240px; }
@@ -799,8 +815,7 @@ const ORIGEN_LABEL = {
           color: #64748b;
         }
 
-        }
-          @media (max-width: 900px) {
+        @media (max-width: 900px) {
         .filter-periodo-row {
           flex-wrap: wrap;
           align-items: stretch;
@@ -895,9 +910,6 @@ const ORIGEN_LABEL = {
       </style>
 
       <script>
-        function abrirModalFiltros() {
-          document.getElementById('modal-filtros').classList.add('open');
-        }
         function abrirModalConfirmar(id) {
           document.getElementById('form-confirmar').action = '/prospectos/' + id + '/estado';
           document.getElementById('modal-confirmar').classList.add('open');
@@ -1353,6 +1365,42 @@ const filtroUsuarioControl = esAdminControl
       params,
     );
 
+    // Pérdidas actuales, clasificadas por motivo y origen de ingreso.
+    // Una conversación aporta como máximo un prospecto, para no duplicar recuentos.
+    // No se filtra por fecha de cierre: se respeta el período de ingreso del control.
+    const perdidasQuery = await pool.query(`
+      SELECT
+        CASE
+          WHEN NULLIF(BTRIM(p.motivo_perdida), '') IS NULL THEN 'Sin motivo registrado'
+          WHEN LOWER(BTRIM(p.motivo_perdida)) LIKE 'otro:%' THEN 'Otro'
+          ELSE BTRIM(p.motivo_perdida)
+        END AS motivo,
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE cv.origen = 'meta')::int AS meta,
+        COUNT(*) FILTER (WHERE cv.origen = 'google')::int AS google,
+        COUNT(*) FILTER (WHERE cv.origen = 'web')::int AS web,
+        COUNT(*) FILTER (WHERE cv.origen IS NULL OR cv.origen NOT IN ('meta', 'google', 'web'))::int AS otro
+      FROM control_ventas cv
+      JOIN LATERAL (
+        SELECT p.estado, p.motivo_perdida
+        FROM prospectos p
+        WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+        ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC
+        LIMIT 1
+      ) p ON TRUE
+      WHERE ${filtro} AND p.estado = 'perdido'
+      GROUP BY 1
+      ORDER BY COUNT(*) DESC, motivo ASC
+    `, params);
+    const perdidasPorMotivo = perdidasQuery.rows;
+    const perdidasTotales = perdidasPorMotivo.reduce((a, r) => a + r.total, 0);
+    const perdidasPorOrigen = {
+      meta: perdidasPorMotivo.reduce((a, r) => a + r.meta, 0),
+      google: perdidasPorMotivo.reduce((a, r) => a + r.google, 0),
+      web: perdidasPorMotivo.reduce((a, r) => a + r.web, 0),
+      otro: perdidasPorMotivo.reduce((a, r) => a + r.otro, 0),
+    };
+
     const stats = resumen.rows[0] || {
       entraron: 0, meta: 0, google: 0, web: 0, sin_identificar: 0, no_respondieron: 0,
       consultas_erroneas: 0, no_avanzaron: 0, derivados: 0, llegaron_demo: 0, confirmados: 0,
@@ -1602,6 +1650,19 @@ paramsResumenVendedores,
 
     const porcentaje = (cantidad, total) =>
       total ? Math.round((Number(cantidad) / Number(total)) * 100) : 0;
+
+    const filasPerdidas = perdidasPorMotivo.length
+      ? perdidasPorMotivo.map((r) => `
+          <tr>
+            <td class="control-seller-name" data-label="Motivo">${esc(r.motivo)}</td>
+            <td class="control-number" data-label="Meta">${r.meta}</td>
+            <td class="control-number" data-label="Google">${r.google}</td>
+            <td class="control-number" data-label="Web">${r.web}</td>
+            <td class="control-number" data-label="Sin identificar / otro">${r.otro}</td>
+            <td class="control-number" data-label="Total"><strong>${r.total}</strong>
+              <span class="control-table-percent">(${porcentaje(r.total, perdidasTotales)}%)</span></td>
+          </tr>`).join("")
+      : `<tr><td colspan="6" class="control-empty">No hay prospectos marcados como perdidos para este período.</td></tr>`;
 
     const tiempo = (minutos) => {
       const n = Math.max(0, Number(minutos || 0));
@@ -1856,6 +1917,20 @@ ${esAdminControl ? `
   })}
 
   ${renderFlipResultCard({
+    title: "Perdidos",
+    value: perdidasTotales,
+    description: `${porcentaje(perdidasTotales, stats.entraron)}% del total · Estado actual perdido con motivo registrado en Prospectos`,
+    cardClass: "stat-no-advance",
+    breakdown: perdidasPorOrigen,
+    denominators: {
+      meta: stats.meta,
+      google: stats.google,
+      web: stats.web || 0,
+      otro: stats.sin_identificar || 0,
+    },
+  })}
+
+  ${renderFlipResultCard({
     title: "Confirmados",
     value: stats.confirmados || 0,
     description: `${porcentaje(stats.confirmados || 0, stats.entraron)}% del total · Confirmaron la contratación`,
@@ -1875,6 +1950,30 @@ ${esAdminControl ? `
   })}
 
 </div>
+  </div>
+  <div class="control-section">
+    <div class="control-section-header">
+      <div>
+        <h2><i class="ti ti-chart-bar"></i> Prospectos perdidos por motivo y origen</h2>
+        <p>Se cuentan los prospectos que ingresaron en el período seleccionado y actualmente figuran como perdidos. El motivo se toma de su cierre en Prospectos; no se incluyen los que solo dejaron de responder al bot.</p>
+      </div>
+      <strong>${perdidasTotales} perdidos</strong>
+    </div>
+    <div class="control-performance-wrap">
+      <table class="control-performance-table">
+        <thead><tr><th>Motivo de pérdida</th><th>Meta</th><th>Google</th><th>Web</th><th>Sin identificar / otro</th><th>Total</th></tr></thead>
+        <tbody>${filasPerdidas}
+          ${perdidasPorMotivo.length ? `<tr class="control-totals-row">
+            <td data-label="Motivo"><strong>Total</strong></td>
+            <td data-label="Meta">${perdidasPorOrigen.meta}</td>
+            <td data-label="Google">${perdidasPorOrigen.google}</td>
+            <td data-label="Web">${perdidasPorOrigen.web}</td>
+            <td data-label="Sin identificar / otro">${perdidasPorOrigen.otro}</td>
+            <td data-label="Total"><strong>${perdidasTotales}</strong></td>
+          </tr>` : ""}
+        </tbody>
+      </table>
+    </div>
   </div>
 ` : `
   <!-- VENDEDOR: solo promedio propio -->
