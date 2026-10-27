@@ -864,3 +864,117 @@ textarea { resize: vertical; min-height: 72px; }
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================
+   CONTROL VENTAS: captación -> bot -> gestión humana
+   ========================================================= */
+.control-flow-section {
+  margin-top: 18px;
+  padding: 22px;
+  border: 1px solid #e6eaf0;
+  border-radius: 14px;
+  background: #fff;
+}
+.control-phase-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.control-phase-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: #f0f4fb;
+  color: #344968;
+  font-size: 13px;
+  font-weight: 800;
+}
+.control-phase-header h2 { margin: 0 0 3px; font-size: 18px; color: #101828; }
+.control-phase-header p { margin: 0; font-size: 13px; line-height: 1.45; color: #667085; }
+.control-phase-total {
+  margin-left: auto;
+  padding: 7px 11px;
+  border-radius: 100px;
+  background: #f2f4f7;
+  font-size: 12px;
+  color: #475467;
+  font-weight: 700;
+}
+.control-flow-section .control-stats-grid { margin-bottom: 0; }
+.control-flow-section .control-stat-card {
+  min-width: 0;
+  height: auto;
+  min-height: 130px;
+  box-sizing: border-box;
+}
+.control-flow-section .control-breakdown-card { padding: 17px; }
+.control-breakdown-divider {
+  padding-top: 13px;
+  margin: 13px 0 3px;
+  border-top: 1px solid #e6eaf0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #667085;
+}
+.control-breakdown-card .control-origin-row { font-size: 12px; }
+.control-breakdown-card .control-origin-row strong { font-size: 12px; }
+.control-flow-section .control-results-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.control-flow-section .control-management-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.control-metrics-note {
+  margin: 16px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #667085;
+}
+.control-alert-inline {
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid #e6eaf0;
+  border-radius: 12px;
+  background: #fcfcfd;
+}
+.control-alert-inline .control-section-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #101828;
+}
+.control-flow-section .control-stat-card .control-stat-title { font-size: 14px; }
+.control-performance-wrap { width: 100%; overflow-x: auto; }
+@media (max-width: 1150px) {
+  .control-flow-section .control-results-grid,
+  .control-flow-section .control-management-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .control-flow-section { padding: 14px; }
+  .control-phase-number { width: 30px; height: 30px; flex-basis: 30px; }
+  .control-phase-header h2 { font-size: 16px; }
+  .control-phase-total { margin-left: 0; }
+  .control-flow-section .control-results-grid,
+  .control-flow-section .control-management-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+  .control-alert-inline { padding: 14px; }
+}
+
+/* Selección de período: rápidos separados de fechas, especialmente en móvil */
+.control-period-buttons, .control-period-dates {
+  display: flex;
+  gap: 9px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.control-period-buttons { padding-right: 10px; border-right: 1px solid #e4e7ec; }
+.control-period-dates label { min-width: 132px; }
+.control-period-dates button { min-height: 38px; }
+@media (max-width: 700px) {
+  .control-period-form { display: flex; flex-direction: column; align-items: stretch; }
+  .control-period-buttons { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); border: 0; padding: 0; }
+  .control-period-buttons button { width: 100%; }
+  .control-period-dates { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .control-period-dates label { min-width: 0; }
+  .control-period-dates button { grid-column: 1 / -1; width: 100%; }
+}

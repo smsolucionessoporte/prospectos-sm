@@ -139,6 +139,13 @@ CREATE INDEX IF NOT EXISTS idx_control_ventas_vendedor
 ALTER TABLE control_ventas
   ADD COLUMN IF NOT EXISTS origen_detalle VARCHAR(50);
 
+-- Inicio de seguimiento después del primer contacto humano y primera
+-- respuesta posterior del prospecto. Los registros históricos quedan NULL.
+ALTER TABLE control_ventas
+  ADD COLUMN IF NOT EXISTS fecha_inicio_seguimiento_post_atencion TIMESTAMPTZ;
+ALTER TABLE control_ventas
+  ADD COLUMN IF NOT EXISTS fecha_respuesta_cliente_post_atencion TIMESTAMPTZ;
+
 -- Momento desde el que el vendedor actualmente asignado tiene una respuesta pendiente.
 -- Es independiente de fecha_derivacion para no perder la historia original al reasignar.
 ALTER TABLE control_ventas

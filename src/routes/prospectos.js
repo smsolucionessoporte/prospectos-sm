@@ -1032,6 +1032,14 @@ if (evento === "consulta_erronea") {
         `
         UPDATE control_ventas
         SET
+          -- Se ejecuta ante un NUEVO mensaje del cliente ya derivado.
+          -- Si existió atención humana previamente, confirma que el
+          -- prospecto volvió a responder luego de esa atención.
+          fecha_respuesta_cliente_post_atencion = CASE
+            WHEN fecha_primera_respuesta_vendedor IS NOT NULL
+            THEN COALESCE(fecha_respuesta_cliente_post_atencion, NOW())
+            ELSE fecha_respuesta_cliente_post_atencion
+          END,
           fecha_inicio_espera_vendedor =
             COALESCE(fecha_inicio_espera_vendedor, NOW()),
           actualizado_en = NOW()
@@ -1061,6 +1069,8 @@ if (evento === "consulta_erronea") {
         `
         UPDATE control_ventas
         SET
+          fecha_inicio_seguimiento_post_atencion =
+            COALESCE(fecha_inicio_seguimiento_post_atencion, NOW()),
           fecha_primera_respuesta_vendedor =
             COALESCE(fecha_primera_respuesta_vendedor, NOW()),
           fecha_inicio_espera_vendedor = NULL,

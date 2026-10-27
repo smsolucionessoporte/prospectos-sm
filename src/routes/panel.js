@@ -1095,6 +1095,29 @@ function renderFlipResultCard({
   `;
 }
 
+// Resultado del bot: el desglose por origen permanece visible, sin girar tarjetas.
+function renderResultCard({ title, value, description, cardClass, breakdown, denominators }) {
+  const origins = [
+    ["📱 Meta", Number(breakdown.meta || 0), Number(denominators.meta || 0)],
+    ["🔎🌐 Google / Web", Number(breakdown.google || 0) + Number(breakdown.web || 0), Number(denominators.google || 0) + Number(denominators.web || 0)],
+    ["❔ Sin identificar", Number(breakdown.otro || 0), Number(denominators.otro || 0)],
+  ];
+  return `
+    <div class="control-stat-card control-breakdown-card ${cardClass}">
+      <div class="control-stat-value">${value}</div>
+      <div class="control-stat-title">${title}</div>
+      <div class="control-stat-desc">${description}</div>
+      <div class="control-breakdown-divider">Por origen · tasa dentro de cada canal</div>
+      ${origins.map(([nombre, cantidad, total]) => `
+        <div class="control-origin-row">
+          <span>${nombre}</span>
+          <strong>${cantidad} · ${formatConversionRate(cantidad, total)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderControlStatCard({
   title,
   value,
@@ -1382,13 +1405,21 @@ const filtroUsuarioControl = esAdminControl
         COUNT(*) FILTER (WHERE cv.origen IS NULL OR cv.origen NOT IN ('meta', 'google', 'web'))::int AS otro
       FROM control_ventas cv
       JOIN LATERAL (
-        SELECT p.estado, p.motivo_perdida
+        SELECT p.id, p.estado, p.motivo_perdida, p.demo_fecha
         FROM prospectos p
         WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
         ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC
         LIMIT 1
       ) p ON TRUE
       WHERE ${filtro} AND p.estado = 'perdido'
+        AND (
+          cv.derivado = TRUE OR p.demo_fecha IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM historial_estados h
+            WHERE h.prospecto_id = p.id
+              AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','confirmado')
+          )
+        )
       GROUP BY 1
       ORDER BY COUNT(*) DESC, motivo ASC
     `, params);
@@ -1408,231 +1439,167 @@ const filtroUsuarioControl = esAdminControl
       confirmados_meta: 0, confirmados_google: 0, confirmados_web: 0, confirmados_otro: 0,
     };
 
-const paramsEmbudo = [];
-
-let filtroVendedorEmbudo = "TRUE";
-
-if (esVendedorControl) {
-  paramsEmbudo.push(usuarioControl.id);
-
-  filtroVendedorEmbudo = `
-    COALESCE(p.demo_responsable, p.creado_por, cv.vendedor_id)
-      = $${paramsEmbudo.length}
-  `;
-}
-
-const embudoVendedores = await pool.query(
-  `
-  WITH vendedores AS (
-    SELECT DISTINCT
-      u.id,
-      u.nombre
-    FROM usuarios u
-    WHERE u.activo = true
-      AND u.rol IN ('vendedor', 'admin')
-  ),
-
-  datos_base AS (
-    SELECT
-      v.id AS vendedor_id,
-      v.nombre AS vendedor,
-
-      cv.id AS control_id,
-      cv.derivado AS derivado_registrado,
-      p.id AS prospecto_id,
-
+// Gestión comercial: cada derivación se ubica en una ÚNICA etapa ACTUAL.
+// La respuesta del prospecto posterior a la atención humana se registra desde
+// esta versión. Los historiales sin ese dato quedan en "En seguimiento", nunca
+// se clasifican automáticamente como personas que no respondieron.
+const gestionQuery = await pool.query(`
+  WITH base AS (
+    SELECT cv.*,
+      p.estado AS estado_prospecto,
+      p.demo_fecha AS fecha_demo,
       (
-        p.demo_fecha IS NOT NULL
-        OR p.estado IN ('demo_coordinada', 'demo_realizada')
+        cv.derivado = true
+        OR p.demo_fecha IS NOT NULL
+        OR p.estado IN ('demo_coordinada','demo_realizada','confirmado')
         OR EXISTS (
-          SELECT 1
-          FROM historial_estados h
-          WHERE h.prospecto_id = p.id
-            AND h.estado_nuevo IN ('demo_coordinada', 'demo_realizada')
+          SELECT 1 FROM historial_estados h WHERE h.prospecto_id = p.id
+          AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','confirmado')
+        )
+      ) AS efectivamente_derivado
+    FROM control_ventas cv
+    LEFT JOIN LATERAL (
+      SELECT p.estado, p.demo_fecha
+      FROM prospectos p
+      WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+      ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC
+      LIMIT 1
+    ) p ON TRUE
+    WHERE ${filtro}
+  ), clasificados AS (
+    SELECT CASE
+      WHEN estado_prospecto = 'confirmado' THEN 'confirmados'
+      WHEN estado_prospecto = 'perdido' THEN 'perdidos'
+      WHEN estado_prospecto = 'demo_realizada' THEN 'demo_realizada'
+      WHEN estado_prospecto = 'demo_coordinada' OR fecha_demo IS NOT NULL THEN 'demo_coordinada'
+      WHEN fecha_primera_respuesta_vendedor IS NULL THEN 'sin_atender'
+      WHEN fecha_inicio_seguimiento_post_atencion IS NOT NULL
+        AND fecha_respuesta_cliente_post_atencion IS NULL THEN 'atendidos_sin_respuesta'
+      ELSE 'en_seguimiento'
+    END AS etapa
+    FROM base
+    WHERE efectivamente_derivado
+  )
+  SELECT etapa, COUNT(*)::int AS cantidad
+  FROM clasificados
+  GROUP BY etapa
+`, params);
+const gestion = Object.fromEntries([
+  'sin_atender', 'atendidos_sin_respuesta', 'en_seguimiento',
+  'demo_coordinada', 'demo_realizada', 'confirmados', 'perdidos'
+].map(etapa => [etapa, 0]));
+for (const fila of gestionQuery.rows) gestion[fila.etapa] = Number(fila.cantidad);
+const totalGestion = Object.values(gestion).reduce((a, b) => a + b, 0);
+
+const paramsEmbudo = [...params];
+if (esVendedorControl) paramsEmbudo.push(usuarioControl.id);
+const filtroVendedorEmbudo = esVendedorControl
+  ? `v.id = $${paramsEmbudo.length}` : 'TRUE';
+const embudoVendedores = await pool.query(`
+  WITH vendedores AS (
+    SELECT id, nombre FROM usuarios
+    WHERE activo = TRUE AND rol IN ('vendedor','admin')
+  ), datos AS (
+    SELECT v.id AS vendedor_id, v.nombre AS vendedor, cv.id,
+      (
+        COALESCE(cv.derivado, FALSE) = TRUE
+        OR p.demo_fecha IS NOT NULL
+        OR p.estado IN ('demo_coordinada','demo_realizada','confirmado')
+        OR EXISTS (
+          SELECT 1 FROM historial_estados h WHERE h.prospecto_id = p.id
+          AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','confirmado')
+        )
+      ) AS derivado_efectivo,
+      (
+        p.demo_fecha IS NOT NULL OR p.estado IN ('demo_coordinada','demo_realizada')
+        OR EXISTS (
+          SELECT 1 FROM historial_estados h
+          WHERE h.prospecto_id = p.id AND h.estado_nuevo IN ('demo_coordinada','demo_realizada')
         )
       ) AS paso_demo_coordinada,
-
       (
-        p.estado = 'demo_realizada'
-        OR EXISTS (
-          SELECT 1
-          FROM historial_estados h
-          WHERE h.prospecto_id = p.id
-            AND h.estado_nuevo = 'demo_realizada'
+        p.estado = 'demo_realizada' OR EXISTS (
+          SELECT 1 FROM historial_estados h
+          WHERE h.prospecto_id = p.id AND h.estado_nuevo = 'demo_realizada'
         )
       ) AS paso_demo_realizada,
-
-      (
-        p.estado = 'confirmado'
-        OR EXISTS (
-          SELECT 1
-          FROM historial_estados h
-          WHERE h.prospecto_id = p.id
-            AND h.estado_nuevo = 'confirmado'
-        )
-      ) AS paso_confirmado,
-
-      (
-        p.estado = 'perdido'
-        OR EXISTS (
-          SELECT 1
-          FROM historial_estados h
-          WHERE h.prospecto_id = p.id
-            AND h.estado_nuevo = 'perdido'
-        )
-      ) AS paso_perdido
-
+      p.estado = 'confirmado' AS confirmado_actual,
+      p.estado = 'perdido' AS perdido_actual
     FROM control_ventas cv
-
-    LEFT JOIN prospectos p
-      ON p.chatwoot_conversation_id =
-         cv.chatwoot_conversation_id
-
-    JOIN vendedores v
-      ON v.id = COALESCE(
-        p.demo_responsable,
-        p.creado_por,
-        cv.vendedor_id
-      )
-
-    WHERE ${filtroVendedorEmbudo}
-  ),
-
-  datos AS (
-    SELECT
-      datos_base.*,
-      (
-        COALESCE(derivado_registrado, false) = true
-        OR paso_demo_coordinada = true
-        OR paso_demo_realizada = true
-        OR paso_confirmado = true
-      ) AS derivado_efectivo
-    FROM datos_base
+    LEFT JOIN LATERAL (
+      SELECT p.* FROM prospectos p
+      WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+      ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC LIMIT 1
+    ) p ON TRUE
+    JOIN vendedores v ON v.id = COALESCE(p.demo_responsable, p.creado_por, cv.vendedor_id)
+    WHERE ${filtro} AND ${filtroVendedorEmbudo}
   )
-
-  SELECT
-    vendedor_id,
-    vendedor,
-
-    COUNT(*) FILTER (
-      WHERE derivado_efectivo
-    )::int AS derivados,
-
-    COUNT(*) FILTER (
-      WHERE derivado_efectivo AND paso_demo_coordinada
-    )::int AS demos_coordinadas,
-
-    COUNT(*) FILTER (
-      WHERE derivado_efectivo AND paso_demo_realizada
-    )::int AS demos_realizadas,
-
-    COUNT(*) FILTER (
-      WHERE derivado_efectivo AND paso_confirmado
-    )::int AS confirmados,
-
-    COUNT(*) FILTER (
-      WHERE derivado_efectivo AND paso_perdido
-    )::int AS perdidos
-
+  SELECT vendedor_id, vendedor,
+    COUNT(*) FILTER (WHERE derivado_efectivo)::int AS derivados,
+    COUNT(*) FILTER (WHERE derivado_efectivo AND paso_demo_coordinada)::int AS demos_coordinadas,
+    COUNT(*) FILTER (WHERE derivado_efectivo AND paso_demo_realizada)::int AS demos_realizadas,
+    COUNT(*) FILTER (WHERE derivado_efectivo AND confirmado_actual)::int AS confirmados,
+    COUNT(*) FILTER (WHERE derivado_efectivo AND perdido_actual)::int AS perdidos
   FROM datos
+  GROUP BY vendedor_id, vendedor ORDER BY vendedor
+`, paramsEmbudo);
 
-  GROUP BY vendedor_id, vendedor
-  ORDER BY vendedor
-  `,
-  paramsEmbudo,
-);
-
-const paramsResumenVendedores = [];
-
+const paramsResumenVendedores = [...params];
+if (!esAdminControl) paramsResumenVendedores.push(usuarioControl.id);
 const filtroUsuarioResumen = esAdminControl
-  ? "TRUE"
-  : (() => {
-      paramsResumenVendedores.push(usuarioControl.id);
-      return `v.id = $${paramsResumenVendedores.length}`;
-    })();
+  ? 'TRUE' : `v.id = $${paramsResumenVendedores.length}`;
 
-    // Identifica rendimiento de los usuarios del grupo comercial
-    const rendimiento = await pool.query(
-      `
-      WITH vendedores AS (
-        SELECT
-          u.id,
-          u.nombre,
-          ROW_NUMBER() OVER (ORDER BY u.nombre)::int AS orden
-        FROM usuarios u
-        WHERE u.activo = true
-          AND u.rol = 'vendedor'
-      )
-      SELECT
-        v.nombre AS vendedor,
+const rendimiento = await pool.query(`
+  WITH vendedores AS (
+    SELECT u.id, u.nombre FROM usuarios u
+    WHERE u.activo = TRUE AND u.rol = 'vendedor'
+  )
+  SELECT v.nombre AS vendedor,
+    COUNT(cv.id) FILTER (
+      WHERE cv.derivado = TRUE AND cv.fecha_derivacion IS NOT NULL
+    )::int AS derivados,
+    COUNT(cv.id) FILTER (
+      WHERE cv.derivado = TRUE AND cv.fecha_derivacion IS NOT NULL
+        AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
+    )::int AS respondidos,
+    COUNT(cv.id) FILTER (
+      WHERE cv.derivado = TRUE AND cv.fecha_inicio_espera_vendedor IS NOT NULL
+    )::int AS pendientes,
+    ROUND(AVG(EXTRACT(EPOCH FROM (
+      cv.fecha_primera_respuesta_vendedor - cv.fecha_derivacion
+    )) / 60) FILTER (
+      WHERE cv.derivado = TRUE AND cv.fecha_derivacion IS NOT NULL
+        AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
+        AND cv.fecha_primera_respuesta_vendedor >= cv.fecha_derivacion
+    ))::int AS promedio_minutos
+  FROM vendedores v
+  LEFT JOIN control_ventas cv ON cv.vendedor_id = v.id AND ${filtro}
+  WHERE ${filtroUsuarioResumen}
+  GROUP BY v.id, v.nombre ORDER BY v.nombre
+`, paramsResumenVendedores);
 
-          COUNT(cv.id) FILTER (
-        WHERE cv.derivado = true
-          AND cv.fecha_derivacion IS NOT NULL
-      )::int AS derivados,
-
-        COUNT(cv.id) FILTER (
-          WHERE cv.derivado = true
-            AND cv.fecha_derivacion IS NOT NULL
-            AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
-        )::int AS respondidos,
-
-        COUNT(cv.id) FILTER (
-          WHERE cv.derivado = true
-            AND cv.fecha_inicio_espera_vendedor IS NOT NULL
-        )::int AS pendientes,
-
-        ROUND(AVG(
-          EXTRACT(
-            EPOCH FROM (
-              cv.fecha_primera_respuesta_vendedor - cv.fecha_derivacion
-            )
-          ) / 60
-        ) FILTER (
-          WHERE cv.derivado = true
-            AND cv.fecha_derivacion IS NOT NULL
-            AND cv.fecha_primera_respuesta_vendedor IS NOT NULL
-            AND cv.fecha_primera_respuesta_vendedor >= cv.fecha_derivacion
-        ))::int AS promedio_minutos
-
-      FROM vendedores v
-
-      LEFT JOIN control_ventas cv
-        ON cv.vendedor_id = v.id
-
-        WHERE ${filtroUsuarioResumen}
-        GROUP BY v.id, v.nombre, v.orden
-        ORDER BY v.orden
-          `,
-        paramsResumenVendedores,
-        );
-
-    const alertasCandidatas = await pool.query(
-      `
-      SELECT
-        cv.chatwoot_conversation_id,
-        v.nombre AS vendedor,
-        cv.fecha_derivacion,
-        cv.fecha_inicio_espera_vendedor,
-        p.contacto,
-        p.telefono
-      FROM control_ventas cv
-            JOIN usuarios v
-        ON v.id = cv.vendedor_id
-      AND v.activo = true
-      AND v.rol = 'vendedor'
-       -- Datos del prospecto
-      LEFT JOIN prospectos p
-        ON p.chatwoot_conversation_id = cv.chatwoot_conversation_id
-        
-        WHERE ${filtroUsuarioResumen}
-        AND cv.derivado = true
-        AND cv.fecha_inicio_espera_vendedor IS NOT NULL
-      ORDER BY cv.fecha_inicio_espera_vendedor ASC
-      LIMIT 100
-      `,
-paramsResumenVendedores,
-    );
+// Las alertas también se acotan por ingreso en el período seleccionado.
+// Incluyen mensajes nuevos de contactos que ya fueron atendidos.
+const alertasCandidatas = await pool.query(`
+  SELECT cv.chatwoot_conversation_id,
+    v.nombre AS vendedor, cv.fecha_derivacion,
+    cv.fecha_inicio_espera_vendedor, cv.fecha_primera_respuesta_vendedor,
+    p.contacto, p.telefono
+  FROM control_ventas cv
+  JOIN usuarios v ON v.id = cv.vendedor_id
+    AND v.activo = TRUE AND v.rol = 'vendedor'
+  LEFT JOIN LATERAL (
+    SELECT p.contacto, p.telefono, p.estado FROM prospectos p
+    WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
+    ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC LIMIT 1
+  ) p ON TRUE
+  WHERE ${filtro} AND ${filtroUsuarioResumen}
+    AND cv.derivado = TRUE
+    AND cv.fecha_inicio_espera_vendedor IS NOT NULL
+    AND COALESCE(p.estado, 'prospecto') NOT IN ('confirmado', 'perdido')
+  ORDER BY cv.fecha_inicio_espera_vendedor ASC
+  LIMIT 100
+`, paramsResumenVendedores);
 
     // "Necesitan atención" usa el mismo horario laboral que el bot (9-17, lun-vie).
     const alertasActuales = alertasCandidatas.rows.map((alerta) => ({
@@ -1777,185 +1744,105 @@ paramsResumenVendedores,
       </div>
 
       <form method="GET" action="/control" class="control-period-form">
-        <button name="periodo" value="hoy" class="btn ${periodo === "hoy" ? "btn-primary" : "btn-secondary"}">Hoy</button>
-        <button name="periodo" value="7" class="btn ${periodo === "7" ? "btn-primary" : "btn-secondary"}">7 días</button>
-        <button name="periodo" value="30" class="btn ${periodo === "30" ? "btn-primary" : "btn-secondary"}">30 días</button>
-        <label>Desde<input type="date" name="desde" value="${req.query.desde || ""}"></label>
-        <label>Hasta<input type="date" name="hasta" value="${req.query.hasta || ""}"></label>
-        <button type="submit" name="periodo" value="personalizado" class="btn btn-secondary">Aplicar</button>
+        <div class="control-period-buttons" role="group" aria-label="Período rápido">
+          <button name="periodo" value="hoy" class="btn ${periodo === "hoy" ? "btn-primary" : "btn-secondary"}">Hoy</button>
+          <button name="periodo" value="7" class="btn ${periodo === "7" ? "btn-primary" : "btn-secondary"}">7 días</button>
+          <button name="periodo" value="30" class="btn ${periodo === "30" ? "btn-primary" : "btn-secondary"}">30 días</button>
+        </div>
+        <div class="control-period-dates">
+          <label>Desde<input type="date" name="desde" value="${req.query.desde || ""}"></label>
+          <label>Hasta<input type="date" name="hasta" value="${req.query.hasta || ""}"></label>
+          <button type="submit" name="periodo" value="personalizado" class="btn btn-secondary">Aplicar fechas</button>
+        </div>
       </form>
 
 ${esAdminControl ? `
-  <!-- ADMIN: origen -->
-  <div class="control-mini-title">Origen de los contactos</div>
-
-  <div class="control-stats-grid control-stats-grid-four">
-    <div class="control-stat-card stat-total">
-      <div class="control-stat-value">${stats.entraron}</div>
-      <div class="control-stat-title">Entraron</div>
-      <div class="control-stat-desc">100% del total</div>
+  <section class="control-flow-section" aria-labelledby="origen-titulo">
+    <div class="control-phase-header">
+      <div class="control-phase-number">01</div>
+      <div><h2 id="origen-titulo">Origen de los contactos</h2>
+        <p>Contactos ingresados durante el período seleccionado.</p></div>
     </div>
-
-    <div class="control-stat-card stat-meta">
-      <div class="control-stat-value">${stats.meta}</div>
-      <div class="control-stat-title">Meta</div>
-      <div class="control-stat-desc">${porcentaje(stats.meta, stats.entraron)}% del total · Detectado desde botón/enlace de Instagram o Facebook</div>
+    <div class="control-stats-grid control-stats-grid-four">
+      ${renderControlStatCard({title:'Entraron', value:stats.entraron, description:'Total de contactos recibidos',cardClass:'stat-total'})}
+      ${renderControlStatCard({title:'Meta',value:stats.meta, description:`${porcentaje(stats.meta,stats.entraron)}% del total · Facebook e Instagram`,cardClass:'stat-meta'})}
+      ${renderControlStatCard({title:'Google / Web', value:Number(stats.google||0)+Number(stats.web||0), description:`${porcentaje(Number(stats.google||0)+Number(stats.web||0),stats.entraron)}% del total`,cardClass:'stat-google'})}
+      ${renderControlStatCard({title:'Sin identificar',value:stats.sin_identificar||0,description:`${porcentaje(stats.sin_identificar||0,stats.entraron)}% del total`,cardClass:'stat-other'})}
     </div>
+  </section>
 
-    <div class="control-stat-card stat-google">
-      <div class="control-stat-value">${(Number(stats.google) || 0) + (Number(stats.web) || 0)}</div>
-      <div class="control-stat-title">Google / Web</div>
-      <div class="control-stat-desc">${porcentaje((Number(stats.google) || 0) + (Number(stats.web) || 0), stats.entraron)}% del total · Detectado desde el sitio web, por publicidad o ingreso directo</div>
+  <section class="control-flow-section" aria-labelledby="bot-titulo">
+    <div class="control-phase-header">
+      <div class="control-phase-number">02</div>
+      <div><h2 id="bot-titulo">Resultado del bot</h2>
+        <p>Desde el primer mensaje hasta la derivación. Acá termina la etapa automática.</p></div>
     </div>
-
-    <div class="control-stat-card stat-other">
-      <div class="control-stat-value">${stats.sin_identificar || 0}</div>
-      <div class="control-stat-title">Sin identificar</div>
-      <div class="control-stat-desc">${porcentaje(stats.sin_identificar || 0, stats.entraron)}% del total</div>
+    <div class="control-stats-grid control-results-grid">
+      ${renderResultCard({
+        title:'No respondieron',value:stats.no_respondieron,
+        description:`${porcentaje(stats.no_respondieron,stats.entraron)}% del total · Sin respuesta al primer mensaje`,
+        cardClass:'stat-no-response',
+        breakdown:{meta:stats.no_respondieron_meta,google:stats.no_respondieron_google,web:stats.no_respondieron_web,otro:stats.no_respondieron_otro},
+        denominators:{meta:stats.meta,google:stats.google,web:stats.web,otro:stats.sin_identificar},
+      })}
+      ${renderResultCard({
+        title:'Consultas erróneas',value:stats.consultas_erroneas,
+        description:`${porcentaje(stats.consultas_erroneas,stats.entraron)}% del total · Consultas ajenas a ventas`,
+        cardClass:'stat-error',
+        breakdown:{meta:stats.consultas_erroneas_meta,google:stats.consultas_erroneas_google,web:stats.consultas_erroneas_web,otro:stats.consultas_erroneas_otro},
+        denominators:{meta:stats.meta,google:stats.google,web:stats.web,otro:stats.sin_identificar},
+      })}
+      ${renderResultCard({
+        title:'No avanzaron',value:stats.no_avanzaron,
+        description:`${porcentaje(stats.no_avanzaron,stats.entraron)}% del total · Respondieron, sin derivación`,
+        cardClass:'stat-no-advance',
+        breakdown:{meta:stats.no_avanzaron_meta,google:stats.no_avanzaron_google,web:stats.no_avanzaron_web,otro:stats.no_avanzaron_otro},
+        denominators:{meta:stats.meta,google:stats.google,web:stats.web,otro:stats.sin_identificar},
+      })}
+      ${renderResultCard({
+        title:'Derivados',value:stats.derivados,
+        description:`${porcentaje(stats.derivados,stats.entraron)}% del total · Pasaron a atención humana`,
+        cardClass:'stat-derived control-stat-highlight',
+        breakdown:{meta:stats.derivados_meta,google:stats.derivados_google,web:stats.derivados_web,otro:stats.derivados_otro},
+        denominators:{meta:stats.meta,google:stats.google,web:stats.web,otro:stats.sin_identificar},
+      })}
     </div>
-  </div>
+  </section>
 
-  <!-- ADMIN: resultado -->
-  <div class="control-mini-title">Resultado del contacto</div>
+  <section class="control-flow-section" aria-labelledby="gestion-titulo">
+    <div class="control-phase-header">
+      <div class="control-phase-number">03</div>
+      <div><h2 id="gestion-titulo">Gestiones comerciales</h2>
+        <p>Situación actual de los derivados del período. Cada prospecto se cuenta una sola vez.</p></div>
+      <div class="control-phase-total">${totalGestion} derivados evaluados</div>
+    </div>
+    <div class="control-stats-grid control-management-grid">
+      ${renderControlStatCard({title:'Sin atender', value:gestion.sin_atender,description:`${formatConversionRate(gestion.sin_atender,totalGestion)} de derivados · Sin primera respuesta humana`,cardClass:'stat-no-response'})}
+      ${renderControlStatCard({title:'Atendidos sin respuesta', value:gestion.atendidos_sin_respuesta,description:`${formatConversionRate(gestion.atendidos_sin_respuesta,totalGestion)} · El vendedor escribió, pero aún no obtuvo una respuesta posterior registrada`,cardClass:'stat-no-advance'})}
+      ${renderControlStatCard({title:'En conversación', value:gestion.en_seguimiento,description:`${formatConversionRate(gestion.en_seguimiento,totalGestion)} · Contactados sin demo; incluye historiales no verificables`,cardClass:'stat-other'})}
+      ${renderControlStatCard({title:'Demo coordinada', value:gestion.demo_coordinada,description:`${formatConversionRate(gestion.demo_coordinada,totalGestion)} · Pendiente de realizar`,cardClass:'stat-google'})}
+      ${renderControlStatCard({title:'Demo realizada', value:gestion.demo_realizada,description:`${formatConversionRate(gestion.demo_realizada,totalGestion)} · Pendiente de cierre`,cardClass:'stat-meta'})}
+      ${renderControlStatCard({title:'Confirmados', value:gestion.confirmados,description:`${formatConversionRate(gestion.confirmados,totalGestion)} · Contratación confirmada`,cardClass:'stat-confirmed'})}
+      ${renderControlStatCard({title:'Perdidos', value:gestion.perdidos,description:`${formatConversionRate(gestion.perdidos,totalGestion)} · Cierre negativo`,cardClass:'stat-error'})}
+    </div>
+    <p class="control-metrics-note">«Atendidos sin respuesta» se registra desde esta actualización, a partir del contacto humano y los mensajes posteriores. Los casos anteriores sin historial suficiente permanecen en «En conversación», para no clasificarlos incorrectamente.</p>
 
- <div class="control-stats-grid control-stats-grid-five control-results-grid">
+    <div class="control-alert-inline">
+      <div class="control-section-header">
+        <div><h3><i class="ti ti-bell"></i> Necesitan atención</h3>
+          <p>Mensajes pendientes de respuesta humana dentro del período. También puede haber conversaciones previamente atendidas.</p>
+        </div>
+        <span class="control-alert-count">${alertasActuales.length}</span>
+      </div>
+      <div class="control-alert-list">${filasAlertas}</div>
+    </div>
+  </section>
 
-  ${renderFlipResultCard({
-    title: "No respondieron",
-    value: stats.no_respondieron,
-    description: `${porcentaje(stats.no_respondieron, stats.entraron)}% del total · No contestaron el primer mensaje`,
-    cardClass: "stat-no-response",
-    breakdown: {
-      meta: stats.no_respondieron_meta,
-      google: stats.no_respondieron_google,
-      web: stats.no_respondieron_web,
-      otro: stats.no_respondieron_otro,
-    },
-    denominators: {
-      meta: stats.meta,
-      google: stats.google,
-      web: stats.web || 0,
-      otro: stats.sin_identificar || 0,
-    },
-  })}
-
-  ${renderFlipResultCard({
-    title: "Consultas erróneas",
-    value: stats.consultas_erroneas,
-    description: `${porcentaje(stats.consultas_erroneas, stats.entraron)}% del total · Ingresaron por error o no correspondía`,
-    cardClass: "stat-error",
-    prefix: "Al menos",
-    breakdown: {
-      meta: stats.consultas_erroneas_meta,
-      google: stats.consultas_erroneas_google,
-      web: stats.consultas_erroneas_web,
-      otro: stats.consultas_erroneas_otro,
-    },
-    denominators: {
-      meta: stats.meta,
-      google: stats.google,
-      web: stats.web || 0,
-      otro: stats.sin_identificar || 0,
-    },
-  })}
-
-  ${renderFlipResultCard({
-    title: "No avanzaron",
-    value: stats.no_avanzaron,
-    description: `${porcentaje(stats.no_avanzaron, stats.entraron)}% del total · Respondieron pero no llegaron a derivarse`,
-    cardClass: "stat-no-advance",
-    breakdown: {
-      meta: stats.no_avanzaron_meta,
-      google: stats.no_avanzaron_google,
-      web: stats.no_avanzaron_web,
-      otro: stats.no_avanzaron_otro,
-    },
-    denominators: {
-      meta: stats.meta,
-      google: stats.google,
-      web: stats.web || 0,
-      otro: stats.sin_identificar || 0,
-    },
-  })}
-
-  ${renderFlipResultCard({
-    title: "Derivados",
-    value: stats.derivados,
-    description: `${porcentaje(stats.derivados, stats.entraron)}% del total`,
-    cardClass: "control-stat-highlight stat-derived",
-    breakdown: {
-      meta: stats.derivados_meta,
-      google: stats.derivados_google,
-      web: stats.derivados_web,
-      otro: stats.derivados_otro,
-    },
-    denominators: {
-      meta: stats.meta,
-      google: stats.google,
-      web: stats.web || 0,
-      otro: stats.sin_identificar || 0,
-    },
-  })}
-
-  ${renderFlipResultCard({
-    title: "Llegaron a demo",
-    value: stats.llegaron_demo || 0,
-    description: `${porcentaje(stats.llegaron_demo || 0, stats.entraron)}% del total · Alguna vez llegaron a etapa demo`,
-    cardClass: "control-stat-highlight stat-demo",
-    breakdown: {
-      meta: stats.llegaron_demo_meta,
-      google: stats.llegaron_demo_google,
-      web: stats.llegaron_demo_web,
-      otro: stats.llegaron_demo_otro,
-    },
-    denominators: {
-      meta: stats.meta,
-      google: stats.google,
-      web: stats.web || 0,
-      otro: stats.sin_identificar || 0,
-    },
-  })}
-
-  ${renderFlipResultCard({
-    title: "Perdidos",
-    value: perdidasTotales,
-    description: `${porcentaje(perdidasTotales, stats.entraron)}% del total · Estado actual perdido con motivo registrado en Prospectos`,
-    cardClass: "stat-no-advance",
-    breakdown: perdidasPorOrigen,
-    denominators: {
-      meta: stats.meta,
-      google: stats.google,
-      web: stats.web || 0,
-      otro: stats.sin_identificar || 0,
-    },
-  })}
-
-  ${renderFlipResultCard({
-    title: "Confirmados",
-    value: stats.confirmados || 0,
-    description: `${porcentaje(stats.confirmados || 0, stats.entraron)}% del total · Confirmaron la contratación`,
-    cardClass: "control-stat-highlight stat-confirmed",
-    breakdown: {
-      meta: stats.confirmados_meta,
-      google: stats.confirmados_google,
-      web: stats.confirmados_web,
-      otro: stats.confirmados_otro,
-    },
-    denominators: {
-      meta: stats.meta,
-      google: stats.google,
-      web: stats.web || 0,
-      otro: stats.sin_identificar || 0,
-    },
-  })}
-
-</div>
-  </div>
-  <div class="control-section">
+  <section class="control-section">
     <div class="control-section-header">
       <div>
         <h2><i class="ti ti-chart-bar"></i> Prospectos perdidos por motivo y origen</h2>
-        <p>Se cuentan los prospectos que ingresaron en el período seleccionado y actualmente figuran como perdidos. El motivo se toma de su cierre en Prospectos; no se incluyen los que solo dejaron de responder al bot.</p>
+        <p>Estado actual perdido entre los contactos que ingresaron durante el período; no incluye los que solo dejaron de responder al bot.</p>
       </div>
       <strong>${perdidasTotales} perdidos</strong>
     </div>
@@ -1974,7 +1861,7 @@ ${esAdminControl ? `
         </tbody>
       </table>
     </div>
-  </div>
+  </section>
 ` : `
   <!-- VENDEDOR: solo promedio propio -->
   <div class="control-mini-title">Mi atención comercial</div>
@@ -1990,6 +1877,12 @@ ${esAdminControl ? `
   </div>
 `}
 
+${!esAdminControl ? `<div class="control-section">
+  <div class="control-section-header"><div><h2>Necesitan atención</h2><p>Mensajes pendientes de respuesta en el período.</p></div>
+  <span class="control-alert-count">${alertasActuales.length}</span></div>
+  <div class="control-alert-list">${filasAlertas}</div>
+</div>` : ""}
+
 <div class="control-section">
   <div class="control-section-header">
     <div>
@@ -2000,7 +1893,7 @@ ${esAdminControl ? `
       </h2>
 
       <p>
-      Resumen de todos los contactos derivados. Los porcentajes indican qué proporción del total derivado a cada vendedor llegó a cada etapa.
+      Contactos que ingresaron en el período elegido. Las demos son etapas alcanzadas; Confirmados y Perdidos son estados actuales. Los porcentajes se calculan sobre los derivados de cada vendedor.
       </p>
     </div>
   </div>
@@ -2040,7 +1933,7 @@ ${esAdminControl ? `
       <div>
         <h2>Respuesta de vendedores</h2>
         <p>
-          Rendimiento acumulado desde la derivación hasta la primera respuesta.
+          Derivaciones del período seleccionado. La media de la primera respuesta se muestra en horas corridas; «Pendientes» son conversaciones con mensajes sin contestar y pueden haber sido respondidas anteriormente.
         </p>
       </div>
     </div>
@@ -2064,16 +1957,6 @@ ${esAdminControl ? `
   </div>
 ` : ""}
 
-      <div class="control-section">
-        <div class="control-section-header">
-          <div>
-            <h2><i class="ti ti-bell"></i> Necesitan atención</h2>
-            <p>Conversaciones asignadas con un mensaje pendiente de respuesta. El tiempo se reinicia al reasignar.</p>
-          </div>
-          <span class="control-alert-count">${alertasActuales.length}</span>
-        </div>
-        <div class="control-alert-list">${filasAlertas}</div>
-      </div>
     `, req));
   } catch (err) {
     console.error("Error cargando control de ventas:", err);
