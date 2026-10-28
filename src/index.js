@@ -13,6 +13,9 @@ const { enviarPorChatwoot, enviarAvisoInterno, formatearFechaAR } = require('./z
 const { responsableCierre } = require('./routes/prospectos');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
 const { registrarRutasZoomGiuliano } = require('./zoomGiuliano');
+const crmRoutes = require('./crm/routes');
+const { iniciarCRM } = require('./crm/schema');
+const { iniciarAvisosCRM } = require('./crm/notifications');
 
 
 const app = express();
@@ -38,21 +41,24 @@ app.use(session({
 }));
 
 app.use(authRoutes);
+app.use(crmRoutes);
 app.use(panelRoutes);
 app.use(prospectosRoutes);
 app.use(campaniasRoutes);
 
 // Redirigir raíz al panel
-app.get('/', (req, res) => res.redirect('/panel'));
+app.get('/', (req, res) => res.redirect('/crm')); 
 
 async function start() {
   try {
     await runMigrations();
+    await iniciarCRM();
     await seedAdminIfNeeded();
     app.listen(PORT, () => {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
     iniciarRecordatorios();
+    iniciarAvisosCRM();
     await iniciarProcesadorCampanias();
     //iniciarRecordatoriosRelevamiento();
     //iniciarResumenDiario();

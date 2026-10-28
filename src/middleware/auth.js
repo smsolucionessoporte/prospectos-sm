@@ -25,7 +25,14 @@ function layout(title, body, req) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title} — SM Prospectos</title>
+<title>${title} — SM Comercial</title>
+<meta name="theme-color" content="#17264d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="SM Comercial">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/icons/sm-comercial.svg">
+<link rel="apple-touch-icon" href="/icons/sm-comercial-192.png">
 <link rel="stylesheet" href="/css/app.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.x/dist/tabler-icons.min.css">
 </head>
@@ -34,38 +41,13 @@ ${u ? `
 <nav class="navbar">
   <div class="nav-brand">
     <span class="nav-logo">SM</span>
-    <span class="nav-title">SM Soluciones</span>
+    <span class="nav-title">SM Comercial</span>
   </div>
   <div class="nav-links">
-            ${
-              req?.session?.usuario?.rol !== "control"
-                ? `<a href="/panel" class="nav-link">
-                    <i class="ti ti-layout-dashboard"></i>
-                    Panel
-                  </a>`
-                : ""
-            }
-
-        ${u.rol === "admin" || u.rol === "vendedor" ? `
-          <a
-            href="/control"
-            class="nav-link${req.path.startsWith("/control") ? " active" : ""}"
-          >
-            ${
-              u.rol === "vendedor"
-                ? "🔔"
-                : '<i class="ti ti-chart-bar"></i>'
-            }
-            Control
-          </a>
-        ` : ""}
-
-                ${u.rol === "admin" ? `
-          <a href="/campanias" class="nav-link${req.path.startsWith("/campanias") ? " active" : ""}">
-            <i class="ti ti-speakerphone"></i>
-            Campañas
-          </a>
-        ` : ""}
+    ${u.rol !== 'control' ? `<a href="/crm" class="nav-link${req.path.startsWith('/crm') ? ' active' : ''}"><i class="ti ti-layout-dashboard"></i><span>Mi agenda</span></a>` : ''}
+    ${u.rol !== 'control' ? `<a href="/panel" class="nav-link${req.path.startsWith('/panel') || req.path.startsWith('/prospectos') ? ' active' : ''}"><i class="ti ti-users"></i><span>Oportunidades</span></a>` : ''}
+    ${['admin','vendedor','control'].includes(u.rol) ? `<a href="/control" class="nav-link${req.path.startsWith('/control') ? ' active' : ''}"><i class="ti ti-chart-bar"></i><span>Resultados</span></a>` : ''}
+    ${u.rol === 'admin' ? `<a href="/campanias" class="nav-link${req.path.startsWith('/campanias') ? ' active' : ''}"><i class="ti ti-speakerphone"></i><span>Campañas</span></a>` : ''}
   </div>
   <div class="nav-user">
     <span class="nav-rol badge-rol-${u.rol}">${u.nombre}</span>
@@ -78,6 +60,7 @@ ${u ? `
     ${body}
   </div>
 </main>
+<script>if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));</script>
 </body>
 </html>`;
 }

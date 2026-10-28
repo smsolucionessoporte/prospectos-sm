@@ -9,10 +9,10 @@ router.get('/login', (req, res) => {
     return res.redirect(
       req.session.usuario.rol === "control"
         ? "/control"
-        : "/panel"
+        : "/crm"
     );
   }
-  const next = req.query.next || '/panel';
+  const next = req.query.next || '/crm';
   const error = req.query.error;
   res.send(layout('Iniciar sesión', `
     <div class="login-wrap">
@@ -20,7 +20,7 @@ router.get('/login', (req, res) => {
         <div class="login-header">
           <div class="login-logo">SM</div>
           <h1 class="login-title">SM Soluciones</h1>
-          <p class="login-sub">Gestión de prospectos SM</p>
+          <p class="login-sub">SM Comercial · CRM de ventas</p>
         </div>
         ${error ? `<div class="alert alert-error"><i class="ti ti-alert-circle"></i> ${error}</div>` : ''}
         <form method="POST" action="/login">
@@ -58,7 +58,7 @@ req.session.usuario = { id: user.id, nombre: user.nombre, email: user.email, rol
         ? "/control"
         : (next && next.startsWith("/"))
           ? next
-          : "/panel";
+          : "/crm";
       req.session.save(() => res.redirect(destino));
   } catch (err) {
     console.error(err);

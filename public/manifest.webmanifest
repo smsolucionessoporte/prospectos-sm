@@ -1,0 +1,15 @@
+{
+  "name": "SM Comercial",
+  "short_name": "SM Comercial",
+  "description": "CRM comercial de SM Soluciones",
+  "start_url": "/crm",
+  "scope": "/",
+  "id": "/crm",
+  "display": "standalone",
+  "background_color": "#f5f6f9",
+  "theme_color": "#17264d",
+  "icons": [
+    { "src": "/icons/sm-comercial-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/sm-comercial-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
