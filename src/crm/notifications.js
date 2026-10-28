@@ -28,13 +28,13 @@ async function terminarAviso(id, enviado, error) {
 async function resumenParaVendedor(usuarioId) {
   const { rows: [r] } = await pool.query(`
     SELECT
-      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente' AND vence_en < NOW()) AS vencidas,
-      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente'
+      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot' AND vence_en < NOW()) AS vencidas,
+      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot'
          AND vence_en >= NOW() AND vence_en < NOW() + interval '1 day') AS proximas,
-      (SELECT COUNT(*)::int FROM control_ventas cv
-         LEFT JOIN prospectos p ON p.chatwoot_conversation_id=cv.chatwoot_conversation_id
-         WHERE cv.derivado=TRUE AND cv.vendedor_id=$1 AND cv.fecha_primera_respuesta_vendedor IS NULL
-         AND COALESCE(p.estado,'prospecto') NOT IN ('confirmado','perdido')) AS sin_primera_atencion,
+      (SELECT COUNT(*)::int FROM crm_chatwoot_estado s
+         WHERE s.responsable_id=$1 AND s.requiere_respuesta=TRUE
+         AND s.ultima_revision >= NOW()-interval '30 minutes'
+         AND s.ultima_entrada >= NOW()-interval '14 days') AS mensajes_por_responder,
       (SELECT COUNT(*)::int FROM prospectos p LEFT JOIN control_ventas cv
          ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
          WHERE p.estado='demo_realizada' AND COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)=$1) AS por_cerrar`, [usuarioId]);
@@ -48,14 +48,14 @@ async function enviarResumenVendedor() {
     const tel = AGENTE_TELEFONO[u.id];
     if (!tel) { console.warn(`[CRM] Resumen omitido para usuario ${u.id}: falta teléfono de contacto`); continue; }
     const r = await resumenParaVendedor(u.id);
-    if (!r.vencidas && !r.proximas && !r.sin_primera_atencion && !r.por_cerrar) continue;
+    if (!r.vencidas && !r.proximas && !r.mensajes_por_responder && !r.por_cerrar) continue;
     const aviso = await reclamarAviso('agenda_manana', u.id);
     if (!aviso) continue;
     const mensaje = `📋 *SM Comercial — agenda del día*\n\n` +
       `👤 ${u.nombre}\n` +
       `🔴 Tareas vencidas: *${r.vencidas}*\n` +
       `📅 Próximas 24 h: *${r.proximas}*\n` +
-      `💬 Sin primera atención: *${r.sin_primera_atencion}*\n` +
+      `💬 Mensajes sin responder (verificados): *${r.mensajes_por_responder}*\n` +
       `🤝 Oportunidades por cerrar: *${r.por_cerrar}*\n\n` +
       `Ingresá y gestioná los casos:\n${appUrl()}/crm`;
     try {
@@ -96,10 +96,44 @@ async function enviarResumenSupervisor() {
   }
 }
 
+async function recordarMensajesSinResponder(hora) {
+  if (process.env.CRM_ALERTAS_WHATSAPP !== 'true') return;
+  const { businessMinutesBetween } = require('../salesBusinessTime');
+  const { rows } = await pool.query(`
+    SELECT s.responsable_id, u.nombre, COUNT(*)::int AS cantidad,
+           MIN(s.ultima_entrada) AS mas_antiguo
+    FROM crm_chatwoot_estado s
+    JOIN usuarios u ON u.id=s.responsable_id
+    WHERE u.activo=TRUE AND u.rol='vendedor'
+      AND s.requiere_respuesta=TRUE
+      AND s.ultima_revision >= NOW()-interval '30 minutes'
+      AND s.ultima_entrada >= NOW()-interval '14 days'
+    GROUP BY s.responsable_id,u.nombre`);
+  for (const r of rows) {
+    // Al menos una hora de trabajo real; nunca alertar por un chat viejo no verificado.
+    if (businessMinutesBetween(r.mas_antiguo) < 60) continue;
+    const tel = AGENTE_TELEFONO[r.responsable_id];
+    if (!tel) continue;
+    const aviso = await reclamarAviso(`respuesta_${hora}`,r.responsable_id);
+    if (!aviso) continue;
+    try {
+      const ok = await enviarPorChatwoot(tel,
+        `🔔 *SM Comercial — mensajes por responder*\n\n${r.nombre}, tenés *${r.cantidad}* conversación(es) con mensaje del cliente pendiente de respuesta.\n\nRevisalas acá: ${appUrl()}/crm`,
+        r.responsable_id);
+      await terminarAviso(aviso,Boolean(ok),ok?null:'No se confirmó el envío');
+    } catch(e) {
+      await terminarAviso(aviso,false,String(e.message).slice(0,250));
+      console.warn('[CRM] Recordatorio de mensajes:',e.message);
+    }
+  }
+}
+
 function iniciarAvisosCRM() {
   // Un solo cron por proceso. El registro crm_avisos impide duplicar envíos entre réplicas.
   cron.schedule('0 9 * * 1-5', () => enviarResumenVendedor().catch(e => console.error('[CRM] Agenda:', e)), { timezone: ZONE });
   cron.schedule('30 16 * * 1-5', () => enviarResumenSupervisor().catch(e => console.error('[CRM] Supervisión:', e)), { timezone: ZONE });
+  // Dos recordatorios máximos por jornada, sujetos a verificación de Chatwoot.
+  cron.schedule('0 11,15 * * 1-5', () => recordarMensajesSinResponder(new Intl.DateTimeFormat('en-GB',{timeZone:ZONE,hour:'2-digit',hourCycle:'h23'}).format(new Date())).catch(e=>console.error('[CRM] Recordatorio mensajes:',e)), {timezone:ZONE});
   console.log(`[CRM] Cron de recordatorios configurado (${process.env.CRM_ALERTAS_WHATSAPP === 'true' ? 'envíos habilitados' : 'envíos deshabilitados'})`);
 }
 

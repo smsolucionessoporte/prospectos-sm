@@ -26,6 +26,36 @@ async function iniciarCRM() {
       ON crm_tareas (responsable_id, vence_en) WHERE estado = 'pendiente';
     CREATE INDEX IF NOT EXISTS crm_tareas_prospecto
       ON crm_tareas (prospecto_id);
+    ALTER TABLE crm_tareas ADD COLUMN IF NOT EXISTS origen VARCHAR(20) NOT NULL DEFAULT 'manual';
+    ALTER TABLE crm_tareas ADD COLUMN IF NOT EXISTS clave_automatica VARCHAR(90);
+    CREATE UNIQUE INDEX IF NOT EXISTS crm_tareas_clave_automatica_uq
+      ON crm_tareas (clave_automatica) WHERE clave_automatica IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS prospectos_chatwoot_conversaciones (
+      chatwoot_conversation_id BIGINT PRIMARY KEY,
+      prospecto_id INTEGER NOT NULL REFERENCES prospectos(id) ON DELETE CASCADE,
+      creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_prospectos_chatwoot_vinculos_prospecto
+      ON prospectos_chatwoot_conversaciones (prospecto_id);
+    INSERT INTO prospectos_chatwoot_conversaciones (chatwoot_conversation_id,prospecto_id)
+    SELECT chatwoot_conversation_id,id FROM prospectos
+    WHERE chatwoot_conversation_id IS NOT NULL
+    ON CONFLICT (chatwoot_conversation_id) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS crm_chatwoot_estado (
+      chatwoot_conversation_id BIGINT PRIMARY KEY,
+      inbox_id INTEGER,
+      responsable_id INTEGER REFERENCES usuarios(id),
+      nombre_contacto TEXT,
+      estado_chatwoot VARCHAR(30),
+      ultima_entrada TIMESTAMPTZ,
+      ultima_salida_humana TIMESTAMPTZ,
+      ultimo_mensaje_id VARCHAR(60),
+      requiere_respuesta BOOLEAN NOT NULL DEFAULT FALSE,
+      ultima_revision TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS crm_chatwoot_estado_prioridades
+      ON crm_chatwoot_estado (responsable_id, ultima_entrada DESC)
+      WHERE requiere_respuesta=TRUE;
     CREATE TABLE IF NOT EXISTS crm_avisos (
       id BIGSERIAL PRIMARY KEY,
       fecha DATE NOT NULL,

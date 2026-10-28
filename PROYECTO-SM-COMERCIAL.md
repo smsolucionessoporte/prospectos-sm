@@ -54,3 +54,44 @@ La aplicación móvil es una **PWA instalable** desde navegador en Android/iPhon
 4. Probar la instalación móvil. Antes de habilitar recordatorios externos, verificar los números de WhatsApp de cada vendedor y la identidad de la cuenta técnica que envía mensajes.
 
 **Importante:** esta es una primera versión real de SM Comercial, no la totalidad del CRM. Los envíos de notificaciones no se activan hasta configurar la variable indicada; el monitoreo de mensajes posteriores a la primera atención también forma parte de la entrega 2.
+
+## Entrega 2A — Priorización de conversaciones y tareas automáticas (28/10/2026)
+
+Esta entrega modifica **la misma aplicación SM Comercial**; no es otra plataforma.
+
+- `src/crm/sync.js` consulta en ciclos la API de Chatwoot (máximo 40 conversaciones por ronda,
+  cuatro solicitudes concurrentes) y guarda un resumen de la última entrada, última salida de asesor,
+  responsable, nombre real y estado. Se verifican oportunidades derivadas de hasta **45 días**.
+- El panel solo muestra como urgentes mensajes entrantes de los últimos **14 días** que, entre
+  los mensajes disponibles en Chatwoot, no tengan una salida humana posterior. Se exige
+  verificación reciente (máximo 30 minutos). **No infiere automáticamente que 16 chats
+  históricos siguen sin atender**. Los estados Pendiente/Abierto de Chatwoot no equivalen
+  al estado comercial de la tarea.
+- Un nuevo mensaje del cliente genera o actualiza **una tarea automática por conversación**;
+  la respuesta posterior del vendedor la completa automáticamente. Se calcula el primer
+  vencimiento tras 60 minutos laborales de lunes a viernes, 9–17 Argentina.
+- Una demo marcada como realizada y actualizada en los últimos 30 días genera una tarea
+  automática de cierre. Las demos anteriores se siguen mostrando en Por cerrar, pero no
+  generan alertas antiguas masivas. Al confirmar/perder la oportunidad se cancela la tarea.
+- El usuario elige una oportunidad por su **nombre**, o usa «Programar» desde una tarjeta;
+  se mantiene la autorización servidor para que un vendedor no cargue tareas de otro.
+- Botón «Actualizar Chatwoot» y banner cuando la sincronización está desactualizada o falta
+  `CHATWOOT_API_TOKEN`. El cron procesa la siguiente ronda cada cinco minutos.
+- Resumen matutino y recordatorio individual a las 11:00 y 15:00, **solo cuando**
+  `CRM_ALERTAS_WHATSAPP=true`, el teléfono esté validado y exista al menos una conversación
+  comprobada con 60 minutos laborales sin respuesta. Los avisos se deduplican por día.
+
+### Límites a validar en Railway
+
+1. La API de Chatwoot debe devolver `messages`, `meta.sender`, `meta.assignee` y `status`
+   para el token configurado; si no, el panel **advierte falta de verificación** en lugar
+   de inventar urgencias. No se probó contra la base de producción desde este entorno.
+2. No se marca como «humanamente atendido» un mensaje saliente atribuido a un bot o a
+   la cuenta administradora técnica. Los vendedores reconocidos en la clasificación son
+   los IDs de Chatwoot 4, 8, 11 y 19. Verificar cualquier alta nueva de vendedor.
+3. Cambios en reuniones o mensajes que no tengan vínculo con `control_ventas` no entran
+   en la ronda inicial de verificación; requieren sincronización de origen.
+4. **WhatsApp permanece desactivado** hasta validar remitente y números (Santiago no figura
+   en `AGENTE_TELEFONO`), ya que las alertas generan mensajes reales.
+5. La sincronización es eventual (cada 5 minutos), no instantánea. También puede
+   solicitarse manualmente desde «Actualizar Chatwoot».

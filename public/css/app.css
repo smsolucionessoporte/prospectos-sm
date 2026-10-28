@@ -1048,3 +1048,16 @@ textarea { resize: vertical; min-height: 72px; }
   .crm-mini-item {flex-direction:column;align-items:stretch;}
   .crm-mini-item .btn {width:100%;justify-content:center;}
 }
+/* Segunda entrega: prioridades verificadas y creación desde cada oportunidad */
+.crm-hero-actions {display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap;}
+.crm-notice {display:flex;align-items:center;gap:9px;border:1px solid #cdddf5;background:#f2f7ff;color:#28507f;border-radius:10px;padding:11px 13px;font-size:12px;margin:0 0 15px;line-height:1.45;}
+.crm-notice i {flex:0 0 auto;font-size:19px;}
+.crm-notice.crm-warning {background:#fff8e6;border-color:#f2db9a;color:#785412;}
+.crm-mini-item .crm-actions {display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;}
+.crm-mini-item .crm-actions .btn {align-self:center;}
+.crm-task-form select[name="referencia"] {font-weight:600;}
+@media(max-width:700px) {
+  .crm-hero-actions {width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .crm-hero-actions .btn {width:100%;font-size:12px;white-space:normal;text-align:center;justify-content:center;}
+  .crm-mini-item .crm-actions {width:100%;justify-content:flex-start;}
+}

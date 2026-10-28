@@ -16,6 +16,7 @@ const { registrarRutasZoomGiuliano } = require('./zoomGiuliano');
 const crmRoutes = require('./crm/routes');
 const { iniciarCRM } = require('./crm/schema');
 const { iniciarAvisosCRM } = require('./crm/notifications');
+const { iniciarSincronizacionCRM } = require('./crm/sync');
 
 
 const app = express();
@@ -59,6 +60,7 @@ async function start() {
     });
     iniciarRecordatorios();
     iniciarAvisosCRM();
+    iniciarSincronizacionCRM();
     await iniciarProcesadorCampanias();
     //iniciarRecordatoriosRelevamiento();
     //iniciarResumenDiario();
