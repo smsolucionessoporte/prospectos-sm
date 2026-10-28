@@ -1096,3 +1096,14 @@ textarea { resize: vertical; min-height: 72px; }
   .crm-ficha-form button { width:100%; justify-content:center; }
   .crm-ficha-tarea { flex-direction:column; align-items:stretch; }
 }
+
+/* SM Comercial: bandeja diaria de seguimientos sin recordatorios futuros. */
+.crm-panel-title-actions { display:flex;align-items:center;gap:9px;flex-wrap:wrap; }
+.crm-no-reminder { font-size:11px;font-weight:700;color:#865a20;background:#fff4db;padding:3px 7px;border-radius:6px; }
+.crm-more-info { margin-top:14px;color:#69788c;font-size:12px;line-height:1.5; }
+.crm-more-info a { color:#2857a7;text-decoration:underline;text-underline-offset:2px; }
+@media(max-width:700px) {
+ .crm-panel-title-actions { justify-content:flex-start; }
+ .crm-panel-title { align-items:flex-start; }
+ .crm-panel-title-actions .btn { white-space:nowrap; }
+}

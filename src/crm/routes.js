@@ -3,6 +3,7 @@ const express = require('express');
 const { pool } = require('../db');
 const { requireAuth, requireRol, layout } = require('../middleware/auth');
 const { router: seguimientosRouter } = require('./seguimientos');
+const { seleccionarAgendaHoy } = require('./agenda');
 const router = express.Router();
 router.use(seguimientosRouter);
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
@@ -33,25 +34,33 @@ function chatUrl(id, inbox = 6) {
 }
 function tituloContacto(p) { return esc(p.nombre_contacto || p.nombre_negocio || p.contacto || `Conversación #${p.chatwoot_conversation_id}`); }
 function filaSeguimiento(t, usuario) {
-  const overdue = new Date(t.vence_en).getTime() < Date.now();
+  const limite = t.vence_en ? new Date(t.vence_en).getTime() : null;
+  const overdue = limite !== null && limite < Date.now();
   const url = chatUrl(t.chatwoot_conversation_id, t.inbox_id || 6);
   const p = Number(t.prospecto_id);
+  const nombre = esc(t.nombre_negocio || t.contacto || `Conversación #${t.chatwoot_conversation_id}`);
+  const descripcion = esc(t.descripcion || 'Registrar la próxima gestión comercial');
+  const detalleFecha = t.recordatorio_vencido
+    ? `⏰ Recordatorio vencido: ${fechaAR(t.vence_en)}`
+    : t.vence_en ? `Vencimiento: ${fechaAR(t.vence_en)}` : 'Vencimiento: sin definir';
   return `<article class="crm-item ${overdue?'crm-late':''}">
     <div class="crm-item-main">
       <div class="crm-item-top">
-        <span class="crm-kind">${esc(t.tipo === 'cierre'?'Cierre':t.tipo === 'llamada'?'Llamada':'Seguimiento')}</span>
         <span class="${t.prioridad === 'alta'?'crm-high':'crm-normal'}">${t.prioridad === 'alta'?'Prioridad alta':'Prioridad normal'}</span>
-        ${overdue?'<span class="crm-overdue">Vencido</span>':''}
-        ${t.recordatorio?'<span class="crm-reminder" title="Tiene recordatorio">⏰ Recordatorio</span>':''}
+        ${t.recordatorio_vencido
+          ? '<span class="crm-reminder" title="Recordatorio vencido">⏰ Recordatorio vencido</span>'
+          : '<span class="crm-no-reminder">Sin recordatorio</span>'}
+        ${overdue && !t.recordatorio_vencido ? '<span class="crm-overdue">Vencido</span>' : ''}
+        ${t.requiere_respuesta ? '<span class="crm-kind">Mensaje sin responder</span>' : ''}
       </div>
-      <strong>${esc(t.nombre_negocio || t.contacto || `Conversación #${t.chatwoot_conversation_id}`)}</strong>
-      <div class="crm-followup-detail">${esc(t.descripcion)}</div>
-      <div class="crm-meta">Vence ${fechaAR(t.vence_en)}${supervisor(usuario)?' · '+esc(t.responsable_nombre):''}</div>
+      <strong>${nombre}</strong>
+      <div class="crm-followup-detail">${descripcion}</div>
+      <div class="crm-meta">${detalleFecha}${supervisor(usuario)?' · '+esc(t.responsable_nombre):''}</div>
     </div>
     <div class="crm-actions">
       ${p>0?`<a class="btn btn-secondary" href="/prospectos/${p}">Ir a ficha</a>`:''}
       ${url?`<a class="btn btn-secondary" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Contactar vía Chatwoot</a>`:''}
-      ${p>0?`<a class="btn btn-primary" href="/prospectos/${p}?tarea=${Number(t.id)}#seguimientos">Dejar seguimiento</a>`:''}
+      ${p>0?`<a class="btn btn-primary" href="/prospectos/${p}${t.tarea_id?'?tarea='+Number(t.tarea_id):''}#seguimientos">Dejar seguimiento</a>`:''}
     </div>
   </article>`;
 }
@@ -112,8 +121,34 @@ router.get('/crm', requireAuth, requireRol('admin','vendedor','soporte'), async 
       LEFT JOIN prospectos p ON p.id=t.prospecto_id
       LEFT JOIN usuarios u ON u.id=t.responsable_id
       LEFT JOIN crm_chatwoot_estado s ON s.chatwoot_conversation_id=t.chatwoot_conversation_id
-      WHERE t.estado='pendiente' AND t.origen <> 'chatwoot' AND ${condT}
-      ORDER BY (t.vence_en < NOW()) DESC,(t.prioridad='alta') DESC,t.vence_en ASC LIMIT 150`,pt);
+      WHERE t.estado='pendiente' AND ${condT}
+        AND (t.origen <> 'chatwoot' OR (s.requiere_respuesta=TRUE AND s.ultima_revision>=NOW()-interval '30 minutes'))
+      ORDER BY t.vence_en ASC LIMIT 2000`,pt);
+
+    // Oportunidades activas: las que no tienen recordatorio vigente también
+    // requieren organización, aunque aún no hayan creado una tarea manual.
+    const po=[];
+    const condO=filtro(usuario,'COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)',po);
+    const {rows:oportunidades}=await pool.query(`
+      SELECT p.id AS prospecto_id,COALESCE(cv.chatwoot_conversation_id,p.chatwoot_conversation_id) AS chatwoot_conversation_id,p.nombre_negocio,p.contacto,
+        u.nombre AS responsable_nombre,s.nombre_contacto,s.inbox_id,s.ultima_entrada
+      FROM prospectos p
+      LEFT JOIN LATERAL (
+        SELECT cv.vendedor_id,cv.chatwoot_conversation_id
+        FROM control_ventas cv
+        WHERE cv.chatwoot_conversation_id=p.chatwoot_conversation_id
+           OR EXISTS (SELECT 1 FROM prospectos_chatwoot_conversaciones v
+                      WHERE v.prospecto_id=p.id AND v.chatwoot_conversation_id=cv.chatwoot_conversation_id)
+        ORDER BY cv.actualizado_en DESC NULLS LAST LIMIT 1
+      ) cv ON TRUE
+      LEFT JOIN crm_chatwoot_estado s
+        ON s.chatwoot_conversation_id=COALESCE(cv.chatwoot_conversation_id,p.chatwoot_conversation_id)
+      LEFT JOIN usuarios u ON u.id=COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)
+      WHERE p.estado NOT IN ('confirmado','perdido','demo_coordinada') AND ${condO}
+        AND (p.actualizado_en >= NOW()-interval '45 days'
+             OR s.ultima_entrada >= NOW()-interval '45 days')
+      ORDER BY p.actualizado_en DESC LIMIT 400`,po);
+    const agendaHoy=seleccionarAgendaHoy({oportunidades,tareas,mensajes,maximo:8});
 
     const pd=[];
     const condD=filtro(usuario,'COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)',pd);
@@ -122,13 +157,6 @@ router.get('/crm', requireAuth, requireRol('admin','vendedor','soporte'), async 
       FROM prospectos p LEFT JOIN control_ventas cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
       WHERE p.estado='demo_coordinada' AND p.demo_fecha IS NOT NULL AND ${condD}
       ORDER BY p.demo_fecha ASC LIMIT 50`,pd);
-    const pc=[];
-    const condC=filtro(usuario,'COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)',pc);
-    const {rows:cierres}=await pool.query(`
-      SELECT p.id,p.contacto,p.nombre_negocio,p.chatwoot_conversation_id
-      FROM prospectos p LEFT JOIN control_ventas cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
-      WHERE p.estado='demo_realizada' AND ${condC}
-      ORDER BY p.actualizado_en ASC LIMIT 50`,pc);
 
     const notice = sinSync
       ? `<div class="crm-notice crm-warning"><i class="ti ti-alert-triangle"></i> No hay verificación reciente de Chatwoot. La lista de mensajes podría estar incompleta. Usá «Actualizar Chatwoot».</div>`
@@ -158,21 +186,18 @@ router.get('/crm', requireAuth, requireRol('admin','vendedor','soporte'), async 
           }).join(''): `<div class="crm-empty">${sinSync?'No se pueden confirmar mensajes pendientes hasta actualizar Chatwoot.':'No hay mensajes esperando respuesta.'}</div>`}
         </section>
         <section class="crm-panel" id="agenda-seguimientos">
-          <div class="crm-panel-title"><h2><i class="ti ti-calendar-time"></i> Agenda de seguimientos</h2><span class="crm-count">${tareas.length}</span></div>
-          <p class="crm-help">Próximos pasos abiertos, con prioridad y vencimiento. ⏰ señala los que tienen recordatorio activado. Se gestionan desde la ficha y salen de la agenda al avanzar la etapa comercial.</p>
-          ${tareas.length?tareas.map(t=>filaSeguimiento(t,usuario)).join(''):'<div class="crm-empty">No hay seguimientos comerciales pendientes.</div>'}
+          <div class="crm-panel-title"><h2><i class="ti ti-calendar-time"></i> Agenda de seguimientos de hoy</h2>
+            <div class="crm-panel-title-actions"><span class="crm-count">${agendaHoy.total}</span>
+              <a class="btn btn-secondary" href="/panel">Ver todos</a></div></div>
+          <p class="crm-help">Oportunidades sin un recordatorio futuro vigente y recordatorios que ya vencieron. Las conversaciones sin respuesta también se incluyen si no tienen recordatorio.</p>
+          ${agendaHoy.visibles.length?agendaHoy.visibles.map(t=>filaSeguimiento(t,usuario)).join(''):'<div class="crm-empty">No tenés seguimientos que requieran atención ahora. Los que tienen recordatorio futuro aparecerán cuando venza.</div>'}
+          ${agendaHoy.total>agendaHoy.visibles.length?`<p class="crm-more-info">Mostrando ${agendaHoy.visibles.length} de ${agendaHoy.total} casos. <a href="/panel">Ver todos en Oportunidades</a>.</p>`:''}
         </section>
         <section class="crm-panel" id="agenda-demos">
           <div class="crm-panel-title"><h2><i class="ti ti-calendar-event"></i> Agenda de demos</h2><span class="crm-count">${demos.length}</span></div>
           ${demos.length?demos.map(p=>`<article class="crm-mini-item"><div><strong>${esc(p.nombre_negocio||p.contacto||`Prospecto #${p.id}`)}</strong><div class="crm-meta">${fechaDemo(p.demo_fecha)}</div></div>
             <div class="crm-actions"><a class="btn btn-secondary" href="/prospectos/${Number(p.id)}">Ir a ficha</a>
               ${chatUrl(p.chatwoot_conversation_id)?`<a class="btn btn-secondary" target="_blank" rel="noopener noreferrer" href="${esc(chatUrl(p.chatwoot_conversation_id))}">Chatwoot</a>`:''}</div></article>`).join(''):'<div class="crm-empty">Sin demos coordinadas.</div>'}
-        </section>
-        <section class="crm-panel" id="por-cerrar">
-          <div class="crm-panel-title"><h2><i class="ti ti-target-arrow"></i> Oportunidades por cerrar</h2><span class="crm-count">${cierres.length}</span></div>
-          ${cierres.length?cierres.map(p=>`<article class="crm-mini-item"><div><strong>${esc(p.nombre_negocio||p.contacto||`Prospecto #${p.id}`)}</strong><div class="crm-meta">Demostración realizada · definir confirmación, pérdida o próximo paso</div></div>
-            <div class="crm-actions"><a class="btn btn-secondary" href="/prospectos/${Number(p.id)}">Ir a ficha</a>
-            <a class="btn btn-primary" href="/prospectos/${Number(p.id)}#seguimientos">Dejar seguimiento</a></div></article>`).join(''):'<div class="crm-empty">Sin oportunidades pendientes de cierre.</div>'}
         </section>
       </div>`;
     return res.send(layout('Mi agenda',html,req));

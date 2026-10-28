@@ -92,7 +92,10 @@ test('Agenda en una columna y sin tareas Hecha o Programar seguimiento',async()=
  assert.equal(res.codigo,200);
  assert.ok(res.cuerpo.includes('crm-pila'));
  assert.ok(res.cuerpo.includes('Conversaciones esperando respuesta'));
- assert.ok(res.cuerpo.includes('Agenda de seguimientos'));
+ assert.ok(res.cuerpo.includes('Agenda de seguimientos de hoy'));
+ assert.ok(res.cuerpo.includes('Ver todos'));
+ assert.ok(res.cuerpo.includes('Sin recordatorio'));
+ assert.equal(res.cuerpo.includes('Oportunidades por cerrar'), false);
  assert.ok(res.cuerpo.includes('Descartar hasta próximo mensaje'));
  assert.equal(res.cuerpo.includes('Programar seguimiento'),false);
  assert.equal(res.cuerpo.includes('>Hecha'),false);
