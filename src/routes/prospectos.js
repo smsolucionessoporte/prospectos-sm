@@ -4,6 +4,7 @@ const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
 const { renderSeguimientosFicha, puedeGestionar } = require("../crm/seguimientos");
+const { pasoPorEstado } = require("../crm/pasos");
 const {
   AGENTE_ZOOM,
   AGENTE_TELEFONO,
@@ -1696,11 +1697,11 @@ if (req.session.usuario.rol === "admin") {
                 [p.origen] || "—"}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ""}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} — ${esc(p.demo_resp_nombre || "—")}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ""}</span></div>` : ""}
               ${
-                p.estado === "demo_realizada"
+                !["confirmado", "perdido"].includes(p.estado)
                   ? `
                     <div class="detail-item">
                       <span class="detail-label">Próxima acción</span>
-                      <span class="detail-val">Cerrar cliente</span>
+                      <span class="detail-val">${esc(pasoPorEstado(p.estado, p.demo_fecha).accion || "—")}</span>
                     </div>
                   `
                   : ""
@@ -4054,7 +4055,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                 <label>Próxima acción</label>
                 <input
                   type="text"
-                  value="${esc(PROXIMA_ACCION[p.estado] || "—")}"
+                  value="${esc(pasoPorEstado(p.estado,p.demo_fecha).accion || PROXIMA_ACCION[p.estado] || "—")}"
                   disabled
                 >
               </div>

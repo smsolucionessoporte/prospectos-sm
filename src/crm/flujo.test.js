@@ -63,10 +63,11 @@ test('Al registrar una gestión se conserva historial y se programa próxima acc
  pool.connect=async()=>({async query(sql,args){writes.push([sql,args]);return sql.includes('INSERT INTO crm_tareas')?{rows:[{id:802}],rowCount:1}:sql.includes('SELECT estado FROM prospectos')?{rows:[{estado:'demo_realizada'}],rowCount:1}:{rows:[],rowCount:1};},release(){}});
  const res=mockRes();await postSeguimiento({session:{usuario},params:{id:'186'},body:{
    gestion_realizada:'Llamé al cliente, revisará el plan',proxima_accion:'Volver a llamar',vence_en:'2026-11-02T11:00',
-   prioridad:'alta',recordatorio:'1'}},res);
+   prioridad:'alta'}},res);
  assert.equal(res.destino,'/prospectos/186?seguimiento=ok#seguimientos');
  assert.ok(writes.some(([s,a])=>s.includes('INSERT INTO crm_seguimientos')&&a[3].startsWith('Llamé')));
- assert.ok(writes.some(([s,a])=>s.includes('INSERT INTO crm_tareas')&&a[8]==='demo_realizada'));
+ assert.ok(writes.some(([s,a])=>s.includes('INSERT INTO crm_tareas')&&a[7]===true&&a[8]==='demo_realizada'));
+ assert.ok(writes.some(([s,a])=>s.includes('INSERT INTO crm_seguimientos')&&a[7]===true));
 });
 
 test('La ficha muestra seguimientos y botón de guardar solo al vendedor asignado',async()=>{
@@ -75,6 +76,7 @@ test('La ficha muestra seguimientos y botón de guardar solo al vendedor asignad
  const html=await renderSeguimientosFicha(p,usuario,0);
  assert.ok(html.includes('¿Qué se hizo?'));
  assert.match(html,/recordatorio/i);
+ assert.equal(html.includes('name="recordatorio"'),false);
  assert.ok(html.includes('Guardar gestión y seguimiento'));
  const otro=await renderSeguimientosFicha(p,{...usuario,id:11,nombre:'Giuliano'},0);
  assert.equal(otro.includes('Guardar gestión y seguimiento'),false);
@@ -95,8 +97,49 @@ test('Agenda en una columna y sin tareas Hecha o Programar seguimiento',async()=
  assert.ok(res.cuerpo.includes('Agenda de seguimientos de hoy'));
  assert.ok(res.cuerpo.includes('Ver todos'));
  assert.ok(res.cuerpo.includes('Sin recordatorio'));
+ assert.equal(res.cuerpo.includes('Mostrando 8 de'),false);
+ assert.equal(res.cuerpo.includes('Los que tienen recordatorio futuro aparecerán cuando venza'),false);
  assert.equal(res.cuerpo.includes('Oportunidades por cerrar'), false);
  assert.ok(res.cuerpo.includes('Descartar hasta próximo mensaje'));
  assert.equal(res.cuerpo.includes('Programar seguimiento'),false);
  assert.equal(res.cuerpo.includes('>Hecha'),false);
+});
+
+test('Agenda de demos propone Dar demo antes y Cargar relevamiento o reagendar después',async()=>{
+  process.env.CHATWOOT_URL='https://chatwoot.example.com';process.env.CHATWOOT_API_TOKEN='token-para-test';
+  const now=new Date();
+  pool.query=async sql=>{
+    if(sql.includes('MAX(ultima_revision)')) return {rows:[{revisado:now}]};
+    if(sql.includes('SELECT p.id,p.contacto,p.nombre_negocio,p.demo_fecha,p.chatwoot_conversation_id')) {
+      return {rows:[
+        {id:401,contacto:'Demo futura',demo_fecha:new Date('2030-10-29T14:30:00Z'),demo_fecha_local:'2030-10-29T14:30:00',chatwoot_conversation_id:30401},
+        {id:402,contacto:'Demo vencida',demo_fecha:new Date('2020-10-27T14:30:00Z'),demo_fecha_local:'2020-10-27T14:30:00',chatwoot_conversation_id:30402}
+      ]};
+    }
+    return {rows:[],rowCount:0};
+  };
+  const res=mockRes();await getAgenda({session:{usuario},path:'/crm',query:{}},res);
+  assert.equal(res.codigo,200);
+  assert.ok(res.cuerpo.includes('Próxima acción: Dar demo'));
+  assert.ok(res.cuerpo.includes('Próxima acción: Cargar relevamiento o reagendar'));
+  assert.ok(res.cuerpo.includes('href="/prospectos/402/relevamiento"'));
+  assert.ok(!res.cuerpo.includes('href="/prospectos/401/relevamiento"'));
+});
+
+test('Agenda comercial muestra Coordinar demo y Cerrar cliente según la etapa',async()=>{
+  process.env.CHATWOOT_URL='https://chatwoot.example.com';process.env.CHATWOOT_API_TOKEN='token-para-test';
+  const now=new Date();
+  pool.query=async sql=>{
+    if(sql.includes('MAX(ultima_revision)')) return {rows:[{revisado:now}]};
+    if(sql.includes('SELECT p.id AS prospecto_id')) return {rows:[
+      {prospecto_id:501,contacto:'En prospección',estado:'prospecto',chatwoot_conversation_id:3501},
+      {prospecto_id:502,contacto:'Con demo realizada',estado:'demo_realizada',chatwoot_conversation_id:3502}
+    ]};
+    return {rows:[],rowCount:0};
+  };
+  const res=mockRes();await getAgenda({session:{usuario},path:'/crm',query:{}},res);
+  assert.equal(res.codigo,200);
+  assert.ok(res.cuerpo.includes('Coordinar demo'));
+  assert.ok(res.cuerpo.includes('Cerrar cliente'));
+  assert.ok(!res.cuerpo.includes('Registrar la próxima gestión comercial'));
 });
