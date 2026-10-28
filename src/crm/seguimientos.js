@@ -54,8 +54,7 @@ async function renderSeguimientosFicha(p, usuario, tareaSeleccionada) {
         <label>Próxima acción <input name="proxima_accion" maxlength="300" value="${esc(seleccionada?.descripcion || '')}" placeholder="Ej.: Volver a llamar el viernes"></label>
         <label>Fecha y hora límite <input type="datetime-local" name="vence_en" value="${esc(fechaParaInput(seleccionada?.vence_en))}"></label>
         <label>Prioridad <select name="prioridad"><option value="normal" ${seleccionada?.prioridad !== 'alta' ? 'selected' : ''}>Normal</option><option value="alta" ${seleccionada?.prioridad === 'alta' ? 'selected' : ''}>Alta</option></select></label>
-        <label class="crm-check"><input type="checkbox" name="recordatorio" value="1" ${seleccionada?.recordatorio ? 'checked' : ''}> ⏰ Mostrar recordatorio en la agenda</label>
-        <div class="crm-form-tip">Si indicás una próxima acción, completá su vencimiento. El seguimiento queda abierto hasta que el prospecto avance de etapa o se cierre.</div>
+        <div class="crm-form-tip">Al programar una próxima acción con fecha se genera automáticamente un recordatorio ⏰, visible en la agenda. El seguimiento queda abierto hasta que el prospecto avance de etapa o se cierre.</div>
         <button type="submit" class="btn btn-primary">Guardar gestión y seguimiento</button>
       </form>` : '<p class="crm-help">Solo el responsable comercial o un administrador puede registrar nuevas gestiones de este prospecto.</p>';
   return `<section class="detail-section crm-ficha-section" id="seguimientos">
@@ -81,11 +80,12 @@ router.post('/prospectos/:id/seguimientos', requireAuth, requireRol('admin', 've
   const siguiente = String(req.body.proxima_accion || '').trim();
   const fecha = fechaRecibida(req.body.vence_en);
   const prioridad = String(req.body.prioridad || 'normal');
-  const recordatorio = req.body.recordatorio === '1';
+  // El recordatorio es automático al indicar acción y fecha; no depende de un checkbox.
+  const recordatorio = Boolean(siguiente && fecha);
   const tareaSolicitada = Number(req.body.tarea_id || 0);
   const tareaId = Number.isSafeInteger(tareaSolicitada) && tareaSolicitada > 0 ? tareaSolicitada : null;
   if (!gestion || gestion.length > 2000 || siguiente.length > 300 || !['normal','alta'].includes(prioridad) ||
-      (Boolean(siguiente) !== Boolean(fecha)) || (recordatorio && !siguiente) ||
+      (Boolean(siguiente) !== Boolean(fecha)) ||
       (fecha && fecha.getTime() < Date.now() - 60000 && !tareaId)) {
     return res.status(400).send('Completá qué se hizo. Si programás un próximo paso, indicá acción y vencimiento válido.');
   }
