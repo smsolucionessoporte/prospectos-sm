@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluarConversacion, sumarMinutosLaborales } = require('./actividad');
+const { evaluarConversacion, sumarMinutosLaborales, requiereAviso } = require('./actividad');
 const ts = v => Math.floor(new Date(v).getTime() / 1000);
 const ahora = new Date('2026-10-28T16:00:00Z').getTime();
 const cliente = (id, time) => ({id,message_type:0,created_at:ts(time),sender:{type:'contact',id:99},private:false});
@@ -16,9 +16,9 @@ test('la respuesta humana posterior cancela la espera',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-10-28T14:00:00Z'),asesor(2,'2026-10-28T15:00:00Z')]},{ahora});
  assert.equal(r.requiereRespuesta,false);
 });
-test('mensaje de bot no reemplaza una respuesta humana',()=>{
+test('si el último mensaje público lo envió el bot, no figura como esperando respuesta',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-10-28T14:00:00Z'),bot(2,'2026-10-28T15:00:00Z')]},{ahora});
- assert.equal(r.requiereRespuesta,true);
+ assert.equal(r.requiereRespuesta,false);
 });
 test('mensaje viejo queda fuera de las urgencias',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-09-05T12:00:00Z')]},{ahora});
@@ -37,7 +37,20 @@ test('la hora laboral no se consume durante el fin de semana',()=>{
  assert.equal(d.toISOString(),'2026-11-02T12:30:00.000Z');
 });
 
-test('un mensaje saliente de un token administrativo no se presume atención de un vendedor',()=>{
+test('el último mensaje saliente, aunque provenga de un token técnico, no es un mensaje del cliente',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-10-28T14:00:00Z'),{id:2,message_type:1,created_at:ts('2026-10-28T15:00:00Z'),sender:{type:'user',id:2}}]},{ahora});
+ assert.equal(r.requiereRespuesta,false);
+});
+
+test('descartar ignora solo el último mensaje del cliente',()=>{
+ const previo=evaluarConversacion({messages:[cliente(22,'2026-10-28T14:00:00Z')]},{ahora});
+ assert.equal(requiereAviso(previo, '22'),false);
+ assert.equal(requiereAviso(previo, null),true);
+ const nuevo=evaluarConversacion({messages:[cliente(22,'2026-10-28T14:00:00Z'),cliente(23,'2026-10-28T15:00:00Z')]},{ahora});
+ assert.equal(requiereAviso(nuevo, '22'),true);
+});
+test('el mensaje entrante vuelve a mostrarse cuando es el último del chat',()=>{
+ const r=evaluarConversacion({messages:[bot(11,'2026-10-28T13:00:00Z'),cliente(12,'2026-10-28T15:00:00Z')]},{ahora});
  assert.equal(r.requiereRespuesta,true);
+ assert.equal(r.ultimoEsDelCliente,true);
 });

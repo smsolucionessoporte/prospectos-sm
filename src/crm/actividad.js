@@ -50,13 +50,19 @@ function evaluarConversacion(datos, { ahora = Date.now() } = {}) {
   });
   const ultimaEntrada = entrantes.sort((a, b) => millis(b.created_at) - millis(a.created_at))[0];
   const ultimaSalida = humanos.sort((a, b) => millis(b.created_at) - millis(a.created_at))[0];
+  // La bandeja 'esperando respuesta' muestra SOLO chats cuyo último mensaje público
+  // es del cliente, no un mensaje de bot ni uno saliente de otro agente.
+  const ultimoPublico = mensajes.sort((a, b) =>
+    millis(b.created_at) - millis(a.created_at) || Number(b.id || 0) - Number(a.id || 0))[0];
+  const ultimoEsDelCliente = Boolean(ultimoPublico && ['0', 'incoming'].includes(String(ultimoPublico.message_type)));
   const entradaMs = millis(ultimaEntrada?.created_at);
   const salidaMs = millis(ultimaSalida?.created_at);
   // Evitar que mensajes viejos se conviertan en tareas urgentes al iniciar el CRM.
   const reciente = entradaMs > 0 && entradaMs >= ahora - 14 * 86400000;
-  const requiereRespuesta = reciente && entradaMs > salidaMs;
+  const requiereRespuesta = reciente && ultimoEsDelCliente && entradaMs > salidaMs;
   return {
     requiereRespuesta,
+    ultimoEsDelCliente,
     ultimaEntrada: entradaMs ? new Date(entradaMs) : null,
     ultimaSalida: salidaMs ? new Date(salidaMs) : null,
     ultimoMensajeId: ultimaEntrada ? String(ultimaEntrada.id || '') : null,
@@ -65,4 +71,9 @@ function evaluarConversacion(datos, { ahora = Date.now() } = {}) {
 }
 
 
-module.exports = { sumarMinutosLaborales, evaluarConversacion };
+function requiereAviso(resultado, descartadoMensajeId) {
+  return Boolean(resultado?.requiereRespuesta && resultado.ultimoMensajeId &&
+    String(resultado.ultimoMensajeId) !== String(descartadoMensajeId ?? ''));
+}
+
+module.exports = { sumarMinutosLaborales, evaluarConversacion, requiereAviso };

@@ -1061,3 +1061,38 @@ textarea { resize: vertical; min-height: 72px; }
   .crm-hero-actions .btn {width:100%;font-size:12px;white-space:normal;text-align:center;justify-content:center;}
   .crm-mini-item .crm-actions {width:100%;justify-content:flex-start;}
 }
+
+/* SM Comercial — Agenda orientada a acciones: secciones apiladas */
+.crm-pila { display:flex; flex-direction:column; gap:16px; width:100%; }
+.crm-pila>.crm-panel { width:100%; }
+.crm-pila .crm-panel-title h2 { font-size:18px; }
+.crm-pila .crm-mini-item,.crm-pila .crm-item { align-items:center; }
+.crm-pila .crm-actions { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
+.crm-pila .crm-actions form { margin:0; }
+.crm-pila .crm-actions .btn { white-space:normal; }
+.crm-followup-detail { color:#40516e; font-size:13px; margin:5px 0 3px; line-height:1.5; }
+.crm-normal,.crm-reminder { font-size:11px; font-weight:650; color:#46607f; background:#eef4fd; padding:3px 7px; border-radius:6px; }
+.crm-reminder { background:#fff6e4; color:#815b16; }
+.crm-notice.crm-success { border-color:#b4dec3; background:#f0fbf4; color:#216440; }
+.crm-ficha-section { scroll-margin-top:14px; }
+.crm-ficha-form { display:grid; grid-template-columns:1fr 1fr; gap:13px; margin:14px 0 18px; }
+.crm-ficha-form>label { display:flex; flex-direction:column; gap:6px; font-size:13px; font-weight:650; color:#3b4c66; min-width:0; }
+.crm-ficha-form>label:first-child,.crm-ficha-form>label:nth-child(2),.crm-ficha-form .crm-check,.crm-ficha-form .crm-form-tip { grid-column:1/-1; }
+.crm-ficha-form input:not([type="checkbox"]),.crm-ficha-form select,.crm-ficha-form textarea { width:100%; background:#fff; border:1px solid #dbe3ee; border-radius:8px; padding:10px; font:inherit; font-weight:400; color:#17264d; box-sizing:border-box; }
+.crm-ficha-form textarea { resize:vertical; }
+.crm-ficha-form .crm-check { flex-direction:row; align-items:center; }
+.crm-ficha-form .crm-check input { width:16px; height:16px; }
+.crm-form-tip { color:#64748b; font-size:12px; line-height:1.4; }
+.crm-ficha-form button { justify-self:start; }
+.crm-ficha-subtitulo { font-size:14px; color:#17264d; margin:20px 0 10px; }
+.crm-ficha-tarea { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 0; border-top:1px solid #e8edf5; }
+.crm-ficha-tarea strong { font-size:13px; }
+@media(max-width:700px) {
+  .crm-pila .crm-mini-item,.crm-pila .crm-item { display:flex; flex-direction:column; align-items:stretch; }
+  .crm-pila .crm-actions { justify-content:flex-start; }
+  .crm-pila .crm-actions .btn,.crm-pila .crm-actions form { width:100%; }
+  .crm-pila .crm-actions form button { width:100%; justify-content:center; }
+  .crm-ficha-form { grid-template-columns:1fr; }
+  .crm-ficha-form button { width:100%; justify-content:center; }
+  .crm-ficha-tarea { flex-direction:column; align-items:stretch; }
+}

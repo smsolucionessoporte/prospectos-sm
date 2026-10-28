@@ -53,6 +53,37 @@ async function iniciarCRM() {
       requiere_respuesta BOOLEAN NOT NULL DEFAULT FALSE,
       ultima_revision TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE crm_chatwoot_estado ADD COLUMN IF NOT EXISTS descartado_mensaje_id VARCHAR(60);
+    ALTER TABLE crm_chatwoot_estado ADD COLUMN IF NOT EXISTS descartado_en TIMESTAMPTZ;
+    ALTER TABLE crm_chatwoot_estado ADD COLUMN IF NOT EXISTS descartado_por INTEGER REFERENCES usuarios(id);
+    ALTER TABLE crm_tareas ADD COLUMN IF NOT EXISTS recordatorio BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE crm_tareas ADD COLUMN IF NOT EXISTS etapa_origen VARCHAR(32);
+    UPDATE crm_tareas t SET etapa_origen=p.estado FROM prospectos p
+      WHERE t.prospecto_id=p.id AND t.etapa_origen IS NULL AND t.origen <> 'chatwoot';
+    CREATE TABLE IF NOT EXISTS crm_seguimientos (
+      id BIGSERIAL PRIMARY KEY,
+      prospecto_id INTEGER NOT NULL REFERENCES prospectos(id) ON DELETE CASCADE,
+      tarea_id BIGINT REFERENCES crm_tareas(id) ON DELETE SET NULL,
+      usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+      gestion_realizada TEXT NOT NULL,
+      proxima_accion TEXT,
+      vence_en TIMESTAMPTZ,
+      prioridad VARCHAR(10) NOT NULL DEFAULT 'normal' CHECK (prioridad IN ('normal','alta')),
+      recordatorio BOOLEAN NOT NULL DEFAULT FALSE,
+      creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS crm_seguimientos_por_prospecto
+      ON crm_seguimientos (prospecto_id, creado_en DESC);
+    CREATE TABLE IF NOT EXISTS crm_recordatorios_tareas (
+      id BIGSERIAL PRIMARY KEY,
+      tarea_id BIGINT NOT NULL REFERENCES crm_tareas(id) ON DELETE CASCADE,
+      vence_en TIMESTAMPTZ NOT NULL,
+      estado VARCHAR(12) NOT NULL DEFAULT 'procesando',
+      creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      enviado_en TIMESTAMPTZ,
+      error TEXT,
+      UNIQUE(tarea_id,vence_en)
+    );
     CREATE INDEX IF NOT EXISTS crm_chatwoot_estado_prioridades
       ON crm_chatwoot_estado (responsable_id, ultima_entrada DESC)
       WHERE requiere_respuesta=TRUE;

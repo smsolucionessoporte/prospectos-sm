@@ -128,8 +128,42 @@ async function recordarMensajesSinResponder(hora) {
   }
 }
 
+async function recordarSeguimientosProgramados() {
+  if (process.env.CRM_ALERTAS_WHATSAPP !== 'true') return;
+  const {rows: tareas} = await pool.query(`
+    SELECT t.id,t.vence_en,t.descripcion,t.responsable_id,p.nombre_negocio,p.contacto
+    FROM crm_tareas t LEFT JOIN prospectos p ON p.id=t.prospecto_id
+    JOIN usuarios u ON u.id=t.responsable_id
+    WHERE t.estado='pendiente' AND t.origen <> 'chatwoot'
+      AND t.recordatorio=TRUE AND t.vence_en <= NOW()
+      AND NOT EXISTS (SELECT 1 FROM crm_recordatorios_tareas r
+        WHERE r.tarea_id=t.id AND r.vence_en=t.vence_en)
+      AND u.activo=TRUE ORDER BY t.vence_en ASC LIMIT 100`);
+  for (const t of tareas) {
+    const tel = AGENTE_TELEFONO[t.responsable_id];
+    if (!tel) continue;
+    const registrado = await pool.query(`
+      INSERT INTO crm_recordatorios_tareas (tarea_id,vence_en) VALUES($1,$2)
+      ON CONFLICT (tarea_id,vence_en) DO NOTHING RETURNING id`,[t.id,t.vence_en]);
+    const avisoId = registrado.rows[0]?.id;
+    if (!avisoId) continue;
+    const contacto = t.nombre_negocio || t.contacto || 'Prospecto comercial';
+    try {
+      const ok = await enviarPorChatwoot(tel,
+        `⏰ *SM Comercial — recordatorio de seguimiento*\n\n*${contacto}*\n${t.descripcion}\n\nEl seguimiento ya alcanzó su vencimiento.\n${appUrl()}/crm#agenda-seguimientos`,
+        t.responsable_id);
+      await pool.query(`UPDATE crm_recordatorios_tareas SET estado=$2,enviado_en=CASE WHEN $2='enviado' THEN NOW() ELSE NULL END,error=$3 WHERE id=$1`,
+        [avisoId,ok?'enviado':'error',ok?null:'No se confirmó el envío']);
+    } catch(error) {
+      console.warn(`[CRM] No se pudo recordar tarea ${t.id}:`,error.message);
+      await pool.query(`UPDATE crm_recordatorios_tareas SET estado='error',error=$2 WHERE id=$1`,[avisoId,String(error.message).slice(0,250)]);
+    }
+  }
+}
+
 function iniciarAvisosCRM() {
   // Un solo cron por proceso. El registro crm_avisos impide duplicar envíos entre réplicas.
+  cron.schedule('*/15 9-16 * * 1-5', () => recordarSeguimientosProgramados().catch(e => console.error('[CRM] Recordatorio seguimiento:',e)), {timezone:ZONE});
   cron.schedule('0 9 * * 1-5', () => enviarResumenVendedor().catch(e => console.error('[CRM] Agenda:', e)), { timezone: ZONE });
   cron.schedule('30 16 * * 1-5', () => enviarResumenSupervisor().catch(e => console.error('[CRM] Supervisión:', e)), { timezone: ZONE });
   // Dos recordatorios máximos por jornada, sujetos a verificación de Chatwoot.

@@ -3,6 +3,7 @@ const axios = require("axios");
 const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
+const { renderSeguimientosFicha, puedeGestionar } = require("../crm/seguimientos");
 const {
   AGENTE_ZOOM,
   AGENTE_TELEFONO,
@@ -1437,6 +1438,13 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
       [p.id],
     );
 
+    const seguimientosHtml = await renderSeguimientosFicha(p, req.session.usuario, req.query.tarea);
+    const gestionesCRM = await pool.query(`
+      SELECT s.gestion_realizada,s.proxima_accion,s.vence_en,s.creado_en,s.recordatorio,
+             u.nombre AS usuario_nombre
+      FROM crm_seguimientos s LEFT JOIN usuarios u ON u.id=s.usuario_id
+      WHERE s.prospecto_id=$1 ORDER BY s.creado_en ASC LIMIT 100`, [p.id]);
+
     const est = ESTADOS_COLOR[p.estado] || "gray";
     const estadoLabel = ESTADOS_LABEL[p.estado] || p.estado;
     const responsableActualNombre =
@@ -1537,6 +1545,9 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
         </button>
       `);
     }
+    if (!["confirmado", "perdido"].includes(p.estado) && await puedeGestionar(p, req.session.usuario)) {
+      acciones.push(`<a href="#seguimientos" class="btn btn-primary"><i class="ti ti-notes"></i> Dejar seguimiento</a>`);
+    }
     acciones.push(
       `<a href="/prospectos/${p.id}/editar" class="btn btn-secondary"><i class="ti ti-pencil"></i> Editar</a>`,
     );
@@ -1599,9 +1610,9 @@ if (req.session.usuario.rol === "admin") {
         : "";
 
     // Historial
-    const histHtml = historial.rows
+    const eventosEstado = historial.rows
       .map(
-        (h) => `
+        (h) => ({ fecha: new Date(h.fecha).getTime(), html: `
       <div class="hist-item">
         <div class="hist-dot ${ESTADOS_COLOR[h.estado_nuevo] || "gray"}"></div>
         <div class="hist-body">
@@ -1615,9 +1626,20 @@ if (req.session.usuario.rol === "admin") {
         }
         </div>
       </div>
-    `,
-      )
-      .join("");
+    `}),
+      );
+    const eventosCRM = gestionesCRM.rows.map(g => ({ fecha: new Date(g.creado_en).getTime(), html: `
+      <div class="hist-item">
+        <div class="hist-dot blue"></div>
+        <div class="hist-body">
+          <span class="hist-estado">Seguimiento comercial</span>
+          <span class="hist-meta">${esc(g.usuario_nombre || "Equipo comercial")} · ${new Date(g.creado_en).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+          <span class="hist-nota">${esc(g.gestion_realizada)}</span>
+          ${g.proxima_accion ? `<span class="hist-nota">Próximo paso: ${esc(g.proxima_accion)} · ${new Date(g.vence_en).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} ${g.recordatorio ? "⏰" : ""}</span>` : ""}
+        </div>
+      </div>` }));
+    const histHtml = [...eventosEstado, ...eventosCRM].sort((a, b) => a.fecha - b.fecha)
+      .map(e => e.html).join("");
 
     const resultadoAccion = req.session.resultadoAccion || null;
     delete req.session.resultadoAccion;
@@ -1627,6 +1649,7 @@ if (req.session.usuario.rol === "admin") {
         p.contacto || p.nombre_negocio || "Prospecto",
         `
         ${renderResultadoAccion(resultadoAccion)}
+        ${req.query.seguimiento === "ok" ? '<div class="crm-notice crm-success"><i class="ti ti-circle-check"></i> Gestión registrada en el historial. Si definiste una próxima acción, también quedó en la agenda.</div>' : ''}
 
         <div class="page-header">
         <div>
@@ -1708,6 +1731,7 @@ if (req.session.usuario.rol === "admin") {
                 : ""
             }
 
+          ${seguimientosHtml}
           ${relHtml}
 
           ${
@@ -3229,6 +3253,17 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
             notaHistorial,
           ],
         );
+
+        // Las gestiones pendientes salen de la agenda cuando cambia la etapa comercial.
+        if (estadoAnterior && estadoAnterior !== estado) {
+          try {
+            await pool.query(`UPDATE crm_tareas SET estado='cancelada',actualizada_en=NOW()
+              WHERE prospecto_id=$1 AND estado='pendiente' AND origen <> 'chatwoot'`, [req.params.id]);
+          } catch (errorCRM) {
+            // Un error de agenda no debe impedir el cierre comercial ni los avisos al cliente.
+            console.error('[CRM] No se pudieron retirar tareas de la etapa anterior:', errorCRM);
+          }
+        }
 
         // ─── Mensaje de bienvenida + aviso al confirmar ───
 

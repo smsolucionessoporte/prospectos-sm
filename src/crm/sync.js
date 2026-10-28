@@ -9,7 +9,7 @@ const MAX_POR_RONDA = 40;
 let ejecutando = false;
 let ultimoResultado = { terminado: null, procesadas: 0, errores: 0, motivo: null };
 const limpiar = v => String(v ?? '').trim();
-const { sumarMinutosLaborales, evaluarConversacion } = require('./actividad');
+const { sumarMinutosLaborales, evaluarConversacion, requiereAviso } = require('./actividad');
 
 function configuracion() {
   const base = limpiar(process.env.CHATWOOT_URL).replace(/\/$/, '');
@@ -40,9 +40,13 @@ async function grabarRevision(row, chat) {
   const resultado = evaluarConversacion(chat);
   const estado = limpiar(chat.status).toLowerCase();
   // No se registran como urgentes los clientes confirmados/perdidos ni los no asignados.
-  const necesita = resultado.requiereRespuesta && !['confirmado', 'perdido'].includes(row.estado_prospecto) &&
+  // Conservar la decisión de 'descartar hasta el próximo mensaje' al sincronizar.
+  const { rows: decisiones } = await pool.query(
+    'SELECT descartado_mensaje_id FROM crm_chatwoot_estado WHERE chatwoot_conversation_id=$1', [id]);
+  const descartadoId = decisiones[0]?.descartado_mensaje_id;
+  const necesita = requiereAviso(resultado, descartadoId) && !['confirmado', 'perdido'].includes(row.estado_prospecto) &&
     responsableId > 0 && ['open', 'pending', 'snoozed', 'resolved'].includes(estado);
-  await pool.query(`
+  const registro = await pool.query(`
     INSERT INTO crm_chatwoot_estado
       (chatwoot_conversation_id,inbox_id,responsable_id,nombre_contacto,estado_chatwoot,
        ultima_entrada,ultima_salida_humana,ultimo_mensaje_id,requiere_respuesta,ultima_revision)
@@ -51,12 +55,16 @@ async function grabarRevision(row, chat) {
        inbox_id=EXCLUDED.inbox_id, responsable_id=EXCLUDED.responsable_id,
        nombre_contacto=EXCLUDED.nombre_contacto,estado_chatwoot=EXCLUDED.estado_chatwoot,
        ultima_entrada=EXCLUDED.ultima_entrada,ultima_salida_humana=EXCLUDED.ultima_salida_humana,
-       ultimo_mensaje_id=EXCLUDED.ultimo_mensaje_id,requiere_respuesta=EXCLUDED.requiere_respuesta,
-       ultima_revision=NOW()`, [id, Number(chat.inbox_id || 6), responsableId, contacto, estado,
+       ultimo_mensaje_id=EXCLUDED.ultimo_mensaje_id,
+       requiere_respuesta=EXCLUDED.requiere_respuesta AND
+         (crm_chatwoot_estado.descartado_mensaje_id IS DISTINCT FROM EXCLUDED.ultimo_mensaje_id),
+       ultima_revision=NOW()
+    RETURNING requiere_respuesta`, [id, Number(chat.inbox_id || 6), responsableId, contacto, estado,
       resultado.ultimaEntrada, resultado.ultimaSalida, resultado.ultimoMensajeId, necesita]);
 
   const clave = `respuesta:${id}`;
-  if (necesita) {
+  const confirmadoPendiente = registro.rows[0]?.requiere_respuesta === true;
+  if (confirmadoPendiente) {
     const vence = sumarMinutosLaborales(resultado.ultimaEntrada, 60);
     await pool.query(`
       INSERT INTO crm_tareas (prospecto_id,chatwoot_conversation_id,responsable_id,creado_por,
@@ -72,7 +80,7 @@ async function grabarRevision(row, chat) {
     await pool.query(`UPDATE crm_tareas SET estado='completada',completada_en=NOW(),actualizada_en=NOW()
       WHERE clave_automatica=$1 AND estado='pendiente'`, [clave]);
   }
-  return necesita;
+  return confirmadoPendiente;
 }
 
 async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {}) {
