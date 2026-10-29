@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
+const { AGENTE_INBOX, AGENTE_CHATWOOT_ID, AGENTE_TELEFONO, telefonoVendedor } = require('./zoomAgentes');
 
 async function getZoomToken() {
   const auth = Buffer.from(`${process.env.ZOOM_CLIENT_ID}:${process.env.ZOOM_CLIENT_SECRET}`).toString('base64');
@@ -173,157 +173,84 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
   );
 
 
-  let conversation = convData.payload?.find(
-    c => Number(c.inbox_id) === Number(inboxId)
-  );
+  // No crear una sesión/contact_inbox ni una conversación desde un envío saliente.
+  // Esa responsabilidad es exclusivamente de Evolution API, el canal de WhatsApp.
+  const conversaciones = Array.isArray(convData.payload) ? convData.payload : [];
+  const delInbox = conversaciones
+    .filter(c => Number(c.inbox_id) === Number(inboxId) && Number(c.id) > 0)
+    .sort((a,b) => {
+      const fecha = c => {
+        for (const key of ['last_activity_at','updated_at','created_at']) {
+          if (c[key] == null) continue;
+          const n=typeof c[key] === 'number' ? c[key]*1000 : Date.parse(c[key]);
+          if (Number.isFinite(n)) return n;
+        }
+        return 0;
+      };
+      return fecha(b)-fecha(a) || Number(b.id)-Number(a.id);
+    });
+  const conversation = delInbox[0] || null;
+  if (!conversation) {
+    console.warn('[CHATWOOT] AVISO_SIN_CONVERSACION_EXISTENTE: envío omitido sin crear conversaciones', {
+      contactId: contacto.id, inboxId, usuarioId
+    });
+    return false;
+  }
 
+  // Envío a un integrante de SM: no reabrir, reasignar ni etiquetar su chat.
+  // El destinatario se verifica contra el teléfono configurado del responsable,
+  // no se infiere solo por el ID del agente que dispara la operación.
+  const digitos = valor => String(valor || '').replace(/\D/g, '');
+  const telefonoDestino = digitos(telefono);
+  const esAvisoInterno = [AGENTE_TELEFONO[Number(usuarioId)], telefonoVendedor(Number(usuarioId))]
+    .some(v => Boolean(v) && digitos(v) === telefonoDestino);
 
-    // Reabrir únicamente conversaciones realmente resueltas.
-    // Si está pendiente, respetar el estado elegido por el agente.
-    if (conversation && conversation.status === 'resolved') {
+  if (!esAvisoInterno && conversation.status === 'resolved') {
+    await axios.post(
+      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/toggle_status`,
+      { status: 'open' },
+      { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
+    );
+  }
 
+  if (!esAvisoInterno) {
+    // La modificación de asignación y etiquetas solo corresponde a mensajes
+    // comerciales al cliente, nunca a recordatorios enviados al personal SM.
+    const chatwootAgentId = Number(
+      Object.keys(AGENTE_CHATWOOT_ID).find(
+        id => Number(AGENTE_CHATWOOT_ID[id]) === Number(usuarioId)
+      )
+    );
+
+    if (chatwootAgentId) {
       await axios.post(
-        `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/toggle_status`,
-        {
-          status: "open"
-        },
-        {
-          headers: {
-            api_access_token: process.env.CHATWOOT_API_TOKEN
-          }
-        }
+        `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/assignments`,
+        { assignee_id: chatwootAgentId },
+        { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
       );
-
     }
 
-
-// Si no existe conversación en Bot Ventas, asegurar que el contacto
-// esté vinculado a ese inbox y crear la conversación.
-if (!conversation) {
-
-  let sourceId;
-
-  try {
-    const { data: contactInbox } = await axios.post(
-      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/${contacto.id}/contact_inboxes`,
-      {
-        inbox_id: inboxId,
-        source_id: telefono
-      },
-      {
-        headers: {
-          api_access_token: process.env.CHATWOOT_API_TOKEN
-        }
-      }
-    );
-
-    sourceId = contactInbox.source_id;
-
-  } catch (error) {
-
-    // Si el vínculo contacto/inbox ya existe, volvemos a consultar
-    // las conversaciones por si Chatwoot ya creó/reconoce una.
-    const { data: retryConvData } = await axios.get(
-      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/contacts/${contacto.id}/conversations`,
-      {
-        headers: {
-          api_access_token: process.env.CHATWOOT_API_TOKEN
-        }
-      }
-    );
-
-    conversation = retryConvData.payload?.find(
-      c => Number(c.inbox_id) === Number(inboxId)
-    );
-
-    if (!conversation) {
-      console.error(
-        "No se pudo vincular el contacto al inbox Bot Ventas:",
-        error.response?.data || error.message
+    try {
+      const { data: labelsData } = await axios.get(
+        `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/labels`,
+        { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
       );
-      return false;
+      const labelsActuales = labelsData.payload || [];
+      const nuevasLabels = [
+        ...labelsActuales.filter(label => label !== 'bot-ventas-activo'),
+        'derivar-ventas'
+      ];
+      await axios.post(
+        `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/labels`,
+        { labels: [...new Set(nuevasLabels)] },
+        { headers: { api_access_token: process.env.CHATWOOT_API_TOKEN } }
+      );
+    } catch (error) {
+      console.error('ERROR actualizando etiquetas de Chatwoot:', error.response?.data || error.message);
     }
   }
 
-  if (!conversation && sourceId) {
-    const { data } = await axios.post(
-      `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations`,
-      {
-        source_id: sourceId,
-        inbox_id: Number(inboxId),
-        contact_id: contacto.id,
-        status: "open"
-      },
-      {
-        headers: {
-          api_access_token: process.env.CHATWOOT_API_TOKEN
-        }
-      }
-    );
-
-    conversation = data;
-  }
-}
-
-// Buscar el ID de Chatwoot correspondiente al usuario responsable de Prospectos
-const chatwootAgentId = Number(
-  Object.keys(AGENTE_CHATWOOT_ID).find(
-    id => Number(AGENTE_CHATWOOT_ID[id]) === Number(usuarioId)
-  )
-);
-
-      // Asignar la conversación al responsable
-      if (chatwootAgentId) {
-        await axios.post(
-          `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/assignments`,
-          {
-            assignee_id: chatwootAgentId
-          },
-          {
-            headers: {
-              api_access_token: process.env.CHATWOOT_API_TOKEN
-            }
-          }
-        );
-      }
-
-            // Marcar como atención humana y evitar que intervenga Bot Ventas
-      try {
-        const { data: labelsData } = await axios.get(
-          `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/labels`,
-          {
-            headers: {
-              api_access_token: process.env.CHATWOOT_API_TOKEN
-            }
-          }
-        );
-
-        const labelsActuales = labelsData.payload || [];
-
-        const nuevasLabels = [
-          ...labelsActuales.filter(label => label !== 'bot-ventas-activo'),
-          'derivar-ventas'
-        ];
-
-        await axios.post(
-          `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/labels`,
-          {
-            labels: [...new Set(nuevasLabels)]
-          },
-          {
-            headers: {
-              api_access_token: process.env.CHATWOOT_API_TOKEN
-            }
-          }
-        );
-
-      } catch (error) {
-        console.error(
-          'ERROR actualizando etiquetas de Chatwoot:',
-          error.response?.data || error.message
-        );
-      }
-
+  console.info('[CHATWOOT] Envío en conversación existente', { contactId: contacto.id, conversationId: conversation.id, inboxId, avisoInterno: esAvisoInterno });
   await axios.post(
     `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/messages`,
     {
