@@ -7,12 +7,12 @@ const { layout } = require('../middleware/auth');
 router.get('/login', (req, res) => {
   if (req.session?.usuario) {
     return res.redirect(
-      req.session.usuario.rol === "control"
+      ['admin', 'control'].includes(req.session.usuario.rol)
         ? "/control"
-        : "/crm"
+        : req.session.usuario.rol === 'vendedor' ? '/crm' : '/panel' 
     );
   }
-  const next = req.query.next || '/crm';
+  const next = req.query.next || '/';
   const error = req.query.error;
   res.send(layout('Iniciar sesión', `
     <div class="login-wrap">
@@ -54,11 +54,10 @@ router.post('/login', async (req, res) => {
     }
 req.session.usuario = { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol };
     const destino =
-      user.rol === "control"
-        ? "/control"
-        : (next && next.startsWith("/"))
-          ? next
-          : "/crm";
+      (next && next.startsWith('/') && !next.startsWith('//') && next !== '/' &&
+       !(user.rol !== 'vendedor' && next.startsWith('/crm')))
+        ? next
+        : (['admin', 'control'].includes(user.rol) ? '/control' : user.rol === 'vendedor' ? '/crm' : '/panel');
       req.session.save(() => res.redirect(destino));
   } catch (err) {
     console.error(err);

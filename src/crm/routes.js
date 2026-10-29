@@ -66,7 +66,7 @@ function filaSeguimiento(t, usuario) {
   </article>`;
 }
 
-router.get('/crm', requireAuth, requireRol('admin','vendedor','soporte'), async (req,res) => {
+router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
   const usuario = req.session.usuario;
   try {
     const params = [];
@@ -222,7 +222,7 @@ router.get('/crm', requireAuth, requireRol('admin','vendedor','soporte'), async 
   }
 });
 
-router.post('/crm/actualizar', requireAuth,requireRol('admin','vendedor','soporte'),async(req,res)=>{
+router.post('/crm/actualizar', requireAuth,requireRol('vendedor'),async(req,res)=>{
   try {
     const {sincronizarCRM}=require('./sync');
     await sincronizarCRM({ usuarioId:supervisor(req.session.usuario)?null:Number(req.session.usuario.id),limite:40 });
@@ -233,7 +233,7 @@ router.post('/crm/actualizar', requireAuth,requireRol('admin','vendedor','soport
   }
 });
 
-router.post('/crm/conversaciones/:id/descartar',requireAuth,requireRol('admin','vendedor','soporte'),async(req,res)=>{
+router.post('/crm/conversaciones/:id/descartar',requireAuth,requireRol('vendedor'),async(req,res)=>{
   const u=req.session.usuario;
   const id=Number(req.params.id);
   const mensaje=String(req.body.mensaje_id||'');

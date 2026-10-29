@@ -44,7 +44,7 @@ ${u ? `
     <span class="nav-title">SM Comercial</span>
   </div>
   <div class="nav-links">
-    ${u.rol !== 'control' ? `<a href="/crm" class="nav-link${req.path.startsWith('/crm') ? ' active' : ''}"><i class="ti ti-layout-dashboard"></i><span>Mi agenda</span></a>` : ''}
+    ${u.rol === 'vendedor' ? `<a href="/crm" class="nav-link${req.path.startsWith('/crm') ? ' active' : ''}"><i class="ti ti-layout-dashboard"></i><span>Mi agenda</span></a>` : ''}
     ${u.rol !== 'control' ? `<a href="/panel" class="nav-link${req.path.startsWith('/panel') || req.path.startsWith('/prospectos') ? ' active' : ''}"><i class="ti ti-users"></i><span>Oportunidades</span></a>` : ''}
     ${['admin','vendedor','control'].includes(u.rol) ? `<a href="/control" class="nav-link${req.path.startsWith('/control') ? ' active' : ''}"><i class="ti ti-chart-bar"></i><span>Resultados</span></a>` : ''}
     ${u.rol === 'admin' ? `<a href="/campanias" class="nav-link${req.path.startsWith('/campanias') ? ' active' : ''}"><i class="ti ti-speakerphone"></i><span>Campañas</span></a>` : ''}

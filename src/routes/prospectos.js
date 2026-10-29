@@ -3,7 +3,7 @@ const axios = require("axios");
 const router = express.Router();
 const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
-const { renderSeguimientosFicha, puedeGestionar } = require("../crm/seguimientos");
+const { renderSeguimientosFicha, puedeGestionar, vendedorAsignado } = require("../crm/seguimientos");
 const { pasoPorEstado } = require("../crm/pasos");
 const {
   AGENTE_ZOOM,
@@ -18,6 +18,45 @@ const {
   normalizarTelefono,
   enviarAvisoInterno,
 } = require("../zoomChatwoot");
+
+
+// Las acciones de ficha (incluyendo demo, relevamiento, edición y cierre)
+// son exclusivas del vendedor realmente asignado, no de cualquier vendedor autenticado.
+router.use('/prospectos/:id', requireAuth, async (req, res, next) => {
+  if (req.session.usuario.rol !== 'vendedor') return next();
+  const prospectoId = Number(req.params.id);
+  if (!Number.isSafeInteger(prospectoId) || prospectoId <= 0) return next();
+  try {
+    const {rows} = await pool.query(`SELECT id,chatwoot_conversation_id,creado_por,demo_responsable
+      FROM prospectos WHERE id=$1`,[prospectoId]);
+    if (!rows.length) return res.status(404).send('Prospecto no encontrado');
+    if (!await puedeGestionar(rows[0],req.session.usuario))
+      return res.status(403).send('Solo podés gestionar tus prospectos asignados');
+    return next();
+  } catch (error) {
+    console.error('[CRM] Error verificando propietario del prospecto',prospectoId,error.message);
+    return res.status(503).send('No se pudo validar el responsable comercial');
+  }
+});
+
+// Canal individual de avisos del bot de Ventas. Nunca envía al grupo.
+router.post('/api/ventas/aviso-directo', express.json(), async (req,res) => {
+  if (!process.env.AUTOMATION_API_KEY || req.headers['x-api-key'] !== process.env.AUTOMATION_API_KEY)
+    return res.status(401).json({ok:false,error:'No autorizado'});
+  const agentId = Number(req.body?.chatwoot_agent_id);
+  const mensaje = String(req.body?.mensaje || '').trim();
+  if (![4,11,19].includes(agentId) || !mensaje || mensaje.length > 4000)
+    return res.status(400).json({ok:false,error:'Destinatario o mensaje inválido'});
+  const usuarioId = AGENTE_CHATWOOT_ID[agentId];
+  try {
+    const ok = await enviarAvisoInterno(mensaje,usuarioId);
+    if (!ok) return res.status(503).json({ok:false,error:'No se pudo entregar al vendedor; revisar teléfono y canal individual'});
+    return res.json({ok:true});
+  } catch(err) {
+    console.error('[VENTAS] No se pudo enviar aviso directo al agente',agentId,err.message);
+    return res.status(502).json({ok:false,error:'Error del canal de notificaciones'});
+  }
+});
 
 function esc(str) {
   return String(str || "")
@@ -142,6 +181,7 @@ function renderResultadoAccion(resultado) {
 
 const ESTADOS_LABEL = {
   prospecto: "Prospecto",
+  sin_respuesta: "Sin respuesta",
   demo_coordinada: "Demo coordinada",
   demo_realizada: "Demo realizada",
   confirmado: "Confirmado",
@@ -1453,7 +1493,17 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
 
     // Acciones disponibles según estado y rol
     const acciones = [];
-    if (p.estado === "prospecto") {
+    const gestionaEtapa = ['admin','vendedor'].includes(req.session.usuario.rol) &&
+      await puedeGestionar(p,req.session.usuario);
+    if (gestionaEtapa && ['prospecto','sin_respuesta'].includes(p.estado)) {
+      const siguiente = p.estado === 'prospecto' ? 'sin_respuesta' : 'prospecto';
+      const texto = siguiente === 'sin_respuesta' ? 'Marcar sin respuesta' : 'Volver a prospecto';
+      acciones.push(`<form method="post" action="/prospectos/${p.id}/estado" style="display:inline"
+        onsubmit="return confirm('¿Confirmás el cambio de estado comercial?')">
+        <input type="hidden" name="estado" value="${siguiente}">
+        <button class="btn btn-secondary" type="submit"><i class="ti ti-flag"></i> ${texto}</button></form>`);
+    }
+    if (["prospecto", "sin_respuesta"].includes(p.estado)) {
       acciones.push(`
           <a href="/prospectos/${p.id}/demo" class="btn btn-primary">
             <i class="ti ti-calendar-event"></i> Coordinar demo
@@ -1525,7 +1575,7 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
             'Al continuar:\\n' +
             '• El prospecto pasará a estado CONFIRMADO.\\n' +
             '• Se enviará automáticamente al cliente el mensaje de bienvenida a SM Soluciones.\\n' +
-            '• Se enviará al grupo interno el aviso de nuevo cliente confirmado.\\n' +
+            '• Se avisará por WhatsApp al vendedor responsable.\\n' +
             '• La próxima etapa será el alta e implementación.\\n\\n' +
             'Esta acción debe realizarse solamente cuando el cliente haya confirmado la contratación.'
           )"
@@ -1962,7 +2012,7 @@ async function reasignarConversacionVentas(req, res) {
     const textos = [
       { ok: true, texto: `Chatwoot: conversación #${conversationId} asignada a ${data.newAssigneeName}` },
       { ok: !!data.prospectosSynced, texto: data.prospectosSynced ? "Sincronizado con Prospectos" : "Sincronización pendiente o no existe prospecto vinculado" },
-      { ok: !!data.groupNotified || !data.changed, texto: !data.changed ? "Ya estaba asignado, no se duplicó el aviso" : data.groupNotified ? "Aviso enviado al grupo Ventas" : "Aviso al grupo en reintento" },
+      { ok: !!data.groupNotified || !data.changed, texto: !data.changed ? "Ya estaba asignado, no se duplicó el aviso" : data.groupNotified ? "Aviso enviado al vendedor" : "Aviso pendiente de entrega individual" },
       { ok: !!data.privateNoteSaved || !data.changed, texto: !data.changed ? "No se duplicó nota" : data.privateNoteSaved ? "Nota interna guardada" : "Falló la nota interna" }
     ];
     guardarResultadoAccion(req, "Reasignación manual de Ventas", textos);
@@ -2584,29 +2634,29 @@ const resultados = [
         `\n👉 Ver prospecto: ${linkProspecto}`;
 
       const avisoEnviado =
-        await enviarAvisoInterno(mensajeGrupo);
+        await enviarAvisoInterno(mensajeGrupo, await vendedorAsignado(prospecto));
 
       if (avisoEnviado) {
         resultados.push({
           ok: true,
-          texto: "Se envió el aviso de la demo al grupo.",
+          texto: "Se envió el aviso de la demo al vendedor responsable.",
         });
       } else {
         resultados.push({
           ok: false,
-          texto: "No se pudo enviar el aviso de la demo al grupo.",
+          texto: "No se pudo enviar el aviso al vendedor responsable.",
         });
       }
     } catch (avisoErr) {
       console.error(
-        "ERROR enviando aviso de demo al grupo:",
+        "ERROR enviando aviso individual de demo:",
         avisoErr.response?.data || avisoErr.message,
       );
 
       resultados.push({
         ok: false,
         texto:
-          `No se pudo enviar el aviso al grupo: ` +
+          `No se pudo enviar el aviso al responsable: ` +
           `${
             avisoErr.response?.data?.message ||
             avisoErr.message ||
@@ -2688,7 +2738,7 @@ router.get("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
         '• El prospecto pasará a estado DEMO REALIZADA.\\n' +
         '• Se registrará el relevamiento como completado.\\n' +
         '• Se enviará automáticamente al cliente un mensaje agradeciendo su participación y la documentación del sistema.\\n' +
-        '• Se enviará al grupo interno el aviso de demo realizada con los datos del relevamiento.\\n\\n' +
+        '• Se avisará al vendedor responsable por WhatsApp.\\n\\n' +
         '¿Confirmás que la demo ya fue realizada?'
       )"
     >
@@ -3095,21 +3145,21 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
         `👉 Cerrar cliente: ${link}`;
 
       const avisoEnviado =
-        await enviarAvisoInterno(mensajeGrupo);
+        await enviarAvisoInterno(mensajeGrupo, await vendedorAsignado(p));
 
       if (avisoEnviado) {
         console.log(
-          `✅ Aviso de demo realizada enviado al grupo: ${req.params.id}`,
+          `✅ Aviso de demo realizada enviado al vendedor: ${req.params.id}`,
         );
 
         resultados.push({
           ok: true,
-          texto: "Se envió el relevamiento al grupo.",
+          texto: "Se envió el relevamiento al vendedor responsable.",
         });
       } else {
         resultados.push({
           ok: false,
-          texto: "No se pudo enviar el relevamiento al grupo.",
+          texto: "No se pudo notificar al vendedor responsable.",
         });
       }
     } catch (msgErr) {
@@ -3121,7 +3171,7 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
       resultados.push({
         ok: false,
         texto:
-          `No se pudo enviar el relevamiento al grupo: ` +
+          `No se pudo enviar el relevamiento al vendedor: ` +
           `${
             msgErr.response?.data?.message ||
             msgErr.message ||
@@ -3162,14 +3212,34 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
               estado,
               telefono,
               demo_responsable,
-              chatwoot_conversation_id
+              chatwoot_conversation_id,
+              creado_por
             FROM prospectos
             WHERE id=$1
             `,
             [req.params.id],
           );
 
+          if (!rows.length) return res.status(404).send('Prospecto no encontrado');
+          if (!['admin','vendedor'].includes(req.session.usuario.rol))
+            return res.status(403).send('No autorizado para cambiar estados comerciales');
+          if (req.session.usuario.rol === 'vendedor' && !(await puedeGestionar({
+            id: Number(req.params.id), ...rows[0], creado_por: rows[0].creado_por,
+          }, req.session.usuario)))
+            return res.status(403).send('Solo podés cambiar el estado de tus prospectos asignados');
           const estadoAnterior = rows[0]?.estado;
+          if (!['prospecto','sin_respuesta','confirmado','perdido'].includes(String(estado)))
+            return res.status(400).send('Usá Coordinar demo o Cargar relevamiento para esas etapas');
+          if (estado === 'confirmado' && estadoAnterior !== 'demo_realizada')
+            return res.status(409).send('Para confirmar, primero debe estar registrada la demo realizada');
+          if (estado === 'prospecto' && estadoAnterior !== 'sin_respuesta')
+            return res.status(409).send('Para volver a Prospecto desde una demo coordinada, usá Reprogramar');
+          if (estado === 'sin_respuesta' && estadoAnterior !== 'prospecto')
+            return res.status(409).send('Sin respuesta solo se puede establecer desde Prospecto');
+          if (['confirmado','perdido'].includes(estadoAnterior))
+            return res.status(409).send('La oportunidad está cerrada; contactá a administración para corregirla');
+          if (estadoAnterior === 'demo_coordinada' && estado === 'prospecto')
+            return res.status(409).send('Usá Reprogramar para volver una demo coordinada a Prospecto');
           const telefono = rows[0]?.telefono;
           const demoResponsable = rows[0]?.demo_responsable;
           const chatwootConversationId =
@@ -3444,7 +3514,7 @@ if (chatwootConversationId) {
           `👉 Ver prospecto: ${linkProspecto}`;
 
         const avisoEnviado =
-          await enviarAvisoInterno(mensajeAlta);
+          await enviarAvisoInterno(mensajeAlta, await vendedorAsignado(full));
 
         if (avisoEnviado) {
           console.log(
@@ -3454,13 +3524,13 @@ if (chatwootConversationId) {
           resultados.push({
             ok: true,
             texto:
-              "Se envió el aviso de nuevo cliente al grupo.",
+              "Se avisó al vendedor responsable.",
           });
         } else {
           resultados.push({
             ok: false,
             texto:
-              "No se pudo enviar el aviso de nuevo cliente al grupo.",
+              "No se pudo avisar al vendedor responsable.",
           });
         }
       } catch (msgErr) {
@@ -3472,7 +3542,7 @@ if (chatwootConversationId) {
         resultados.push({
           ok: false,
           texto:
-            `No se pudo enviar el aviso al grupo: ` +
+            `No se pudo enviar el aviso al responsable: ` +
             `${
               msgErr.response?.data?.message ||
               msgErr.message ||

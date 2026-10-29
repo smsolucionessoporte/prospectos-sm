@@ -131,4 +131,4 @@ router.post('/prospectos/:id/seguimientos', requireAuth, requireRol('admin', 've
   } finally { if (db) db.release(); }
 });
 
-module.exports = { router, renderSeguimientosFicha, fechaRecibida, puedeGestionar };
+module.exports = { router, renderSeguimientosFicha, fechaRecibida, puedeGestionar, vendedorAsignado };

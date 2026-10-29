@@ -48,7 +48,10 @@ app.use(prospectosRoutes);
 app.use(campaniasRoutes);
 
 // Redirigir raíz al panel
-app.get('/', (req, res) => res.redirect('/crm')); 
+app.get('/', (req, res) => {
+  const rol = req.session?.usuario?.rol;
+  return res.redirect(rol === 'admin' || rol === 'control' ? '/control' : rol === 'vendedor' ? '/crm' : rol === 'soporte' ? '/panel' : '/login');
+}); 
 
 async function start() {
   try {

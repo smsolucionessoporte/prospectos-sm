@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const { pool } = require('../db');
-const { AGENTE_TELEFONO } = require('../zoomAgentes');
+const { AGENTE_TELEFONO, telefonoVendedor } = require('../zoomAgentes');
 const { enviarPorChatwoot } = require('../zoomChatwoot');
 
 const ZONE = 'America/Argentina/Buenos_Aires';
@@ -45,7 +45,7 @@ async function enviarResumenVendedor() {
   if (process.env.CRM_ALERTAS_WHATSAPP !== 'true') return;
   const { rows: usuarios } = await pool.query("SELECT id, nombre FROM usuarios WHERE activo=TRUE AND rol='vendedor' ORDER BY id");
   for (const u of usuarios) {
-    const tel = AGENTE_TELEFONO[u.id];
+    const tel = telefonoVendedor(u.id);
     if (!tel) { console.warn(`[CRM] Resumen omitido para usuario ${u.id}: falta teléfono de contacto`); continue; }
     const r = await resumenParaVendedor(u.id);
     if (!r.vencidas && !r.proximas && !r.mensajes_por_responder && !r.por_cerrar) continue;
@@ -112,7 +112,7 @@ async function recordarMensajesSinResponder(hora) {
   for (const r of rows) {
     // Al menos una hora de trabajo real; nunca alertar por un chat viejo no verificado.
     if (businessMinutesBetween(r.mas_antiguo) < 60) continue;
-    const tel = AGENTE_TELEFONO[r.responsable_id];
+    const tel = telefonoVendedor(r.responsable_id);
     if (!tel) continue;
     const aviso = await reclamarAviso(`respuesta_${hora}`,r.responsable_id);
     if (!aviso) continue;
@@ -140,7 +140,7 @@ async function recordarSeguimientosProgramados() {
         WHERE r.tarea_id=t.id AND r.vence_en=t.vence_en)
       AND u.activo=TRUE ORDER BY t.vence_en ASC LIMIT 100`);
   for (const t of tareas) {
-    const tel = AGENTE_TELEFONO[t.responsable_id];
+    const tel = telefonoVendedor(t.responsable_id);
     if (!tel) continue;
     const registrado = await pool.query(`
       INSERT INTO crm_recordatorios_tareas (tarea_id,vence_en) VALUES($1,$2)

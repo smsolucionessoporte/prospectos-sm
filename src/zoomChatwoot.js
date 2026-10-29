@@ -54,20 +54,16 @@ function normalizarTelefono(tel) {
   return variantes;
 }
 
-const CONVERSACION_AVISOS_ID = Number(process.env.CONVERSACION_AVISOS_ID);
-
-async function enviarAvisoInterno(mensaje) {
-  if (!CONVERSACION_AVISOS_ID) {
-    console.log('CONVERSACION_AVISOS_ID no configurado');
+// Los avisos internos comerciales son privados y se dirigen al vendedor asignado.
+// Nunca enviar a un grupo como alternativa si falla la entrega.
+async function enviarAvisoInterno(mensaje, usuarioId) {
+  const { telefonoVendedor } = require('./zoomAgentes');
+  const telefono = telefonoVendedor(Number(usuarioId));
+  if (!telefono) {
+    console.warn('[VENTAS] Aviso individual no enviado: teléfono del vendedor no configurado', usuarioId);
     return false;
   }
-
-  await enviarMensajePorConversationId(
-    CONVERSACION_AVISOS_ID,
-    mensaje
-  );
-
-  return true;
+  return Boolean(await enviarPorChatwoot(telefono,mensaje,Number(usuarioId)));
 }
 
 async function enviarMensajePorConversationId(conversationId, mensaje) {
@@ -154,8 +150,10 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
     );
 
     if (data.payload?.length) {
-      contacto = data.payload[0];
-      break;
+      const digitos = valor => String(valor || '').replace(/\D/g, '');
+      const permitidos = new Set(variantes.map(digitos));
+      contacto = data.payload.find(item => permitidos.has(digitos(item.phone_number))) || null;
+      if (contacto) break;
     }
   }
 

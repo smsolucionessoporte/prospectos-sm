@@ -13,7 +13,8 @@ const AGENTE_TELEFONO = {
   10: "+54 9 11 6927-3611", // Román
   11: "+54 9 11 5403-7905", // Tomás
   12: "+54 9 11 3274-6298", // Giuliano
-  7: "+54 9 11 2478-5622", // Daniel
+  7: "+54 9 11 2478-5622", // Daniel (solo compatibilidad histórica)
+  13: process.env.VENTAS_TELEFONO_SANTIAGO || undefined, // Obligatorio para avisos a Santiago
 
 };
 
@@ -37,5 +38,16 @@ const AGENTE_INBOX = {
 };
 
 
-module.exports = { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID };
+function telefonoVendedor(usuarioId) {
+  const variables = {
+    8: process.env.VENTAS_TELEFONO_RAFAEL,
+    12: process.env.VENTAS_TELEFONO_GIULIANO,
+    13: process.env.VENTAS_TELEFONO_SANTIAGO,
+  };
+  // Solo vendedores actualmente habilitados: no reutilizar teléfono histórico de Daniel.
+  if (![8,12,13].includes(Number(usuarioId))) return null;
+  const telefono = String(variables[usuarioId] || AGENTE_TELEFONO[usuarioId] || '').trim();
+  return /^\+?[0-9 ()-]{10,25}$/.test(telefono) ? telefono : null;
+}
+module.exports = { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID, telefonoVendedor };
 
