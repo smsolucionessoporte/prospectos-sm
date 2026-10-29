@@ -5,6 +5,7 @@ const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
 const { renderSeguimientosFicha, puedeGestionar, vendedorAsignado } = require("../crm/seguimientos");
 const { pasoPorEstado } = require("../crm/pasos");
+const {checkSlot,crearReunionMeet,cancelarReunionMeet,parseLocal}=require("../meet/calendar");
 const {
   AGENTE_ZOOM,
   AGENTE_TELEFONO,
@@ -2193,7 +2194,7 @@ router.post("/prospectos/:id/reprogramar-demo", requireAuth, async (req, res) =>
 
     const { rows } = await client.query(
       `
-      SELECT id, estado, demo_fecha
+      SELECT id, estado, demo_fecha, google_event_id, demo_tipo
       FROM prospectos
       WHERE id = $1
       FOR UPDATE
@@ -2233,6 +2234,10 @@ router.post("/prospectos/:id/reprogramar-demo", requireAuth, async (req, res) =>
         demo_fecha = NULL,
         demo_responsable = NULL,
         zoom_join_url = NULL,
+        demo_tipo = NULL,
+        google_event_id = NULL,
+        demo_solicitud = NULL,
+        recordatorio_enviado = FALSE,
         recordatorio_relevamiento_enviado = FALSE,
         actualizado_en = NOW()
       WHERE id = $1
@@ -2254,6 +2259,12 @@ router.post("/prospectos/:id/reprogramar-demo", requireAuth, async (req, res) =>
     );
 
     await client.query("COMMIT");
+    // No cancelar los eventos recurrentes grupales compartidos con otros clientes.
+    if (prospecto.google_event_id) {
+      await cancelarReunionMeet(prospecto.google_event_id).catch(error => {
+        console.error('[MEET] Evento personalizado cancelado en ficha pero no en Calendar',prospecto.google_event_id,error.message);
+      });
+    }
 
     res.redirect(`/prospectos/${req.params.id}`);
   } catch (err) {
@@ -4590,143 +4601,54 @@ let cambioResponsable = null;
       );
     }
 
-    // ─── REPROGRAMAR DEMO ─────────────────────────────────────────────
-if (cambioFechaDemo) {
-  // Si el admin cambió responsable en esta misma edición,
-  // la nueva reunión se crea en el Zoom del nuevo responsable.
-  const responsableDemoId = cambioResponsable
-    ? cambioResponsable.id
-    : actual.demo_responsable || actual.creado_por;
-
-  const zoomEmail = AGENTE_ZOOM[responsableDemoId];
-
-  if (!zoomEmail) {
-    return res
-      .status(400)
-      .send("El responsable de la demo no tiene una cuenta de Zoom configurada");
-  }
-
-  const nombreParaZoom =
-    b.nombre_negocio ||
-    b.contacto ||
-    actual.nombre_negocio ||
-    actual.contacto ||
-    "Prospecto";
-
-  let nuevoJoinUrl;
-
-  try {
-    nuevoJoinUrl = await crearReunionZoom(
-      zoomEmail,
-      `Demo ${nombreParaZoom}`,
-      fechaDemoNueva,
-    );
-      } catch (zoomErr) {
-      console.error(
-        "ERROR recreando reunión Zoom:",
-        zoomErr.response?.data || zoomErr.message,
-      );
-
-      await alertarResponsableError(
-        responsableDemoId,
-        "Error al reprogramar la demostración",
-        actual,
-        `Se intentó reprogramar la demo para ${formatearFechaAR(fechaDemoNueva)}, pero no se pudo crear la nueva reunión de Zoom. La fecha anterior continúa vigente.`,
-      );
-
-      return res.status(500).send(
-        "No se pudo crear la nueva reunión de Zoom. La fecha de la demo no fue modificada.",
-      );
-    }
-
-    // Guardar nueva fecha y reemplazar el link anterior.
-    // También habilitamos nuevamente el recordatorio de 2 horas.
-    await pool.query(
-      `
-      UPDATE prospectos
-      SET
-        demo_fecha = $1,
-        zoom_join_url = $2,
-        recordatorio_enviado = false,
-        recordatorio_relevamiento_enviado = false,
-        actualizado_en = NOW()
-      WHERE id = $3
-      `,
-      [fechaDemoNueva, nuevoJoinUrl, req.params.id],
-    );
-
-    const fechaAnteriorFormateada = formatearFechaAR(fechaDemoAnterior);
-    const fechaNuevaFormateada = formatearFechaAR(fechaDemoNueva);
-
-    await pool.query(
-      `
-      INSERT INTO historial_estados
-        (
-          prospecto_id,
-          estado_anterior,
-          estado_nuevo,
-          usuario_id,
-          nota
-        )
-      VALUES ($1,$2,$2,$3,$4)
-      `,
-      [
-        req.params.id,
-        actual.estado,
-        req.session.usuario.id,
-        `Demo reprogramada de ${fechaAnteriorFormateada} a ${fechaNuevaFormateada}`,
-      ],
-    );
-
-    // Reenviar invitación solamente si el usuario eligió hacerlo.
-    if (b.reenviar_invitacion === "1") {
-      const mensaje = `*Msj automático*
-
-  ¡Hola! 👋
-
-  La fecha de tu demostración fue reprogramada.
-
-  📅 Nueva fecha: ${fechaNuevaFormateada}
-
-  Te dejamos el nuevo link para unirte a la demostración: 🎥
-
-  🔗 ${nuevoJoinUrl}
-
-  💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
-
+    // ─── REPROGRAMACIÓN EN GOOGLE MEET (nunca crear Zoom) ───
+    if (cambioFechaDemo) {
+      const responsableDemoId = cambioResponsable?.id || actual.demo_responsable || actual.creado_por;
+      let nuevoJoinUrl = null, nuevoEventId = null;
+      let nuevaDemoTipo = actual.demo_tipo || 'personalizada';
       try {
-        const enviado = await enviarPorChatwoot(
-          b.telefono || actual.telefono,
-          mensaje,
-          responsableDemoId,
-        );
-
-        if (!enviado) {
-          console.error(
-            "No se pudo reenviar la invitación de la demo reprogramada",
-          );
-
-          await alertarResponsableError(
-            responsableDemoId,
-            "No se pudo enviar la nueva invitación",
-            actual,
-            `La demo fue reprogramada para ${fechaNuevaFormateada} y el nuevo Zoom fue creado correctamente, pero no se pudo enviar la invitación actualizada al contacto.`,
-          );
+        if (nuevaDemoTipo === 'grupal_am' || nuevaDemoTipo === 'grupal_pm') {
+          const turno = nuevaDemoTipo === 'grupal_am' ? 'am' : 'pm';
+          const fechaDia = fechaDemoNueva.split('T')[0];
+          const sesion = checkSlot(fechaDia,turno);
+          if (fechaDemoNueva.slice(11,16)!==sesion.hora)
+            return res.status(400).send(`La demo grupal ${turno.toUpperCase()} tiene horario fijo ${sesion.hora}. Cambiá la fecha, no el horario.`);
+          nuevoJoinUrl = sesion.url;
+        } else {
+          const when=parseLocal(fechaDemoNueva);
+          if(when.utc.getTime()<=Date.now())return res.status(400).send('La fecha debe ser futura');
+          const creada=await crearReunionMeet({title:'SM Soluciones | Demostración personalizada',
+            localStart:fechaDemoNueva,description:`Prospecto #${req.params.id}`});
+          nuevoJoinUrl=creada.joinUrl;
+          nuevoEventId=creada.eventId;
         }
-      } catch (msgErr) {
-        console.error(
-          "ERROR reenviando invitación de demo:",
-          msgErr.response?.data || msgErr.message,
-        );
-        await alertarResponsableError(
-          responsableDemoId,
-          "No se pudo enviar la nueva invitación",
-          actual,
-          `La demo fue reprogramada para ${fechaNuevaFormateada}, pero falló el envío de la invitación actualizada al contacto.`,
-        );
+        await pool.query(`UPDATE prospectos SET demo_fecha=$1::timestamp,zoom_join_url=$2,
+          google_event_id=$3,demo_tipo=$4,recordatorio_enviado=false,
+          recordatorio_relevamiento_enviado=false,actualizado_en=NOW() WHERE id=$5`,
+          [fechaDemoNueva,nuevoJoinUrl,nuevoEventId,nuevaDemoTipo,req.params.id]);
+        await pool.query(`INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota)
+          VALUES($1,$2,$2,$3,$4)`,[req.params.id,actual.estado,req.session.usuario.id,
+          `Demo reprogramada: ${formatearFechaAR(fechaDemoAnterior)} → ${formatearFechaAR(fechaDemoNueva)} · Google Meet`]);
+        // El evento anterior solo es cancelable si fue una reunión personalizada creada por API.
+        if(actual.google_event_id && actual.google_event_id !== nuevoEventId){
+          try{await cancelarReunionMeet(actual.google_event_id);}
+          catch(error){console.error('[MEET] Evento anterior no cancelado',actual.google_event_id,error.message);}
+        }
+      } catch(error) {
+        if(nuevoEventId){await cancelarReunionMeet(nuevoEventId).catch(err=>console.error('[MEET] Falló limpieza de evento nuevo',err.message));}
+        console.error('[MEET] Error reprogramando',error);
+        return res.status(503).send(`No se pudo reprogramar correctamente la reunión: ${esc(error.message)}. Revisá la ficha antes de reintentar.`);
+      }
+      const nuevaFecha=formatearFechaAR(fechaDemoNueva);
+      if(b.reenviar_invitacion === '1'){
+        try{
+          const ok=await enviarPorChatwoot(b.telefono||actual.telefono,
+            `¡Hola! 😊 Tu demostración de SM Soluciones fue reprogramada.\n📅 ${nuevaFecha} (Buenos Aires)\n🎥 Google Meet: ${nuevoJoinUrl}\nDuración: 30 minutos.`,responsableDemoId);
+          if(!ok)await alertarResponsableError(responsableDemoId,'Reprogramación sin aviso al cliente',actual,
+            'La fecha fue actualizada, pero no se pudo entregar el WhatsApp; contactalo manualmente.');
+        }catch(error){console.error('[MEET] Falló reenvío de invitación',error.message);}
       }
     }
-  }
 
     res.redirect("/prospectos/" + req.params.id);
   } catch (err) {

@@ -17,6 +17,7 @@ const crmRoutes = require('./crm/routes');
 const { iniciarCRM } = require('./crm/schema');
 const { iniciarAvisosCRM } = require('./crm/notifications');
 const { iniciarSincronizacionCRM } = require('./crm/sync');
+const {router:meetRoutes,iniciarMeet,iniciarAvisosMeet}=require('./meet/routes');
 
 
 const app = express();
@@ -44,6 +45,7 @@ app.use(session({
 app.use(authRoutes);
 app.use(crmRoutes);
 app.use(panelRoutes);
+app.use(meetRoutes); // Inscripciones y Meet antes de rutas legacy de Zoom
 app.use(prospectosRoutes);
 app.use(campaniasRoutes);
 
@@ -57,12 +59,14 @@ async function start() {
   try {
     await runMigrations();
     await iniciarCRM();
+    await iniciarMeet();
     await seedAdminIfNeeded();
     app.listen(PORT, () => {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });
     iniciarRecordatorios();
     iniciarAvisosCRM();
+    iniciarAvisosMeet();
     iniciarSincronizacionCRM();
     await iniciarProcesadorCampanias();
     //iniciarRecordatoriosRelevamiento();
@@ -94,7 +98,8 @@ function iniciarRecordatorios() {
   setInterval(async () => {
     try {
       const { rows } = await pool.query(`
-        SELECT p.*, u.nombre as demo_resp_nombre
+        SELECT p.*, to_char(p.demo_fecha,'YYYY-MM-DD"T"HH24:MI') AS demo_fecha_local,
+               u.nombre as demo_resp_nombre
         FROM prospectos p
         LEFT JOIN usuarios u ON p.demo_responsable = u.id
         WHERE COALESCE(p.recordatorio_enviado, false) = false
@@ -105,10 +110,10 @@ function iniciarRecordatorios() {
 
       for (const p of rows) {
         const fechaFormateada = formatearFechaAR(
-          p.demo_fecha.toISOString().slice(0, 16)
+          p.demo_fecha_local
         );
 
-        const linkZoom = p.zoom_join_url
+        const linkMeet = p.zoom_join_url
           ? `\n🔗 ${p.zoom_join_url}`
           : '';
 
@@ -116,7 +121,7 @@ function iniciarRecordatorios() {
 
 ¡Hola! 👋 Te recordamos que en 2 horas tenés programada la demostración de nuestro sistema de gestión. 🎥
 
-📅 ${fechaFormateada}${linkZoom}
+📅 ${fechaFormateada}${linkMeet}
 
 💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
 
@@ -135,7 +140,7 @@ function iniciarRecordatorios() {
           console.log(
             '✓ Recordatorio de demo enviado:',
             p.id,
-            '| zoom:',
+            '| meet:',
             Boolean(p.zoom_join_url)
           );
         } else {
