@@ -15,6 +15,7 @@ const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = requi
 const { registrarRutasZoomGiuliano } = require('./zoomGiuliano');
 const crmRoutes = require('./crm/routes');
 const { iniciarCRM } = require('./crm/schema');
+const { iniciarPruebaSchema, iniciarAvisosPrueba } = require('./crm/prueba');
 const { iniciarAvisosCRM } = require('./crm/notifications');
 const { iniciarSincronizacionCRM } = require('./crm/sync');
 const {router:meetRoutes,iniciarMeet,iniciarAvisosMeet}=require('./meet/routes');
@@ -59,6 +60,7 @@ async function start() {
   try {
     await runMigrations();
     await iniciarCRM();
+    await iniciarPruebaSchema();
     await iniciarMeet();
     await seedAdminIfNeeded();
     app.listen(PORT, () => {
@@ -66,6 +68,7 @@ async function start() {
     });
     iniciarRecordatorios();
     iniciarAvisosCRM();
+    iniciarAvisosPrueba();
     iniciarAvisosMeet();
     iniciarSincronizacionCRM();
     await iniciarProcesadorCampanias();

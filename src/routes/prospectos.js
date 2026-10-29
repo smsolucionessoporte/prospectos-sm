@@ -5,6 +5,7 @@ const { pool } = require("../db");
 const { requireAuth, requireRol, layout } = require("../middleware/auth");
 const { renderSeguimientosFicha, puedeGestionar, vendedorAsignado } = require("../crm/seguimientos");
 const { pasoPorEstado } = require("../crm/pasos");
+const { activarPrueba, procesarAvisosPrueba, estadoPrueba } = require("../crm/prueba");
 const {checkSlot,crearReunionMeet,cancelarReunionMeet,parseLocal}=require("../meet/calendar");
 const {
   AGENTE_ZOOM,
@@ -185,6 +186,7 @@ const ESTADOS_LABEL = {
   sin_respuesta: "Sin respuesta",
   demo_coordinada: "Demo coordinada",
   demo_realizada: "Demo realizada",
+  prueba: "Prueba",
   confirmado: "Confirmado",
   perdido: "Perdido",
 };
@@ -194,6 +196,7 @@ const PROXIMA_ACCION = {
   sin_respuesta: "Reintentar contacto",
   demo_coordinada: "Completar relevamiento",
   demo_realizada: "Cerrar cliente",
+  prueba: "Definir contratación al terminar la prueba",
   confirmado: "Dar de alta en SM Admin",
   perdido: "—",
 };
@@ -203,6 +206,7 @@ const ESTADOS_COLOR = {
   sin_respuesta: "yellow",
   demo_coordinada: "blue",
   demo_realizada: "purple",
+  prueba: "blue",
   confirmado: "green",
   perdido: "red",
 };
@@ -1489,12 +1493,19 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
 
     const est = ESTADOS_COLOR[p.estado] || "gray";
     const estadoLabel = ESTADOS_LABEL[p.estado] || p.estado;
+    const pruebaDetalle = p.estado === 'prueba' ?
+      `<section class="detail-section"><div class="section-title-row"><i class="ti ti-flask"></i><span>${esc(estadoPrueba(p.estado,p.prueba_vence))}</span></div>
+        <p>Inicio: <strong>${esc(p.prueba_inicio ? new Intl.DateTimeFormat('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'}).format(new Date(p.prueba_inicio)) : 'Sin definir')}</strong></p>
+        <p>Vence: <strong>${esc(p.prueba_vence ? new Intl.DateTimeFormat('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'}).format(new Date(p.prueba_vence)) : 'Sin definir')}</strong></p>
+        <p class="text-muted">El vencimiento no confirma ni pierde automáticamente al cliente. Registrá el resultado desde las acciones de esta ficha.</p>
+      </section>` : '';
     const responsableActualNombre =
       p.demo_resp_nombre || p.creado_por_nombre || "—";
 
     // Acciones disponibles según estado y rol
     const acciones = [];
-    const gestionaEtapa = ['admin','vendedor'].includes(req.session.usuario.rol) &&
+    const gestionaEtapa = (['admin','vendedor'].includes(req.session.usuario.rol) ||
+      (req.session.usuario.rol === 'soporte' && p.origen === 'prospecto-interno')) &&
       await puedeGestionar(p,req.session.usuario);
     if (gestionaEtapa && ['prospecto','sin_respuesta'].includes(p.estado)) {
       const siguiente = p.estado === 'prospecto' ? 'sin_respuesta' : 'prospecto';
@@ -1565,7 +1576,12 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
           `);
         }
 
-    if (p.estado === "demo_realizada") {
+    if (p.estado === "demo_realizada" && gestionaEtapa) {
+      acciones.push(`<form method="POST" action="/prospectos/${p.id}/estado" style="display:inline"
+        onsubmit="return confirm('¿Confirmás que YA se instaló y activó el sistema de prueba?\\n\\nLa prueba durará 7 días corridos y se avisará por WhatsApp al cliente y a su responsable.')">
+        <input type="hidden" name="estado" value="prueba">
+        <button class="btn btn-primary" type="submit"><i class="ti ti-flask"></i> Activar prueba (7 días)</button>
+      </form>`);
       acciones.push(`
         <form
           method="POST"
@@ -1596,6 +1612,14 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
           <i class="ti ti-x"></i> Marcar como perdido
         </button>
       `);
+    }
+    if (p.estado === 'prueba' && gestionaEtapa) {
+      acciones.push(`<form method="POST" action="/prospectos/${p.id}/estado" style="display:inline"
+        onsubmit="return confirm('¿Confirmás que este prospecto decidió contratar el sistema?')">
+        <input type="hidden" name="estado" value="confirmado">
+        <button class="btn btn-success" type="submit"><i class="ti ti-check"></i> Confirmar cliente</button>
+      </form>
+      <button type="button" class="btn btn-danger" onclick="abrirModalPerdido()"><i class="ti ti-x"></i> Marcar como perdido</button>`);
     }
     if (!["confirmado", "perdido"].includes(p.estado) && await puedeGestionar(p, req.session.usuario)) {
       acciones.push(`<a href="#seguimientos" class="btn btn-primary"><i class="ti ti-notes"></i> Dejar seguimiento</a>`);
@@ -1783,6 +1807,7 @@ if (req.session.usuario.rol === "admin") {
                 : ""
             }
 
+          ${pruebaDetalle}
           ${seguimientosHtml}
           ${relHtml}
 
@@ -3224,7 +3249,8 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
               telefono,
               demo_responsable,
               chatwoot_conversation_id,
-              creado_por
+              creado_por,
+              origen
             FROM prospectos
             WHERE id=$1
             `,
@@ -3232,21 +3258,54 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
           );
 
           if (!rows.length) return res.status(404).send('Prospecto no encontrado');
-          if (!['admin','vendedor'].includes(req.session.usuario.rol))
+          if (!(['admin','vendedor'].includes(req.session.usuario.rol) ||
+               (req.session.usuario.rol === 'soporte' && rows[0].origen === 'prospecto-interno')))
             return res.status(403).send('No autorizado para cambiar estados comerciales');
-          if (req.session.usuario.rol === 'vendedor' && !(await puedeGestionar({
+          if (['vendedor','soporte'].includes(req.session.usuario.rol) && !(await puedeGestionar({
             id: Number(req.params.id), ...rows[0], creado_por: rows[0].creado_por,
           }, req.session.usuario)))
             return res.status(403).send('Solo podés cambiar el estado de tus prospectos asignados');
           const estadoAnterior = rows[0]?.estado;
+          if (estado === 'prueba') {
+            // Activación real, con fecha fija, historial, tarea y avisos en la misma transacción.
+            if (estadoAnterior !== 'demo_realizada')
+              return res.status(409).send('La prueba solo se activa después de una demostración realizada');
+            const responsable = rows[0].origen === 'prospecto-interno'
+              ? Number(rows[0].demo_responsable || rows[0].creado_por || 0)
+              : await vendedorAsignado({ id:Number(req.params.id), ...rows[0] });
+            const resultado = await activarPrueba({ prospectoId:Number(req.params.id),
+              usuarioId:Number(req.session.usuario.id), responsableId:responsable, nota });
+            if (!resultado.ok) return res.status(409).send(resultado.motivo);
+            // Avisos registrados de forma duradera; el procesador reintenta si falla Chatwoot.
+            try { await procesarAvisosPrueba({limite:15}); }
+            catch(e) {console.error('[PRUEBA] Avisos pendientes de reintento',e.message);}
+            let entregas = [];
+            try {
+              ({rows:entregas} = await pool.query(`SELECT tipo,estado FROM crm_prueba_avisos
+                WHERE prospecto_id=$1 AND tipo IN ('activacion_cliente','activacion_responsable')`,[req.params.id]));
+            } catch(e) {
+              console.error('[PRUEBA] Activación guardada; no se pudo consultar entrega:', e.message);
+            }
+            const estadoAviso = tipo => entregas.find(a=>a.tipo===tipo)?.estado;
+            const recibidoCliente = estadoAviso('activacion_cliente') === 'enviado';
+            const recibidoResponsable = estadoAviso('activacion_responsable') === 'enviado';
+            guardarResultadoAccion(req,'Prueba activada',[
+              {ok:true,texto:'Prueba registrada por 7 días corridos, con vencimiento en la ficha y agenda.'},
+              {ok:recibidoCliente,texto:recibidoCliente?'Se envió el aviso de activación al cliente.':'Aviso al cliente pendiente de entrega; se reintentará automáticamente.'},
+              {ok:recibidoResponsable,texto:recibidoResponsable?'Se notificó al responsable individual.':'Aviso al responsable pendiente de entrega; se reintentará automáticamente.'}
+            ]);
+            return res.redirect('/prospectos/'+req.params.id);
+          }
           if (!['prospecto','sin_respuesta','confirmado','perdido'].includes(String(estado)))
-            return res.status(400).send('Usá Coordinar demo o Cargar relevamiento para esas etapas');
-          if (estado === 'confirmado' && estadoAnterior !== 'demo_realizada')
-            return res.status(409).send('Para confirmar, primero debe estar registrada la demo realizada');
+            return res.status(400).send('Usá Coordinar demo, Cargar relevamiento o Activar prueba para esas etapas');
+          if (estado === 'confirmado' && !['demo_realizada','prueba'].includes(estadoAnterior))
+            return res.status(409).send('Para confirmar, primero debe estar registrada una demo realizada o la prueba');
           if (estado === 'prospecto' && estadoAnterior !== 'sin_respuesta')
             return res.status(409).send('Para volver a Prospecto desde una demo coordinada, usá Reprogramar');
           if (estado === 'sin_respuesta' && estadoAnterior !== 'prospecto')
             return res.status(409).send('Sin respuesta solo se puede establecer desde Prospecto');
+          if (estadoAnterior === 'prueba' && !['confirmado','perdido'].includes(estado))
+            return res.status(409).send('Desde Prueba solo se puede confirmar o marcar como perdido');
           if (['confirmado','perdido'].includes(estadoAnterior))
             return res.status(409).send('La oportunidad está cerrada; contactá a administración para corregirla');
           if (estadoAnterior === 'demo_coordinada' && estado === 'prospecto')
@@ -3658,7 +3717,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
     const demoCoordinada =
       p.estado !== "prospecto" && p.estado !== "sin_respuesta";
 
-    const demoHecha = ["demo_realizada", "confirmado", "perdido"].includes(
+    const demoHecha = ["demo_realizada", "prueba", "confirmado", "perdido"].includes(
       p.estado,
     );
 
@@ -3916,6 +3975,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                         ["prospecto", "Prospecto"],
                         ["demo_coordinada", "Demo coordinada"],
                         ["demo_realizada", "Demo realizada"],
+                        ["prueba", "Prueba"],
                         ["confirmado", "Confirmado"],
                         ["perdido", "Perdido"],
                       ]
@@ -4331,6 +4391,12 @@ if (
       };
     }
 
+    // La activación de prueba siempre debe pasar por su operación transaccional.
+    // Rechazar antes de guardar los demás campos para evitar cambios parciales.
+    if (cambioEstado && cambioEstado.nuevo === 'prueba') {
+      return res.status(409).send('Activá la prueba desde la ficha para registrar los 7 días y notificar al cliente y al vendedor');
+    }
+
     // Detectar si se modificó la fecha/hora de una demo ya coordinada
     const fechaDemoAnterior = actual.demo_fecha
       ? formatearDateTimeLocalAR(actual.demo_fecha)
@@ -4390,7 +4456,7 @@ let cambioResponsable = null;
     }
   }
 
-  const demoHecha = ["demo_realizada", "confirmado", "perdido"].includes(
+  const demoHecha = ["demo_realizada", "prueba", "confirmado", "perdido"].includes(
       actual.estado,
     );
 
@@ -4496,6 +4562,7 @@ let cambioResponsable = null;
           "prospecto",
           "demo_coordinada",
           "demo_realizada",
+          "prueba",
           "confirmado",
           "perdido",
         ];
@@ -4503,6 +4570,8 @@ let cambioResponsable = null;
         if (!estadosPermitidos.includes(cambioEstado.nuevo)) {
           return res.status(400).send("Estado no válido");
         }
+        if (cambioEstado.nuevo === 'prueba' && cambioEstado.anterior !== 'prueba')
+          return res.status(409).send('La prueba debe activarse desde la ficha para registrar los 7 días y enviar los avisos');
 
         await pool.query(
           `

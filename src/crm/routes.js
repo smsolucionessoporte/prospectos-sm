@@ -55,6 +55,7 @@ function filaSeguimiento(t, usuario) {
         ${t.requiere_respuesta ? '<span class="crm-kind">Mensaje sin responder</span>' : ''}
       </div>
       <strong>${nombre}</strong>
+      ${t.estado === 'prueba' && t.vence_en ? `<div class="crm-followup-detail"><strong>🧪 Prueba ${overdue?'vencida':'vigente'}</strong> · Finaliza ${esc(fechaAR(t.vence_en))}</div>` : ''}
       <div class="crm-followup-detail">${descripcion}</div>
       <div class="crm-meta">${detalleFecha}${supervisor(usuario)?' · '+esc(t.responsable_nombre):''}</div>
     </div>
@@ -134,7 +135,7 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
     const condO=filtro(usuario,'COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)',po);
     const {rows:oportunidades}=await pool.query(`
       SELECT p.id AS prospecto_id,COALESCE(cv.chatwoot_conversation_id,p.chatwoot_conversation_id) AS chatwoot_conversation_id,p.nombre_negocio,p.contacto,
-        p.estado,to_char(p.demo_fecha, 'YYYY-MM-DD"T"HH24:MI:SS') AS demo_fecha_local,
+        p.estado,p.prueba_vence,to_char(p.demo_fecha, 'YYYY-MM-DD"T"HH24:MI:SS') AS demo_fecha_local,
         u.nombre AS responsable_nombre,s.nombre_contacto,s.inbox_id,s.ultima_entrada
       FROM prospectos p
       LEFT JOIN LATERAL (

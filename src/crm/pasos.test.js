@@ -7,7 +7,7 @@ const AHORA=Date.parse('2026-10-28T14:00:00-03:00');
 test('Próxima acción de cada estado comercial',()=>{
   assert.equal(pasoPorEstado('prospecto').accion,'Coordinar demo');
   assert.equal(pasoPorEstado('sin_respuesta').accion,'Reintentar contacto');
-  assert.equal(pasoPorEstado('demo_realizada').accion,'Cerrar cliente');
+  assert.equal(pasoPorEstado('demo_realizada').accion,'Activar prueba o cerrar cliente');
   assert.equal(pasoPorEstado('confirmado').terminal,true);
   assert.equal(pasoPorEstado('perdido').terminal,true);
 });
@@ -29,4 +29,11 @@ test('Fecha naive de PostgreSQL tratada como hora argentina, no UTC',()=>{
   assert.equal(instanteDemoAR(new Date('2026-10-28T14:30:00Z')),
     Date.parse('2026-10-28T14:30:00-03:00'));
   assert.equal(pasoPorEstado('demo_coordinada',null,AHORA).accion,'Confirmar fecha de la demo');
+});
+
+test('La etapa Prueba tiene seguimiento antes de contratar o perder',()=>{
+  const p=pasoPorEstado('prueba');
+  assert.equal(p.tipo,'seguimiento');
+  assert.equal(p.terminal,false);
+  assert.match(p.accion,/vencimiento/);
 });

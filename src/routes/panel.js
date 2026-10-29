@@ -9,6 +9,7 @@ const ESTADOS = {
   prospecto: { label: "Prospecto", color: "gray" },
   demo_coordinada: { label: "Demo coordinada", color: "blue" },
   demo_realizada: { label: "Demo realizada", color: "purple" },
+  prueba: { label: "Prueba", color: "blue" },
   confirmado: { label: "Confirmado ✓", color: "green" },
   perdido: { label: "Perdido", color: "red" },
 };
@@ -23,7 +24,8 @@ const PROXIMA_ACCION = {
   prospecto: "Coordinar demo",
   sin_respuesta: "Reintentar contacto",
   demo_coordinada: "Realizar demo",
-  demo_realizada: "Cerrar cliente",
+  demo_realizada: "Activar prueba o cerrar cliente",
+  prueba: "Definir contratación al vencer la prueba",
   confirmado: "Implementación",
   perdido: "Sin acción",
 };
@@ -220,6 +222,7 @@ const ORIGEN_LABEL = {
           <td>
                       <div class="prospect-contact">${esc(p.contacto || "—")}</div>
                       ${p.propuesta_texto ? `<div class="prospect-next"><i class="ti ti-message-check"></i> Propuesta cargada</div>` : ""}
+          ${p.estado === 'prueba' && p.prueba_vence ? `<div class="prospect-next">🧪 ${new Date(p.prueba_vence).getTime() <= Date.now() ? 'Prueba vencida' : 'Prueba vigente'} · Vence ${esc(new Intl.DateTimeFormat('es-AR',{timeZone:'America/Argentina/Buenos_Aires',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(p.prueba_vence)))}</div>` : ''}
                     </td>
                     <td>${esc(p.telefono || "—")}</td>
                     <td>${esc(p.rubro || "—")}</td>
@@ -1417,7 +1420,7 @@ const filtroUsuarioControl = esAdminControl
           OR EXISTS (
             SELECT 1 FROM historial_estados h
             WHERE h.prospecto_id = p.id
-              AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','confirmado')
+              AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','prueba','confirmado')
           )
         )
       GROUP BY 1
@@ -1451,10 +1454,10 @@ const gestionQuery = await pool.query(`
       (
         cv.derivado = true
         OR p.demo_fecha IS NOT NULL
-        OR p.estado IN ('demo_coordinada','demo_realizada','confirmado')
+        OR p.estado IN ('demo_coordinada','demo_realizada','prueba','confirmado')
         OR EXISTS (
           SELECT 1 FROM historial_estados h WHERE h.prospecto_id = p.id
-          AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','confirmado')
+          AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','prueba','confirmado')
         )
       ) AS efectivamente_derivado
     FROM control_ventas cv
@@ -1470,6 +1473,7 @@ const gestionQuery = await pool.query(`
     SELECT CASE
       WHEN estado_prospecto = 'confirmado' THEN 'confirmados'
       WHEN estado_prospecto = 'perdido' THEN 'perdidos'
+      WHEN estado_prospecto = 'prueba' THEN 'prueba'
       WHEN estado_prospecto = 'demo_realizada' THEN 'demo_realizada'
       WHEN estado_prospecto = 'demo_coordinada' OR fecha_demo IS NOT NULL THEN 'demo_coordinada'
       WHEN fecha_primera_respuesta_vendedor IS NULL THEN 'sin_atender'
@@ -1484,7 +1488,7 @@ const gestionQuery = await pool.query(`
 `, params);
 const gestion = Object.fromEntries([
   'sin_atender', 'en_seguimiento',
-  'demo_coordinada', 'demo_realizada', 'confirmados', 'perdidos'
+  'demo_coordinada', 'demo_realizada', 'prueba', 'confirmados', 'perdidos'
 ].map(etapa => [etapa, 0]));
 for (const fila of gestionQuery.rows) gestion[fila.etapa] = Number(fila.cantidad);
 const totalGestion = Object.values(gestion).reduce((a, b) => a + b, 0);
@@ -1502,10 +1506,10 @@ const embudoVendedores = await pool.query(`
       (
         COALESCE(cv.derivado, FALSE) = TRUE
         OR p.demo_fecha IS NOT NULL
-        OR p.estado IN ('demo_coordinada','demo_realizada','confirmado')
+        OR p.estado IN ('demo_coordinada','demo_realizada','prueba','confirmado')
         OR EXISTS (
           SELECT 1 FROM historial_estados h WHERE h.prospecto_id = p.id
-          AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','confirmado')
+          AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','prueba','confirmado')
         )
       ) AS derivado_efectivo,
       (
@@ -1819,7 +1823,8 @@ ${esAdminControl ? `
       ${renderControlStatCard({title:'Sin atender', value:gestion.sin_atender,description:`${formatConversionRate(gestion.sin_atender,totalGestion)} de derivados · Sin primera respuesta humana`,cardClass:'stat-no-response'})}
       ${renderControlStatCard({title:'En conversación', value:gestion.en_seguimiento,description:`${formatConversionRate(gestion.en_seguimiento,totalGestion)} · Atendidos por un vendedor, sin otro estado comercial registrado`,cardClass:'stat-other'})}
       ${renderControlStatCard({title:'Demo coordinada', value:gestion.demo_coordinada,description:`${formatConversionRate(gestion.demo_coordinada,totalGestion)} · Pendiente de realizar`,cardClass:'stat-google'})}
-      ${renderControlStatCard({title:'Demo realizada', value:gestion.demo_realizada,description:`${formatConversionRate(gestion.demo_realizada,totalGestion)} · Pendiente de cierre`,cardClass:'stat-meta'})}
+      ${renderControlStatCard({title:'Demo realizada', value:gestion.demo_realizada,description:`${formatConversionRate(gestion.demo_realizada,totalGestion)} · Pendiente de próximo paso`,cardClass:'stat-meta'})}
+      ${renderControlStatCard({title:'Prueba', value:gestion.prueba,description:`${formatConversionRate(gestion.prueba,totalGestion)} · Pruebas activadas (7 días)`,cardClass:'stat-google'})}
       ${renderControlStatCard({title:'Confirmados', value:gestion.confirmados,description:`${formatConversionRate(gestion.confirmados,totalGestion)} · Contratación confirmada`,cardClass:'stat-confirmed'})}
       ${renderControlStatCard({title:'Perdidos', value:gestion.perdidos,description:`${formatConversionRate(gestion.perdidos,totalGestion)} · Cierre negativo`,cardClass:'stat-error'})}
     </div>

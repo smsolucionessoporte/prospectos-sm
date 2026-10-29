@@ -82,11 +82,11 @@ test('Sin respuesta comercial, la próxima acción es Reintentar contacto',()=>{
   assert.equal(visibles[0].descripcion,'Reintentar contacto');
 });
 
-test('Demo realizada con tarea automática de cierre conserva fecha y prioridad, pero dice Cerrar cliente',()=>{
+test('Demo realizada ofrece activar prueba o cerrar cliente, con fecha y prioridad',()=>{
   const {visibles}=agenda({oportunidades:[{...oportunidad(17,'Julio'),estado:'demo_realizada'}],tareas:[
     tarea(17,{origen:'demo',descripcion:'Contactar después de la demostración y definir próximo paso'})
   ]});
-  assert.equal(visibles[0].descripcion,'Cerrar cliente');
+  assert.equal(visibles[0].descripcion,'Activar prueba o cerrar cliente');
   assert.equal(visibles[0].prioridad,'alta');
   assert.ok(visibles[0].vence_en);
 });
@@ -105,4 +105,16 @@ test('El mensaje entrante sin respuesta mantiene el paso Responder al cliente',(
   ]});
   assert.equal(visibles[0].descripcion,'Responder el último mensaje del cliente');
   assert.equal(visibles[0].requiere_respuesta,true);
+});
+
+test('Prueba conserva recordatorio de siete días y prioridad alta',()=>{
+  const p={...oportunidad(25,'Comercio en prueba'),estado:'prueba',prueba_vence:'2026-11-05T17:00:00.000Z'};
+  const {visibles}=agenda({oportunidades:[p],tareas:[tarea(25,{
+    origen:'prueba',recordatorio:true,vence_en:p.prueba_vence,
+    descripcion:'Revisar vencimiento de la prueba y definir contratación'
+  })]});
+  assert.equal(visibles.length,1);
+  assert.equal(visibles[0].recordatorio,true);
+  assert.equal(visibles[0].vence_en,p.prueba_vence);
+  assert.equal(visibles[0].descripcion,'Revisar vencimiento de la prueba y definir contratación');
 });

@@ -59,7 +59,7 @@ async function renderSeguimientosFicha(p, usuario, tareaSeleccionada) {
       </form>` : '<p class="crm-help">Solo el responsable comercial o un administrador puede registrar nuevas gestiones de este prospecto.</p>';
   return `<section class="detail-section crm-ficha-section" id="seguimientos">
     <div class="section-title-row"><i class="ti ti-notes"></i><span>Seguimientos comerciales</span></div>
-    ${p.estado === 'demo_realizada' ? `<p class="crm-help">Si el cliente confirma o no continúa, usá las acciones de cierre de esta ficha; eso retira sus tareas de la agenda.</p>` : ''}
+    ${['demo_realizada','prueba'].includes(p.estado) ? `<p class="crm-help">Si el cliente confirma o no continúa, usá las acciones de cierre de esta ficha; eso retira sus tareas de la agenda.</p>` : ''}
     ${formulario}
     <p class="crm-help">Las gestiones guardadas también aparecen en el Historial de la ficha.</p>
     <h3 class="crm-ficha-subtitulo">Agenda pendiente (${tareas.length})</h3>${pendientes}

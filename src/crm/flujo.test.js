@@ -126,7 +126,7 @@ test('Agenda de demos propone Dar demo antes y Cargar relevamiento o reagendar d
   assert.ok(!res.cuerpo.includes('href="/prospectos/401/relevamiento"'));
 });
 
-test('Agenda comercial muestra Coordinar demo y Cerrar cliente según la etapa',async()=>{
+test('Agenda comercial muestra Coordinar demo y Activar prueba o cerrar cliente según la etapa',async()=>{
   process.env.CHATWOOT_URL='https://chatwoot.example.com';process.env.CHATWOOT_API_TOKEN='token-para-test';
   const now=new Date();
   pool.query=async sql=>{
@@ -140,6 +140,6 @@ test('Agenda comercial muestra Coordinar demo y Cerrar cliente según la etapa',
   const res=mockRes();await getAgenda({session:{usuario},path:'/crm',query:{}},res);
   assert.equal(res.codigo,200);
   assert.ok(res.cuerpo.includes('Coordinar demo'));
-  assert.ok(res.cuerpo.includes('Cerrar cliente'));
+  assert.ok(res.cuerpo.includes('Activar prueba o cerrar cliente'));
   assert.ok(!res.cuerpo.includes('Registrar la próxima gestión comercial'));
 });

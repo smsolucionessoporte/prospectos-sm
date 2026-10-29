@@ -36,7 +36,9 @@ function pasoPorEstado(estado, demoFecha, ahora = Date.now()) {
         : { accion: 'Cargar relevamiento o reagendar', tipo: 'demo', vencimiento: instante, terminal: false, demoVencida: true };
     }
     case 'demo_realizada':
-      return { accion: 'Cerrar cliente', tipo: 'cierre', terminal: false };
+      return { accion: 'Activar prueba o cerrar cliente', tipo: 'cierre', terminal: false };
+    case 'prueba':
+      return { accion: 'Contactar al cliente antes del vencimiento y definir contratación', tipo: 'seguimiento', terminal: false };
     case 'confirmado':
     case 'perdido':
       return { accion: null, tipo: null, terminal: true };
