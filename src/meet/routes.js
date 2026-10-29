@@ -7,6 +7,7 @@ const {AGENTE_TELEFONO}=require('../zoomAgentes');
 const {vendedorAsignado,puedeGestionar}=require('../crm/seguimientos');
 const {MEET_GRUPAL,checkSlot,parseLocal,crearReunionMeet,cancelarReunionMeet}=require('./calendar');
 const {issue,verify}=require('./booking-token');
+const {destinatariosDemo}=require('./destinatarios');
 const router=express.Router();
 const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const SITE=()=>String(process.env.PUBLIC_BASE_URL||'https://prospectos-sm-production.up.railway.app').replace(/\/$/,'');
@@ -36,9 +37,10 @@ async function guardarAvisos(client,p,clave,mensajeCliente,mensajeInterno){
  const id=Number(p.id), cid=p.chatwoot_conversation_id;
  const destinos=[
    ...(cid||p.telefono?[{destino:'cliente',destinatario:null,telefono:p.telefono,conversacion:cid,mensaje:mensajeCliente}]:[]),
-   ...(seller&&[8,12,13].includes(seller)?[{destino:'vendedor',destinatario:seller,telefono:null,conversacion:null,mensaje:mensajeInterno}]:[]),
-   {destino:'equipo-marisol',destinatario:6,telefono:process.env.DEMO_TELEFONO_MARISOL||AGENTE_TELEFONO[6],conversacion:null,mensaje:mensajeInterno},
-   {destino:'equipo-roman',destinatario:10,telefono:process.env.DEMO_TELEFONO_ROMAN||AGENTE_TELEFONO[10],conversacion:null,mensaje:mensajeInterno}
+   ...destinatariosDemo(seller, mensajeInterno, {
+     6: process.env.DEMO_TELEFONO_MARISOL || AGENTE_TELEFONO[6],
+     10: process.env.DEMO_TELEFONO_ROMAN || AGENTE_TELEFONO[10],
+   })
  ];
  for(const n of destinos){
   if(!n.mensaje) continue;
@@ -116,7 +118,7 @@ router.post('/demo/reservar',express.urlencoded({extended:false}),async(req,res)
    else {
    await client.query("UPDATE prospectos SET demo_solicitud='pendiente_personalizada',actualizado_en=NOW() WHERE id=$1",[p.id]);
    await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,nota) VALUES($1,$2,$2,$3)',[p.id,p.estado,'Solicitó otro horario de demostración desde enlace de reserva']);
-   const m=`📅 *SOLICITUD DE DEMO PERSONALIZADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n👨‍💼 Vendedor asignado: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}`;
+   const m=`📅 *SOLICITUD DE DEMO PERSONALIZADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n👨‍💼 Vendedor asignado: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
    await guardarAvisos(client,p,`personalizada:pendiente`,null,m);
    }
   }else{
@@ -126,7 +128,7 @@ router.post('/demo/reservar',express.urlencoded({extended:false}),async(req,res)
      recordatorio_enviado=false,recordatorio_relevamiento_enviado=false,actualizado_en=NOW() WHERE id=$1`,[p.id,fecha,`grupal_${slot.slot}`,slot.url]);
    await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,nota) VALUES($1,$2,$3,$4)',[p.id,p.estado,'demo_coordinada',`Inscripción web: demostración grupal ${slot.slot.toUpperCase()} ${fecha} · Meet ${slot.url}`]);
    const text=mensajeDemo(p,slot.utc,slot.url,false);
-   const m=`📅 *NUEVA INSCRIPCIÓN A DEMO GRUPAL*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} (Buenos Aires)\n🎥 ${slot.url}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}`;
+   const m=`📅 *NUEVA INSCRIPCIÓN A DEMO GRUPAL*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} (Buenos Aires)\n🎥 ${slot.url}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
    await guardarAvisos(client,p,`inscripcion:${fecha}`,text,m);
   }
   await client.query('COMMIT');success=true;
@@ -163,7 +165,7 @@ router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:fals
     recordatorio_relevamiento_enviado=false,actualizado_en=NOW() WHERE id=$1`,[p.id,fecha,custom?'personalizada':`grupal_${slot.slot}`,url,meeting?.eventId||null]);
   await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota) VALUES($1,$2,$3,$4,$5)',[p.id,actual.estado,'demo_coordinada',req.session.usuario.id,`Demostración ${custom?'personalizada':'grupal'} en Google Meet · ${fecha} · ${url}`]);
   const seller=await vendedorAsignado(p),text=mensajeDemo(p,slot.utc,url,custom);
-  const intern=`📅 *DEMO COORDINADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} Buenos Aires\n🎥 ${url}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}`;
+  const intern=`📅 *DEMO COORDINADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} Buenos Aires\n🎥 ${url}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
   await guardarAvisos(client,p,`manual:${fecha}`,text,intern);
   await client.query('COMMIT');setImmediate(()=>procesarAvisos().catch(console.error));
   return res.redirect(`/prospectos/${p.id}`);
