@@ -136,12 +136,144 @@ router.post('/demo/reservar',express.urlencoded({extended:false}),async(req,res)
  finally{client.release();}
  if(success){setImmediate(()=>procesarAvisos().catch(console.error));return res.send(htmlReserva('',personal?'<p>✅ Recibimos tu solicitud. Un asesor te contactará para coordinar un horario personalizado.</p>':'<p>✅ Tu demostración grupal quedó registrada. Recibirás los datos por WhatsApp. Si no llegan, consultá con tu asesor.</p>'));}
 });
+// Vista interna de coordinación: estilos propios y aislados, sin alterar otras pantallas.
+function vistaCoordinarDemo(p){
+ const minFecha=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ return `
+ <style>
+ .meet-page{max-width:930px;margin:0 auto;padding:6px 0 36px;color:#17233c}
+ .meet-page *{box-sizing:border-box}
+ .meet-back{display:inline-flex;align-items:center;gap:6px;margin-bottom:22px;color:#52627a;font-size:13px;text-decoration:none}
+ .meet-back:hover{color:#2563eb}
+ .meet-eyebrow{display:flex;align-items:center;gap:7px;color:#2563eb;text-transform:uppercase;letter-spacing:.1em;font-size:11px;font-weight:750;margin-bottom:8px}
+ .meet-heading{font-size:28px;line-height:1.18;font-weight:760;letter-spacing:-.035em;margin:0 0 8px;color:#16213b}
+ .meet-description{font-size:14px;color:#65728a;line-height:1.6;margin:0 0 24px}
+ .meet-card{background:#fff;border:1px solid #dfe5ee;border-radius:16px;box-shadow:0 8px 28px rgba(27,40,72,.045);overflow:hidden}
+ .meet-section{padding:24px 28px;border-bottom:1px solid #e9edf4}
+ .meet-section:last-child{border-bottom:none}
+ .meet-section-title{display:flex;align-items:center;gap:11px;font-size:15px;font-weight:700;margin:0 0 17px;color:#16213b}
+ .meet-number{display:inline-grid;place-items:center;width:26px;height:26px;background:#edf3ff;color:#2563eb;border-radius:8px;font-weight:800;font-size:12px}
+ .meet-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+ .meet-tile{display:block;margin:0;cursor:pointer;background:#fff;border:1.5px solid #e0e6f0;border-radius:12px;padding:16px;position:relative;min-height:138px;transition:border-color .18s,background .18s,box-shadow .18s}
+ .meet-tile:hover{border-color:#92b5f6}
+ .meet-tile.selected,.meet-tile:has(input:checked){border-color:#2563eb;background:#f5f9ff;box-shadow:0 0 0 2px rgba(37,99,235,.09)}
+ .meet-tile input{position:absolute;right:15px;top:17px;accent-color:#2563eb;width:16px;height:16px;margin:0}
+ .meet-tile-icon{display:inline-grid;place-items:center;width:33px;height:33px;border-radius:9px;background:#f1f4f9;color:#526985;font-size:17px;margin-bottom:11px}
+ .meet-tile.selected .meet-tile-icon,.meet-tile:has(input:checked) .meet-tile-icon{background:#e2edff;color:#2563eb}
+ .meet-tile-name{display:block;color:#17233c;font-size:13px;font-weight:700;padding-right:12px;margin-bottom:4px}
+ .meet-tile-sub{display:block;color:#6d798d;font-size:12px;line-height:1.4;font-weight:400}
+ .meet-fields{display:grid;grid-template-columns:minmax(0,330px);gap:15px}
+ .meet-fields.personalized{grid-template-columns:repeat(2,minmax(0,330px))}
+ .meet-field-label{display:block;margin:0 0 7px;color:#394965;font-size:12px;font-weight:650}
+ .meet-page input[type=date],.meet-page input[type=time]{display:block;width:100%;height:43px;border:1px solid #cfd8e6;border-radius:9px;background:white;color:#16213b;padding:0 12px;font-size:14px;font-family:inherit}
+ .meet-page input:focus-visible{outline:3px solid rgba(37,99,235,.18);border-color:#2563eb}
+ .meet-muted{font-size:12px;color:#718096;line-height:1.5;margin:9px 0 0}
+ .meet-footer{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:20px 28px;background:#fcfdff}
+ .meet-footer-note{display:flex;align-items:center;gap:8px;font-size:12px;color:#718096}
+ .meet-footer-note i{font-size:17px;color:#64748b}
+ .meet-button{display:inline-flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:9px;background:#2563eb;color:white;min-height:43px;padding:11px 19px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
+ .meet-button:hover{background:#1d4ed8}
+ .meet-button:disabled{opacity:.65;cursor:wait}
+ .meet-error{display:none;margin-top:13px;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:9px;padding:10px 13px;font-size:12px}
+ .meet-error.visible{display:block}
+ .meet-hidden{display:none}
+ @media(max-width:720px){.meet-heading{font-size:23px}.meet-choices{grid-template-columns:1fr}.meet-tile{min-height:unset;padding:14px 16px 14px 60px}.meet-tile-icon{position:absolute;left:14px;top:16px}.meet-tile-name{margin-top:3px}.meet-section{padding:19px 17px}.meet-fields,.meet-fields.personalized{grid-template-columns:1fr}.meet-footer{padding:17px;align-items:stretch;flex-direction:column}.meet-button{width:100%}.meet-footer-note{order:2}}
+ </style>
+ <div class="meet-page">
+  <a class="meet-back" href="/prospectos/${p.id}"><i class="ti ti-arrow-left"></i> Volver a la ficha del prospecto</a>
+  <div class="meet-eyebrow"><i class="ti ti-video"></i> SM COMERCIAL · DEMOSTRACIONES</div>
+  <h1 class="meet-heading">Coordinar demostración</h1>
+  <p class="meet-description">Seleccioná un turno de Google Meet para <strong>${esc(p.contacto||p.nombre_negocio||'el prospecto')}</strong>. La confirmación se enviará por WhatsApp y quedará registrada en la ficha.</p>
+  <form id="meet-booking-form" class="meet-card" action="/prospectos/${p.id}/demo" method="post">
+   <section class="meet-section">
+    <h2 class="meet-section-title"><span class="meet-number">1</span> Elegí la modalidad</h2>
+    <div class="meet-choices" role="radiogroup" aria-label="Modalidad de demostración">
+     <label class="meet-tile selected" data-meet-tile>
+      <input type="radio" name="tipo" value="am" checked>
+      <span class="meet-tile-icon"><i class="ti ti-sun"></i></span>
+      <span class="meet-tile-name">Turno mañana</span>
+      <span class="meet-tile-sub">10:30 a 11:00 · Grupal</span>
+     </label>
+     <label class="meet-tile" data-meet-tile>
+      <input type="radio" name="tipo" value="pm">
+      <span class="meet-tile-icon"><i class="ti ti-sunset"></i></span>
+      <span class="meet-tile-name">Turno tarde</span>
+      <span class="meet-tile-sub">15:30 a 16:00 · Grupal</span>
+     </label>
+     <label class="meet-tile" data-meet-tile>
+      <input type="radio" name="tipo" value="personalizada">
+      <span class="meet-tile-icon"><i class="ti ti-calendar-time"></i></span>
+      <span class="meet-tile-name">Otro horario</span>
+      <span class="meet-tile-sub">Reunión individual · A coordinar</span>
+     </label>
+    </div>
+   </section>
+   <section class="meet-section">
+    <h2 class="meet-section-title"><span class="meet-number">2</span> Seleccioná la fecha</h2>
+    <div class="meet-fields" id="meet-fields">
+     <div><label class="meet-field-label" for="meet-date">Fecha de la demostración</label>
+      <input id="meet-date" name="fecha" type="date" min="${minFecha}" required>
+      <p class="meet-muted" id="meet-date-note">Disponible de lunes a viernes, 10:30 o 15:30 según el turno elegido.</p>
+     </div>
+     <div id="meet-time-wrap" class="meet-hidden"><label class="meet-field-label" for="meet-time">Horario personalizado (Buenos Aires)</label>
+      <input id="meet-time" name="hora" type="time" value="11:00" disabled>
+      <p class="meet-muted">Duración máxima de 30 minutos.</p>
+     </div>
+    </div>
+    <p class="meet-error" id="meet-error" role="alert"></p>
+   </section>
+   <div class="meet-footer">
+    <span class="meet-footer-note"><i class="ti ti-shield-check"></i> Se registra en la ficha y se envía una única confirmación.</span>
+    <button class="meet-button" id="meet-confirm" type="submit"><i class="ti ti-calendar-check"></i> Confirmar demostración</button>
+   </div>
+  </form>
+ </div>
+ <script>
+ (()=>{
+  const form=document.getElementById('meet-booking-form');
+  const date=document.getElementById('meet-date');
+  const time=document.getElementById('meet-time');
+  const timeWrap=document.getElementById('meet-time-wrap');
+  const note=document.getElementById('meet-date-note');
+  const fields=document.getElementById('meet-fields');
+  const error=document.getElementById('meet-error');
+  const submit=document.getElementById('meet-confirm');
+  const radios=[...form.querySelectorAll('input[name="tipo"]')];
+  function currentType(){return radios.find(r=>r.checked)?.value||'am';}
+  function refresh(){
+   const type=currentType(),custom=type==='personalizada';
+   form.querySelectorAll('[data-meet-tile]').forEach(tile=>tile.classList.toggle('selected',tile.querySelector('input').checked));
+   timeWrap.classList.toggle('meet-hidden',!custom);fields.classList.toggle('personalized',custom);time.disabled=!custom;time.required=custom;
+   note.textContent=custom?'Elegí la fecha acordada con el prospecto.':'Turnos grupales de lunes a viernes.';
+   error.textContent='';error.classList.remove('visible');
+  }
+  radios.forEach(r=>r.addEventListener('change',refresh));refresh();
+  form.addEventListener('submit',event=>{
+   const type=currentType(),d=date.value;
+   let problem='';
+   if(!d)problem='Seleccioná una fecha.';
+   else if(type!=='personalizada'){
+    const weekday=new Date(d+'T12:00:00Z').getUTCDay();
+    if(weekday===0||weekday===6)problem='Los turnos grupales están disponibles de lunes a viernes.';
+    else {
+     const start=new Date(d+'T'+(type==='am'?'10:30':'15:30')+':00-03:00');
+     if(start.getTime()<Date.now()+15*60000)problem='Elegí un turno futuro con al menos 15 minutos de anticipación.';
+    }
+   }else if(time.value){
+    const start=new Date(d+'T'+time.value+':00-03:00');
+    if(start.getTime()<=Date.now())problem='Elegí una fecha y hora futuras.';
+   }
+   if(problem){event.preventDefault();error.textContent=problem;error.classList.add('visible');return;}
+   submit.disabled=true;submit.innerHTML='<i class="ti ti-loader-2"></i> Registrando...';
+  });
+ })();
+ </script>`;
+}
 router.get('/prospectos/:id/demo',requireAuth,async(req,res)=>{
  const {rows}=await pool.query('SELECT * FROM prospectos WHERE id=$1',[req.params.id]);const p=rows[0];if(!p)return res.status(404).send('Prospecto no encontrado');
  if(!await puedeGestionar(p,req.session.usuario))return res.status(403).send('Sin permisos sobre este prospecto');
  if(!['prospecto','sin_respuesta'].includes(p.estado))return res.status(409).send('Este prospecto ya no está pendiente de coordinar demo');
- const content=`<a href="/prospectos/${p.id}">Volver a la ficha</a><h1>Coordinar demostración con Google Meet</h1><p>Prospecto: ${esc(p.contacto||p.nombre_negocio)}. Las demostraciones grupales usan los enlaces fijos de SM Soluciones.</p><form method="post" action="/prospectos/${p.id}/demo"><label>Tipo de reunión<select name="tipo" required><option value="am">Grupal AM · 10:30 a 11:00</option><option value="pm">Grupal PM · 15:30 a 16:00</option><option value="personalizada">Personalizada · crear Google Meet</option></select></label><label>Fecha<input name="fecha" type="date" required></label><label>Hora personalizada (solo si elegís personalizada)<input name="hora" type="time" value="11:00"></label><p class="muted">Para crear Meet personalizado es necesario conectar Google Calendar con permisos de grabación. No se confirma la demo si Google rechaza crearla.</p><button type="submit">Registrar y enviar confirmación</button></form>`;
- return res.send(layout('Coordinar demo en Meet',content,req));
+ return res.send(layout('Coordinar demo en Meet',vistaCoordinarDemo(p),req));
 });
 router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:false}),async(req,res)=>{
  const {rows}=await pool.query('SELECT * FROM prospectos WHERE id=$1',[req.params.id]);const p=rows[0];if(!p)return res.status(404).send('Prospecto no encontrado');
