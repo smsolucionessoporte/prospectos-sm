@@ -3487,7 +3487,7 @@ if (chatwootConversationId) {
       }
 
       // ---------------------------------------------------------
-      // 2. AVISO AL GRUPO
+      // 2. AVISO INDIVIDUAL AL RESPONSABLE COMERCIAL
       // ---------------------------------------------------------
 
       try {
@@ -3503,6 +3503,20 @@ if (chatwootConversationId) {
             "No se pudo recuperar el prospecto confirmado",
           );
         }
+
+        // El nombre del responsable de una demo no está disponible en esta ruta.
+        // Resolver el vendedor real de la oportunidad una sola vez y usarlo
+        // tanto en el texto como en el destinatario del aviso individual.
+        const responsableComercialId = await vendedorAsignado(full);
+        if (!responsableComercialId) {
+          throw new Error('No se pudo identificar al responsable comercial de este cliente');
+        }
+        const { rows: responsableComercialRows } = await pool.query(
+          'SELECT nombre FROM usuarios WHERE id=$1',
+          [responsableComercialId],
+        );
+        const nombreResponsableComercial =
+          responsableComercialRows[0]?.nombre || `Usuario #${responsableComercialId}`;
 
         const nombreParaGrupo =
           full.nombre_negocio ||
@@ -3521,11 +3535,11 @@ if (chatwootConversationId) {
           `📦 Plan ofrecido: ${full.plan_ofrecido || "—"}\n\n` +
           `⭐ Módulos contratados: ${(full.modulos_contratados || []).join(", ") || "—"}\n` +
           `🛠️ Equipamiento: ${(full.equipamiento || []).join(", ") || "—"}${full.equip_observaciones ? ` — ${full.equip_observaciones}` : ""}\n\n` +
-          `👨‍💼 Vendedor a cargo: ${nombreResponsable}\n` +
+          `👨‍💼 Responsable comercial: ${nombreResponsableComercial}\n` +
           `👉 Ver prospecto: ${linkProspecto}`;
 
         const avisoEnviado =
-          await enviarAvisoInterno(mensajeAlta, await vendedorAsignado(full));
+          await enviarAvisoInterno(mensajeAlta, responsableComercialId);
 
         if (avisoEnviado) {
           console.log(
