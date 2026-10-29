@@ -1165,7 +1165,7 @@ function renderControlStatCard({
 
 
 // Control: admin + vendedores
-router.get("/control", requireAuth, requireRol("admin", "vendedor", "control"), async (req, res) => {
+router.get("/control", requireAuth, requireRol("admin", "control"), async (req, res) => {
     try {
     // Usuario actual
     const usuarioControl = req.session.usuario;
