@@ -3,6 +3,7 @@
 const axios = require('axios');
 const { pool } = require('../db');
 const { AGENTE_CHATWOOT_ID } = require('../zoomAgentes');
+const { esContactoInterno, tieneAtributoInterno, esGrupoWhatsapp } = require('./internal-contact');
 
 const VENTANA_DIAS = 45;
 const MAX_POR_RONDA = 40;
@@ -29,6 +30,25 @@ async function detalleChatwoot(cfg, id) {
   }
   if (!messages.length) throw new Error('Chatwoot no devolvió mensajes para verificar');
   return { ...data, messages };
+}
+
+async function esConversacionExcluida(cfg, chat) {
+  const meta = chat.meta || {};
+  const sender = meta.sender || chat.contact || {};
+  if (esGrupoWhatsapp(sender.identifier, sender.phone_number, chat.contact_inbox?.source_id, chat.source_id)) return true;
+  const atributos = sender.custom_attributes || chat.contact?.custom_attributes || chat.custom_attributes;
+  if (esContactoInterno(atributos)) return true;
+  const id = Number(sender.id || chat.contact?.id || 0);
+  if (tieneAtributoInterno(atributos) || !Number.isSafeInteger(id) || id <= 0) return false;
+  const respuesta = await axios.get(`${cfg.url}/contacts/${id}`, { headers: cfg.headers, timeout: 8000 });
+  const contacto = respuesta.data?.payload || respuesta.data || {};
+  return esContactoInterno(contacto.custom_attributes);
+}
+
+async function excluirDeAgenda(chatId) {
+  await pool.query('UPDATE crm_chatwoot_estado SET requiere_respuesta=FALSE,ultima_revision=NOW() WHERE chatwoot_conversation_id=$1', [chatId]);
+  await pool.query(`UPDATE crm_tareas SET estado='completada',completada_en=NOW(),actualizada_en=NOW()
+    WHERE clave_automatica=$1 AND estado='pendiente'`, [`respuesta:${chatId}`]);
 }
 
 async function grabarRevision(row, chat) {
@@ -118,7 +138,11 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
       await Promise.all(candidatos.rows.slice(i, i + 4).map(async row => {
         try {
           const chat = await detalleChatwoot(cfg, row.chatwoot_conversation_id);
-          await grabarRevision(row, chat);
+          if (await esConversacionExcluida(cfg, chat)) {
+            await excluirDeAgenda(row.chatwoot_conversation_id);
+          } else {
+            await grabarRevision(row, chat);
+          }
           procesadas++;
         } catch (err) {
           errores++;
@@ -144,4 +168,4 @@ function iniciarSincronizacionCRM() {
     { timezone: 'America/Argentina/Buenos_Aires' });
 }
 
-module.exports = { sincronizarCRM, iniciarSincronizacionCRM, configuracion, estadoSincronizacion: () => ({ ...ultimoResultado }) };
+module.exports = { sincronizarCRM, iniciarSincronizacionCRM, configuracion, esConversacionExcluida, estadoSincronizacion: () => ({ ...ultimoResultado }) };
