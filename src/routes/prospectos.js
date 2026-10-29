@@ -6,6 +6,7 @@ const { requireAuth, requireRol, layout } = require("../middleware/auth");
 const { renderSeguimientosFicha, puedeGestionar, vendedorAsignado } = require("../crm/seguimientos");
 const { pasoPorEstado } = require("../crm/pasos");
 const { activarPrueba, procesarAvisosPrueba, estadoPrueba } = require("../crm/prueba");
+const { periodoPruebaManual } = require("../crm/prueba-manual");
 const {checkSlot,crearReunionMeet,cancelarReunionMeet,parseLocal}=require("../meet/calendar");
 const {
   AGENTE_ZOOM,
@@ -1507,14 +1508,6 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
     const gestionaEtapa = (['admin','vendedor'].includes(req.session.usuario.rol) ||
       (req.session.usuario.rol === 'soporte' && p.origen === 'prospecto-interno')) &&
       await puedeGestionar(p,req.session.usuario);
-    if (gestionaEtapa && ['prospecto','sin_respuesta'].includes(p.estado)) {
-      const siguiente = p.estado === 'prospecto' ? 'sin_respuesta' : 'prospecto';
-      const texto = siguiente === 'sin_respuesta' ? 'Marcar sin respuesta' : 'Volver a prospecto';
-      acciones.push(`<form method="post" action="/prospectos/${p.id}/estado" style="display:inline"
-        onsubmit="return confirm('¿Confirmás el cambio de estado comercial?')">
-        <input type="hidden" name="estado" value="${siguiente}">
-        <button class="btn btn-secondary" type="submit"><i class="ti ti-flag"></i> ${texto}</button></form>`);
-    }
     if (["prospecto", "sin_respuesta"].includes(p.estado)) {
       acciones.push(`
           <a href="/prospectos/${p.id}/demo" class="btn btn-primary">
@@ -1660,11 +1653,8 @@ if (req.session.usuario.rol === "admin") {
         </div>
         <div class="detail-grid">
           <div class="detail-item"><span class="detail-label">Módulos de interés</span><span class="detail-val">${(p.modulos || []).join(", ") || "—"}</span></div>
-          <div class="detail-item"><span class="detail-label">Sistema actual</span><span class="detail-val">${esc(p.sistema_actual || "—")} ${p.tiempo_sistema ? "(" + esc(p.tiempo_sistema) + ")" : ""}</span></div>
+          <div class="detail-item"><span class="detail-label">Sistema actual</span><span class="detail-val">${esc(p.sistema_actual || "—")}</span></div>
           <div class="detail-item"><span class="detail-label">Problema sistema actual</span><span class="detail-val">${esc(p.problema_sistema || "—")}</span></div>
-          <div class="detail-item"><span class="detail-label">Necesidades especiales</span><span class="detail-val">${esc(p.necesidades || "—")}</span></div>
-          <div class="detail-item"><span class="detail-label">Cant. productos</span><span class="detail-val">${esc(p.cant_productos || "—")}</span></div>
-          <div class="detail-item"><span class="detail-label">Volumen ventas</span><span class="detail-val">${esc(p.cant_ventas || "—")}</span></div>
           <div class="detail-item"><span class="detail-label">Equipamiento</span><span class="detail-val">${(p.equipamiento || []).join(", ") || "—"} ${p.equip_observaciones ? "— " + esc(p.equip_observaciones) : ""}</span></div>
           <div class="detail-item"><span class="detail-label">Nivel de interés</span><span class="detail-val">
             ${{ alto: "🔥 Alto", medio: "👀 Medio", bajo: "❄️ Bajo" }[p.nivel_interes] || "—"}
@@ -1771,16 +1761,6 @@ if (req.session.usuario.rol === "admin") {
               }           
                 [p.origen] || "—"}</span></div>
               ${p.nota_prospecto ? `<div class="detail-item full"><span class="detail-label">Notas</span><span class="detail-val">${esc(p.nota_prospecto)}</span></div>` : ""}              ${p.demo_fecha ? `<div class="detail-item"><span class="detail-label">Demo agendada</span><span class="detail-val">${new Date(p.demo_fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} — ${esc(p.demo_resp_nombre || "—")}${p.zoom_join_url ? ` — <a href="${p.zoom_join_url}" target="_blank">Entrar a la reunión <i class="ti ti-external-link"></i></a>` : ""}</span></div>` : ""}
-              ${
-                !["confirmado", "perdido"].includes(p.estado)
-                  ? `
-                    <div class="detail-item">
-                      <span class="detail-label">Próxima acción</span>
-                      <span class="detail-val">${esc(pasoPorEstado(p.estado, p.demo_fecha).accion || "—")}</span>
-                    </div>
-                  `
-                  : ""
-              }
 
               <div class="detail-item">
                 <span class="detail-label">Responsable</span>
@@ -1818,7 +1798,6 @@ if (req.session.usuario.rol === "admin") {
             <div class="section-title-row"><i class="ti ti-check-circle"></i><span>Cliente confirmado</span></div>
             <div class="detail-grid">
               ${p.modulos_contratados?.length ? `<div class="detail-item full"><span class="detail-label">Módulos contratados</span><span class="detail-val">${p.modulos_contratados.join(", ")}</span></div>` : ""}
-              ${p.condiciones_comerciales ? `<div class="detail-item full"><span class="detail-label">Condiciones comerciales</span><span class="detail-val">${esc(p.condiciones_comerciales)}</span></div>` : ""}
             </div>
           </div>`
               : ""
@@ -2821,32 +2800,10 @@ router.get("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
               <label>¿Qué sistema usa hoy?</label>
               <input type="text" name="sistema_actual" value="${esc(p.sistema_actual || "")}" placeholder="Ej: Excel, Tango, ninguno...">
             </div>
-            <div class="field">
-              <label>¿Hace cuánto lo usa?</label>
-              <input type="text" name="tiempo_sistema" value="${esc(p.tiempo_sistema || "")}" placeholder="Ej: 2 años">
-            </div>
           </div>
           <div class="field">
             <label>¿Qué problema tiene con el sistema actual?</label>
             <textarea name="problema_sistema" placeholder="No maneja granel, no tiene facturación electrónica...">${esc(p.problema_sistema || "")}</textarea>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="section-title-row"><i class="ti ti-adjustments"></i><span>Necesidades especiales</span><span class="badge-opt">opcional</span></div>
-          <div class="field">
-            <label>Requerimientos específicos o particularidades</label>
-            <textarea name="necesidades" placeholder="Granel con pesaje, múltiples listas de precio, integración contable...">${esc(p.necesidades || "")}</textarea>
-          </div>
-          <div class="grid2">
-            <div class="field">
-              <label>Cantidad estimada de productos</label>
-              <input type="text" name="cant_productos" value="${esc(p.cant_productos || "")}" placeholder="Ej: 500, más de 1000...">
-            </div>
-            <div class="field">
-              <label>Volumen de ventas diarias</label>
-              <input type="text" name="cant_ventas" value="${esc(p.cant_ventas || "")}" placeholder="Ej: 50 tickets/día">
-            </div>
           </div>
         </div>
 
@@ -2999,7 +2956,7 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
 
   try {
     const { rows: estadoRows } = await pool.query(
-      "SELECT estado FROM prospectos WHERE id=$1",
+      "SELECT estado,tiempo_sistema,necesidades,cant_productos,cant_ventas FROM prospectos WHERE id=$1",
       [req.params.id],
     );
 
@@ -3038,11 +2995,11 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
         b.rubro_otro,
         modulos,
         b.sistema_actual,
-        b.tiempo_sistema,
+        estadoRows[0].tiempo_sistema,
         b.problema_sistema,
-        b.necesidades,
-        b.cant_productos,
-        b.cant_ventas,
+        estadoRows[0].necesidades,
+        estadoRows[0].cant_productos,
+        estadoRows[0].cant_ventas,
         equipamiento,
         b.equip_observaciones,
         JSON.stringify(objeciones),
@@ -3957,7 +3914,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
             </div>
           </div>
 
-          <!-- ESTADO: SOLO INFORMATIVO -->
+          <!-- ESTADO Y FECHAS (cambios manuales de administración sin mensajes) -->
           <div class="form-section">
             <div class="section-title-row">
               <i class="ti ti-flag"></i>
@@ -3970,7 +3927,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                 ${
                 req.session.usuario.rol === "admin"
                   ? `
-                    <select name="estado">
+                    <select name="estado" id="estado-prospecto" onchange="actualizarCamposEtapa()">
                       ${[
                         ["prospecto", "Prospecto"],
                         ["demo_coordinada", "Demo coordinada"],
@@ -4003,28 +3960,25 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
               </div>
             </div>
 
-            ${
-            p.demo_fecha
-              ? `
-            <div class="field">
-              <label>Fecha y hora de la demo</label>
+            <div class="field" id="bloque-fecha-demo"
+            style="${p.estado === 'demo_coordinada' ? '' : 'display:none'}">
+            <label>Fecha y hora de la demo</label>
+            <input type="datetime-local" id="demo_fecha" name="demo_fecha"
+              value="${formatearDateTimeLocalAR(p.demo_fecha)}"
+              data-original="${formatearDateTimeLocalAR(p.demo_fecha)}"
+              ${p.estado === 'demo_coordinada' ? 'required' : 'disabled'}>
+            <small class="text-muted">Para reprogramar una demo se utiliza Google Meet.</small>
+          </div>
 
-              <input
-                type="datetime-local"
-                id="demo_fecha"
-                name="demo_fecha"
-                value="${formatearDateTimeLocalAR(p.demo_fecha)}"
-                data-original="${formatearDateTimeLocalAR(p.demo_fecha)}"
-                required
-              >
-
-              <small class="text-muted">
-                Si modificás la fecha, se creará una nueva reunión en Zoom.
-              </small>
-            </div>
-          `
-              : ""
-          }
+          ${u.rol === 'admin' ? `<div class="field" id="bloque-inicio-prueba"
+            style="${p.estado === 'prueba' ? '' : 'display:none'}">
+            <label>Inicio real de la prueba (opcional)</label>
+            <input type="datetime-local" id="prueba_inicio" name="prueba_inicio"
+              value="${formatearDateTimeLocalAR(p.prueba_inicio)}"
+              ${p.estado === 'prueba' && p.prueba_inicio ? 'readonly' : p.estado === 'prueba' ? '' : 'disabled'}>
+            <small class="text-muted">Al corregir manualmente el estado a Prueba, se calculan 7 días desde el inicio real.
+              Si se deja vacío se usa la fecha actual. No se envían mensajes ni avisos.</small>
+          </div>` : ''}
 
           ${
             demoHecha
@@ -4071,52 +4025,11 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                 >
               </div>
 
-              <div class="field">
-                <label>Hace cuánto lo usa</label>
-                <input
-                  type="text"
-                  name="tiempo_sistema"
-                  value="${esc(p.tiempo_sistema || "")}"
-                >
-              </div>
             </div>
 
             <div class="field">
               <label>Problema con el sistema actual</label>
               <textarea name="problema_sistema">${esc(p.problema_sistema || "")}</textarea>
-            </div>
-          </div>
-
-          <!-- NECESIDADES -->
-          <div class="form-section">
-            <div class="section-title-row">
-              <i class="ti ti-adjustments"></i>
-              <span>Necesidades y volumen</span>
-            </div>
-
-            <div class="field">
-              <label>Necesidades especiales</label>
-              <textarea name="necesidades">${esc(p.necesidades || "")}</textarea>
-            </div>
-
-            <div class="grid2">
-              <div class="field">
-                <label>Cantidad de productos</label>
-                <input
-                  type="text"
-                  name="cant_productos"
-                  value="${esc(p.cant_productos || "")}"
-                >
-              </div>
-
-              <div class="field">
-                <label>Volumen de ventas diarias</label>
-                <input
-                  type="text"
-                  name="cant_ventas"
-                  value="${esc(p.cant_ventas || "")}"
-                >
-              </div>
             </div>
           </div>
 
@@ -4206,14 +4119,6 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
                 </select>
               </div>
 
-              <div class="field">
-                <label>Próxima acción</label>
-                <input
-                  type="text"
-                  value="${esc(pasoPorEstado(p.estado,p.demo_fecha).accion || PROXIMA_ACCION[p.estado] || "—")}"
-                  disabled
-                >
-              </div>
             </div>
 
             <div class="field">
@@ -4221,10 +4126,6 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
               <textarea name="obs_generales">${esc(p.obs_generales || "")}</textarea>
             </div>
 
-            <div class="field">
-              <label>Condiciones comerciales</label>
-              <textarea name="condiciones_comerciales">${esc(p.condiciones_comerciales || "")}</textarea>
-            </div>
           </div>
 
           `
@@ -4292,18 +4193,37 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
           sync();
         });
 
+        function actualizarCamposEtapa() {
+          const estado = document.getElementById('estado-prospecto')?.value;
+          const demo = document.getElementById('bloque-fecha-demo');
+          const demoInput = document.getElementById('demo_fecha');
+          if (demo && demoInput) {
+            const visible = estado === 'demo_coordinada';
+            demo.style.display = visible ? '' : 'none';
+            demoInput.disabled = !visible;
+            demoInput.required = visible;
+          }
+          const prueba = document.getElementById('bloque-inicio-prueba');
+          const pruebaInput = document.getElementById('prueba_inicio');
+          if (prueba && pruebaInput) {
+            const visible = estado === 'prueba';
+            prueba.style.display = visible ? '' : 'none';
+            pruebaInput.disabled = !visible;
+          }
+        }
+        actualizarCamposEtapa();
         function confirmarEdicion() {
           const fechaInput = document.getElementById("demo_fecha");
           const reenviarInput = document.getElementById("reenviar_invitacion");
 
-          if (fechaInput) {
+          if (fechaInput && !fechaInput.disabled) {
             const fechaOriginal = fechaInput.dataset.original || "";
             const fechaNueva = fechaInput.value || "";
 
             if (fechaNueva !== fechaOriginal) {
               const continuar = confirm(
                 "Estás modificando la fecha de la demostración.\\n\\n" +
-                "Se creará una nueva reunión en Zoom con la nueva fecha y hora.\\n\\n" +
+                "Se actualizará la reunión de Google Meet con la nueva fecha y hora.\\n\\n" +
                 "¿Querés continuar?"
               );
 
@@ -4325,7 +4245,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
 
           return confirm(
             "¿Confirmás que querés guardar estos cambios?\\n\\n" +
-            "No se cambiará la etapa comercial ni se enviarán mensajes automáticos al cliente."
+            "La corrección manual de etapa no enviará mensajes ni avisos."
           );
         }
       </script>
@@ -4391,10 +4311,29 @@ if (
       };
     }
 
-    // La activación de prueba siempre debe pasar por su operación transaccional.
-    // Rechazar antes de guardar los demás campos para evitar cambios parciales.
+    // Editar es corrección histórica: no es la activación comunicada al cliente.
+    // El botón «Activar prueba» conserva aparte su flujo de notificaciones.
+    let periodoManual = null;
     if (cambioEstado && cambioEstado.nuevo === 'prueba') {
-      return res.status(409).send('Activá la prueba desde la ficha para registrar los 7 días y notificar al cliente y al vendedor');
+      try { periodoManual = periodoPruebaManual(b.prueba_inicio || ''); }
+      catch (error) { return res.status(400).send(error.message); }
+    }
+    if (cambioEstado && cambioEstado.nuevo === 'demo_coordinada' && !actual.demo_fecha)
+      return res.status(409).send('Para coordinar una nueva demostración, usá Coordinar demo.');
+
+    // Regularizar pruebas antiguas que ya figuran en estado Prueba pero no tienen fechas.
+    // Nunca genera notificaciones; tampoco modifica una activación ya registrada.
+    let completarFechasPrueba = null;
+    if (req.session.usuario.rol === 'admin' && actual.estado === 'prueba' &&
+        (!actual.prueba_inicio || !actual.prueba_vence)) {
+      try {
+        const inicio = b.prueba_inicio || formatearDateTimeLocalAR(actual.prueba_inicio);
+        // Si solo sobrevivió el vencimiento, reconstruimos el inicio original.
+        const fechaPorVencimiento = !inicio && actual.prueba_vence
+          ? new Date(new Date(actual.prueba_vence).getTime() - 7*86400000)
+          : new Date();
+        completarFechasPrueba = periodoPruebaManual(inicio,fechaPorVencimiento);
+      } catch (error) { return res.status(400).send(error.message); }
     }
 
     // Detectar si se modificó la fecha/hora de una demo ya coordinada
@@ -4405,6 +4344,7 @@ if (
     const fechaDemoNueva = b.demo_fecha || "";
 
     const cambioFechaDemo =
+      (cambioEstado?.nuevo || actual.estado) === 'demo_coordinada' &&
       Boolean(actual.demo_fecha) &&
       Boolean(fechaDemoNueva) &&
       fechaDemoNueva !== fechaDemoAnterior;
@@ -4537,25 +4477,37 @@ let cambioResponsable = null;
         modulos,
 
         demoHecha ? b.sistema_actual : actual.sistema_actual,
-        demoHecha ? b.tiempo_sistema : actual.tiempo_sistema,
+        actual.tiempo_sistema,
 
         demoHecha ? b.problema_sistema : actual.problema_sistema,
-        demoHecha ? b.necesidades : actual.necesidades,
-        demoHecha ? b.cant_productos : actual.cant_productos,
-        demoHecha ? b.cant_ventas : actual.cant_ventas,
+        actual.necesidades,
+        actual.cant_productos,
+        actual.cant_ventas,
 
         equipamiento,
 
         demoHecha ? b.equip_observaciones : actual.equip_observaciones,
 
         demoHecha ? b.obs_generales : actual.obs_generales,
-        demoHecha ? b.condiciones_comerciales : actual.condiciones_comerciales,
+        actual.condiciones_comerciales,
 
         b.plan_ofrecido || null,
 
         req.params.id,
       ],
     );
+
+      if (completarFechasPrueba) {
+        const corregida = await pool.query(`UPDATE prospectos
+          SET prueba_inicio=$2,
+              prueba_vence=$3,actualizado_en=NOW()
+          WHERE id=$1 AND estado='prueba'`,
+          [req.params.id,completarFechasPrueba.inicio,completarFechasPrueba.vence]);
+        if (corregida.rowCount) await pool.query(`INSERT INTO historial_estados
+          (prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota)
+          VALUES($1,'prueba','prueba',$2,'Se completaron las fechas de prueba (sin notificaciones)')`,
+          [req.params.id,req.session.usuario.id]);
+      }
 
           if (cambioEstado) {
         const estadosPermitidos = [
@@ -4570,39 +4522,41 @@ let cambioResponsable = null;
         if (!estadosPermitidos.includes(cambioEstado.nuevo)) {
           return res.status(400).send("Estado no válido");
         }
-        if (cambioEstado.nuevo === 'prueba' && cambioEstado.anterior !== 'prueba')
-          return res.status(409).send('La prueba debe activarse desde la ficha para registrar los 7 días y enviar los avisos');
-
-        await pool.query(
-          `
-          UPDATE prospectos
-          SET estado = $1,
-              actualizado_en = NOW()
-          WHERE id = $2
-          `,
-          [cambioEstado.nuevo, req.params.id],
-        );
-
-        await pool.query(
-          `
-          INSERT INTO historial_estados
-            (
-              prospecto_id,
-              estado_anterior,
-              estado_nuevo,
-              usuario_id,
-              nota
-            )
-          VALUES ($1, $2, $3, $4, $5)
-          `,
-          [
-            req.params.id,
-            cambioEstado.anterior,
-            cambioEstado.nuevo,
-            req.session.usuario.id,
-            "Estado corregido manualmente desde edición",
-          ],
-        );
+        // Estado e historial en una única transacción. Ningún aviso se crea aquí.
+        const conexion = await pool.connect();
+        try {
+          await conexion.query('BEGIN');
+          const sqlCambio = periodoManual
+            ? `UPDATE prospectos SET estado='prueba',prueba_inicio=$3,prueba_vence=$4,
+                actualizado_en=NOW() WHERE id=$1 AND estado=$2`
+            : `UPDATE prospectos SET estado=$3,actualizado_en=NOW()
+                WHERE id=$1 AND estado=$2`;
+          const paramsCambio = periodoManual
+            ? [req.params.id,cambioEstado.anterior,periodoManual.inicio,periodoManual.vence]
+            : [req.params.id,cambioEstado.anterior,cambioEstado.nuevo];
+          const guardado = await conexion.query(sqlCambio,paramsCambio);
+          if (guardado.rowCount !== 1)
+            throw new Error('El estado cambió durante la edición. Actualizá la ficha antes de guardar.');
+          await conexion.query(`INSERT INTO historial_estados
+            (prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota)
+            VALUES ($1,$2,$3,$4,$5)`,[
+            req.params.id,cambioEstado.anterior,cambioEstado.nuevo,req.session.usuario.id,
+            periodoManual
+              ? `Prueba registrada manualmente (sin notificaciones). Inicio: ${formatearDateTimeLocalAR(periodoManual.inicio)}; vencimiento: ${formatearDateTimeLocalAR(periodoManual.vence)}`
+              : 'Estado corregido manualmente desde edición'
+          ]);
+          if (periodoManual) {
+            // Evitar que quede pendiente un seguimiento automático de la etapa anterior.
+            // No crea ninguna tarea ni aviso nuevo al regularizar una prueba histórica.
+            await conexion.query(`UPDATE crm_tareas SET estado='cancelada',actualizada_en=NOW()
+              WHERE prospecto_id=$1 AND estado='pendiente' AND origen <> 'chatwoot'`,
+              [req.params.id]);
+          }
+          await conexion.query('COMMIT');
+        } catch (error) {
+          await conexion.query('ROLLBACK').catch(()=>{});
+          throw error;
+        } finally { conexion.release(); }
       }
 
       if (
