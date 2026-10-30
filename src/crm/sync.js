@@ -20,16 +20,28 @@ function configuracion() {
   return { url: `${base}/api/v1/accounts/${account}`, headers: { api_access_token: token } };
 }
 
+function extraerMensajes(respuesta) {
+  if (Array.isArray(respuesta)) return respuesta;
+  if (Array.isArray(respuesta?.payload)) return respuesta.payload;
+  if (Array.isArray(respuesta?.payload?.messages)) return respuesta.payload.messages;
+  if (Array.isArray(respuesta?.messages)) return respuesta.messages;
+  return [];
+}
+
 async function detalleChatwoot(cfg, id) {
   const { data } = await axios.get(`${cfg.url}/conversations/${id}`, { headers: cfg.headers, timeout: 8000 });
   if (!data || Number(data.id) !== Number(id)) throw new Error('Respuesta de conversación inesperada');
-  let messages = Array.isArray(data.messages) ? data.messages : [];
-  if (!messages.length) {
-    const r = await axios.get(`${cfg.url}/conversations/${id}/messages`, { headers: cfg.headers, timeout: 8000 });
-    messages = Array.isArray(r.data?.payload) ? r.data.payload : Array.isArray(r.data) ? r.data : [];
+  // El detalle de la conversación puede traer mensajes parciales/desactualizados.
+  // Consultar SIEMPRE el endpoint de mensajes antes de decidir si hay respuesta pendiente.
+  const { data: mensajesData } = await axios.get(`${cfg.url}/conversations/${id}/messages`,
+    { headers: cfg.headers, timeout: 8000 });
+  const mensajes = extraerMensajes(mensajesData);
+  if (!mensajes.length) throw new Error('Chatwoot no devolvió mensajes actuales para verificar');
+  const unicos = new Map();
+  for (const mensaje of [...extraerMensajes(data.messages), ...mensajes]) {
+    if (mensaje && mensaje.id != null) unicos.set(String(mensaje.id), mensaje);
   }
-  if (!messages.length) throw new Error('Chatwoot no devolvió mensajes para verificar');
-  return { ...data, messages };
+  return { ...data, messages: Array.from(unicos.values()) };
 }
 
 async function esConversacionExcluida(cfg, chat) {
@@ -168,4 +180,4 @@ function iniciarSincronizacionCRM() {
     { timezone: 'America/Argentina/Buenos_Aires' });
 }
 
-module.exports = { sincronizarCRM, iniciarSincronizacionCRM, configuracion, esConversacionExcluida, estadoSincronizacion: () => ({ ...ultimoResultado }) };
+module.exports = { extraerMensajes, sincronizarCRM, iniciarSincronizacionCRM, configuracion, esConversacionExcluida, estadoSincronizacion: () => ({ ...ultimoResultado }) };
