@@ -44,13 +44,23 @@ router.use('/prospectos/:id', requireAuth, async (req, res, next) => {
 });
 
 // Canal individual de avisos del bot de Ventas. Nunca envía al grupo.
+const { linkChatwoot, completarEnlaceConversacion } = require('../crm/chatwoot-link');
+
 router.post('/api/ventas/aviso-directo', express.json(), async (req,res) => {
   if (!process.env.AUTOMATION_API_KEY || req.headers['x-api-key'] !== process.env.AUTOMATION_API_KEY)
     return res.status(401).json({ok:false,error:'No autorizado'});
   const agentId = Number(req.body?.chatwoot_agent_id);
-  const mensaje = String(req.body?.mensaje || '').trim();
-  if (![4,11,19].includes(agentId) || !mensaje || mensaje.length > 4000)
-    return res.status(400).json({ok:false,error:'Destinatario o mensaje inválido'});
+  const original = String(req.body?.mensaje || '').trim();
+  const chatId = req.body?.chatwoot_conversation_id == null ? null : Number(req.body.chatwoot_conversation_id);
+  if (![4,11,19].includes(agentId) || !original || original.length > 4000 ||
+      (chatId !== null && (!Number.isSafeInteger(chatId) || chatId <= 0)))
+    return res.status(400).json({ok:false,error:'Destinatario, conversación o mensaje inválido'});
+  let mensaje = original;
+  if (chatId !== null) {
+    try { mensaje = completarEnlaceConversacion(original, linkChatwoot(chatId, 6)); }
+    catch (error) { return res.status(503).json({ok:false,error:'Enlace Chatwoot no configurado'}); }
+  }
+  if (mensaje.length > 4000) return res.status(400).json({ok:false,error:'Mensaje demasiado largo'});
   const usuarioId = AGENTE_CHATWOOT_ID[agentId];
   if (!telefonoVendedor(usuarioId)) {
     const variable = {8:'VENTAS_TELEFONO_RAFAEL',12:'VENTAS_TELEFONO_GIULIANO',13:'VENTAS_TELEFONO_SANTIAGO'}[usuarioId];
@@ -2552,7 +2562,8 @@ const resultados = [
       }
 
       mensajeGrupo +=
-        `\n👉 Ver prospecto: ${linkProspecto}`;
+        `\n👉 Ver prospecto: ${linkProspecto}` +
+        (prospecto.chatwoot_conversation_id ? `\n🔗 Chatwoot: ${linkChatwoot(prospecto.chatwoot_conversation_id)}` : '');
 
       const avisoEnviado =
         await enviarAvisoInterno(mensajeGrupo, await vendedorAsignado(prospecto));
@@ -3041,7 +3052,8 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
           }[p.nivel_interes] || "—"
         }\n\n` +
         `👨‍💼 Vendedor a cargo: ${nombreResponsableDemo}\n` +
-        `👉 Cerrar cliente: ${link}`;
+        `👉 Cerrar cliente: ${link}` +
+        (p.chatwoot_conversation_id ? `\n🔗 Chatwoot: ${linkChatwoot(p.chatwoot_conversation_id)}` : '');
 
       const avisoEnviado =
         await enviarAvisoInterno(mensajeGrupo, await vendedorAsignado(p));
@@ -3458,7 +3470,8 @@ if (chatwootConversationId) {
           `⭐ Módulos contratados: ${(full.modulos_contratados || []).join(", ") || "—"}\n` +
           `🛠️ Equipamiento: ${(full.equipamiento || []).join(", ") || "—"}${full.equip_observaciones ? ` — ${full.equip_observaciones}` : ""}\n\n` +
           `👨‍💼 Responsable comercial: ${nombreResponsableComercial}\n` +
-          `👉 Ver prospecto: ${linkProspecto}`;
+          `👉 Ver prospecto: ${linkProspecto}` +
+          (full.chatwoot_conversation_id ? `\n🔗 Chatwoot: ${linkChatwoot(full.chatwoot_conversation_id)}` : '');
 
         const avisoEnviado =
           await enviarAvisoInterno(mensajeAlta, responsableComercialId);

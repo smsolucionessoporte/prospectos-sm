@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { pool } = require('../db');
 const { AGENTE_TELEFONO, telefonoVendedor } = require('../zoomAgentes');
 const { enviarPorChatwoot } = require('../zoomChatwoot');
+const { linkChatwoot } = require('./chatwoot-link');
 
 const ZONE = 'America/Argentina/Buenos_Aires';
 const appUrl = () => String(process.env.APP_URL || '').replace(/\/$/, '');
@@ -105,7 +106,8 @@ async function recordarMensajesSinResponder(hora) {
   const { businessMinutesBetween } = require('../salesBusinessTime');
   const { rows } = await pool.query(`
     SELECT s.responsable_id, u.nombre, COUNT(*)::int AS cantidad,
-           MIN(s.ultima_entrada) AS mas_antiguo
+           MIN(s.ultima_entrada) AS mas_antiguo,
+           (ARRAY_AGG(s.chatwoot_conversation_id ORDER BY s.ultima_entrada ASC))[1:12] AS conversaciones
     FROM crm_chatwoot_estado s
     JOIN usuarios u ON u.id=s.responsable_id
     WHERE u.activo=TRUE AND u.rol='vendedor'
@@ -121,8 +123,11 @@ async function recordarMensajesSinResponder(hora) {
     const aviso = await reclamarAviso(`respuesta_${hora}`,r.responsable_id);
     if (!aviso) continue;
     try {
+      // Incluir enlaces directos sin generar un WhatsApp por conversación.
+      const enlaces = (r.conversaciones || []).map(id => `• #${id}: ${linkChatwoot(id)}`).join('\n');
+      const otras = r.cantidad > 12 ? `\n...y ${r.cantidad - 12} más en la agenda.` : '';
       const ok = await enviarPorChatwoot(tel,
-        `🔔 *SM Comercial — mensajes por responder*\n\n${r.nombre}, tenés *${r.cantidad}* conversación(es) con mensaje del cliente pendiente de respuesta.\n\nRevisalas acá: ${appUrl()}/crm`,
+        `🔔 *SM Comercial — mensajes por responder*\n\n${r.nombre}, tenés *${r.cantidad}* conversación(es) con mensaje del cliente pendiente de respuesta.\n\n🔗 Abrir en Chatwoot:\n${enlaces}${otras}\n\nAgenda: ${appUrl()}/crm`,
         r.responsable_id);
       await terminarAviso(aviso,Boolean(ok),ok?null:'No se confirmó el envío');
     } catch(e) {
@@ -135,7 +140,7 @@ async function recordarMensajesSinResponder(hora) {
 async function recordarSeguimientosProgramados() {
   if (process.env.CRM_ALERTAS_WHATSAPP !== 'true') return;
   const {rows: tareas} = await pool.query(`
-    SELECT t.id,t.vence_en,t.descripcion,t.responsable_id,p.nombre_negocio,p.contacto
+    SELECT t.id,t.vence_en,t.descripcion,t.responsable_id,t.chatwoot_conversation_id,p.nombre_negocio,p.contacto
     FROM crm_tareas t LEFT JOIN prospectos p ON p.id=t.prospecto_id
     JOIN usuarios u ON u.id=t.responsable_id
     WHERE t.estado='pendiente' AND t.origen <> 'chatwoot'
@@ -158,8 +163,10 @@ async function recordarSeguimientosProgramados() {
     if (!avisoId) continue;
     const contacto = t.nombre_negocio || t.contacto || 'Prospecto comercial';
     try {
+      // Si la tarea tiene chat asociado, el aviso debe llevar su link o fallar/reintentarse.
+      const url = t.chatwoot_conversation_id ? linkChatwoot(t.chatwoot_conversation_id) : '';
       const ok = await enviarPorChatwoot(tel,
-        `⏰ *SM Comercial — recordatorio de seguimiento*\n\n*${contacto}*\n${t.descripcion}\n\nEl seguimiento ya alcanzó su vencimiento.\n${appUrl()}/crm#agenda-seguimientos`,
+        `⏰ *SM Comercial — recordatorio de seguimiento*\n\n*${contacto}*\n${t.descripcion}\n\nEl seguimiento ya alcanzó su vencimiento.\n${url ? `🔗 Conversación en Chatwoot: ${url}\n` : ""}${appUrl()}/crm#agenda-seguimientos`,
         t.responsable_id);
       await pool.query(`UPDATE crm_recordatorios_tareas SET estado=$2,enviado_en=CASE WHEN $2='enviado' THEN NOW() ELSE NULL END,error=$3 WHERE id=$1`,
         [avisoId,ok?'enviado':'error',ok?null:'No se confirmó el envío']);
