@@ -53,6 +53,13 @@ async function iniciarCRM() {
       requiere_respuesta BOOLEAN NOT NULL DEFAULT FALSE,
       ultima_revision TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    -- Tombstones de conversaciones realmente eliminadas en Chatwoot.
+    -- Nunca borrar control_ventas ni prospectos: preservamos auditoría histórica.
+    CREATE TABLE IF NOT EXISTS crm_chatwoot_inexistentes (
+      chatwoot_conversation_id BIGINT PRIMARY KEY,
+      detectado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      motivo VARCHAR(60) NOT NULL DEFAULT 'chatwoot_404'
+    );
     ALTER TABLE crm_chatwoot_estado ADD COLUMN IF NOT EXISTS descartado_mensaje_id VARCHAR(60);
     ALTER TABLE crm_chatwoot_estado ADD COLUMN IF NOT EXISTS descartado_en TIMESTAMPTZ;
     ALTER TABLE crm_chatwoot_estado ADD COLUMN IF NOT EXISTS descartado_por INTEGER REFERENCES usuarios(id);

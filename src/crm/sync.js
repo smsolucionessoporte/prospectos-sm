@@ -8,7 +8,7 @@ const { esContactoInterno, tieneAtributoInterno, esGrupoWhatsapp } = require('./
 const VENTANA_DIAS = 45;
 const MAX_POR_RONDA = 40;
 let ejecutando = false;
-let ultimoResultado = { terminado: null, procesadas: 0, errores: 0, motivo: null };
+let ultimoResultado = { terminado: null, procesadas: 0, errores: 0, inexistentes: 0, motivo: null };
 const limpiar = v => String(v ?? '').trim();
 const { sumarMinutosLaborales, evaluarConversacion, requiereAviso } = require('./actividad');
 
@@ -29,7 +29,17 @@ function extraerMensajes(respuesta) {
 }
 
 async function detalleChatwoot(cfg, id) {
-  const { data } = await axios.get(`${cfg.url}/conversations/${id}`, { headers: cfg.headers, timeout: 8000 });
+  let data;
+  try {
+    ({ data } = await axios.get(`${cfg.url}/conversations/${id}`, { headers: cfg.headers, timeout: 8000 }));
+  } catch (error) {
+    // Un 404 del detalle acredita que Chatwoot ya no tiene la conversación.
+    // Un 404 de /messages NO es lo mismo y no debe excluir ningún registro.
+    if (error.response?.status === 404) {
+      error.chatwootConversationNotFound = true;
+    }
+    throw error;
+  }
   if (!data || Number(data.id) !== Number(id)) throw new Error('Respuesta de conversación inesperada');
   // El detalle de la conversación puede traer mensajes parciales/desactualizados.
   // Consultar SIEMPRE el endpoint de mensajes antes de decidir si hay respuesta pendiente.
@@ -61,6 +71,18 @@ async function excluirDeAgenda(chatId) {
   await pool.query('UPDATE crm_chatwoot_estado SET requiere_respuesta=FALSE,ultima_revision=NOW() WHERE chatwoot_conversation_id=$1', [chatId]);
   await pool.query(`UPDATE crm_tareas SET estado='completada',completada_en=NOW(),actualizada_en=NOW()
     WHERE clave_automatica=$1 AND estado='pendiente'`, [`respuesta:${chatId}`]);
+}
+
+async function registrarConversacionInexistente(chatId) {
+  // Idempotente. Una eliminación real se informa una sola vez; ningún borrado de historial.
+  // Primero cerrar la tarea: si la actualización falla, el siguiente ciclo
+  // puede volver a probar y la conversación NO queda excluida a medias.
+  await excluirDeAgenda(chatId);
+  const { rows } = await pool.query(`
+    INSERT INTO crm_chatwoot_inexistentes(chatwoot_conversation_id)
+    VALUES($1) ON CONFLICT (chatwoot_conversation_id) DO NOTHING
+    RETURNING chatwoot_conversation_id`, [chatId]);
+  return rows.length > 0;
 }
 
 async function grabarRevision(row, chat) {
@@ -131,11 +153,11 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
   if (ejecutando) return { ...ultimoResultado, enProceso: true };
   const cfg = configuracion();
   if (!cfg) {
-    ultimoResultado = { terminado: new Date(), procesadas: 0, errores: 0, motivo: 'Falta configurar CHATWOOT_URL o CHATWOOT_API_TOKEN' };
+    ultimoResultado = { terminado: new Date(), procesadas: 0, errores: 0, inexistentes: 0, motivo: 'Falta configurar CHATWOOT_URL o CHATWOOT_API_TOKEN' };
     return ultimoResultado;
   }
   ejecutando = true;
-  let procesadas = 0, errores = 0;
+  let procesadas = 0, errores = 0, inexistentes = 0;
   try {
     const params = [VENTANA_DIAS, Math.max(1, Math.min(100, Number(limite) || MAX_POR_RONDA))];
     // Incluir el responsable actual cacheado: el histórico puede estar sin actualizar
@@ -154,7 +176,10 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
         ORDER BY p.id DESC LIMIT 1
       ) p ON TRUE
       LEFT JOIN crm_chatwoot_estado s ON s.chatwoot_conversation_id=cv.chatwoot_conversation_id
-      WHERE (cv.derivado=TRUE OR (cv.vendedor_id IS NOT NULL AND cv.fecha_ingreso >= NOW()-interval '14 days'))
+      WHERE NOT EXISTS (
+        SELECT 1 FROM crm_chatwoot_inexistentes ci
+        WHERE ci.chatwoot_conversation_id=cv.chatwoot_conversation_id
+      ) AND (cv.derivado=TRUE OR (cv.vendedor_id IS NOT NULL AND cv.fecha_ingreso >= NOW()-interval '14 days'))
         AND (cv.vendedor_id IS NOT NULL OR s.responsable_id IS NOT NULL)
         AND (COALESCE(cv.fecha_derivacion,cv.fecha_ingreso) >= NOW()-($1::int * interval '1 day')
              OR cv.actualizado_en >= NOW()-interval '14 days')
@@ -172,14 +197,29 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
           }
           procesadas++;
         } catch (err) {
-          errores++;
-          console.warn(`[CRM] No se pudo comprobar chat #${row.chatwoot_conversation_id}:`, err.response?.status || err.message);
+          if (err.chatwootConversationNotFound === true) {
+            try {
+              if (await registrarConversacionInexistente(row.chatwoot_conversation_id)) {
+                console.info(`[CRM] Chat #${row.chatwoot_conversation_id} eliminado en Chatwoot: excluido de futuras sincronizaciones`);
+              }
+              inexistentes++;
+            } catch (dbError) {
+              errores++;
+              console.error('[CRM] No se pudo registrar conversación eliminada', {
+                chatwoot_conversation_id: row.chatwoot_conversation_id,
+                error: dbError.message,
+              });
+            }
+          } else {
+            errores++;
+            console.warn(`[CRM] No se pudo comprobar chat #${row.chatwoot_conversation_id}:`, err.response?.status || err.message);
+          }
         }
       }));
     }
-    ultimoResultado = { terminado: new Date(), procesadas, errores, motivo: errores ? 'Algunas conversaciones no se pudieron comprobar' : null };
+    ultimoResultado = { terminado: new Date(), procesadas, errores, inexistentes, motivo: errores ? 'Algunas conversaciones no se pudieron comprobar' : null };
   } catch (err) {
-    ultimoResultado = { terminado: new Date(), procesadas, errores: errores + 1, motivo: err.message };
+    ultimoResultado = { terminado: new Date(), procesadas, errores: errores + 1, inexistentes, motivo: err.message };
     console.error('[CRM] Error sincronizando:', err.message);
   } finally {
     ejecutando = false;
@@ -195,4 +235,4 @@ function iniciarSincronizacionCRM() {
     { timezone: 'America/Argentina/Buenos_Aires' });
 }
 
-module.exports = { extraerMensajes, detalleChatwoot, grabarRevision, sincronizarCRM, iniciarSincronizacionCRM, configuracion, esConversacionExcluida, estadoSincronizacion: () => ({ ...ultimoResultado }) };
+module.exports = { extraerMensajes, detalleChatwoot, registrarConversacionInexistente, grabarRevision, sincronizarCRM, iniciarSincronizacionCRM, configuracion, esConversacionExcluida, estadoSincronizacion: () => ({ ...ultimoResultado }) };

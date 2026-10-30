@@ -50,3 +50,47 @@ test('Chatwoot sin agente nunca hereda el vendedor antiguo de Control', async ()
   assert.equal(pendiente, false);
   assert.equal(lastUpsert[2], null);
 });
+
+test('404 del detalle se identifica como conversación eliminada, sin confundir errores de mensajes', async () => {
+  const previous = axios.get;
+  axios.get = async (url) => {
+    if (url.endsWith('/999')) {
+      const error = new Error('Request failed with status code 404');
+      error.response = { status: 404 };
+      throw error;
+    }
+    if (url.endsWith('/2860/messages')) {
+      const error = new Error('Request failed with status code 404');
+      error.response = { status: 404 };
+      throw error;
+    }
+    return { data: { id: 2860, messages: [] } };
+  };
+  try {
+    const { detalleChatwoot } = require('./sync');
+    await assert.rejects(() => detalleChatwoot({url:'https://cw.test/api/v1/accounts/1',headers:{}},999),
+      e => e.chatwootConversationNotFound === true);
+    await assert.rejects(() => detalleChatwoot({url:'https://cw.test/api/v1/accounts/1',headers:{}},2860),
+      e => e.chatwootConversationNotFound !== true);
+  } finally { axios.get = previous; }
+});
+
+test('conversación eliminada registra exclusión única y cierra tarea, sin borrar Prospectos', async () => {
+  let registrados = 0;
+  const originalQuery = pool.query;
+  const sentencias = [];
+  pool.query = async (sql) => {
+    sentencias.push(sql);
+    if (sql.includes('INSERT INTO crm_chatwoot_inexistentes'))
+      return { rows: registrados++ === 0 ? [{ chatwoot_conversation_id:999 }] : [] };
+    return {rows:[],rowCount:1};
+  };
+  try {
+    const { registrarConversacionInexistente } = require('./sync');
+    assert.equal(await registrarConversacionInexistente(999), true);
+    assert.equal(await registrarConversacionInexistente(999), false);
+    assert.ok(sentencias.some(sql=>sql.includes('UPDATE crm_chatwoot_estado SET requiere_respuesta=FALSE')));
+    assert.ok(sentencias.some(sql=>sql.includes("UPDATE crm_tareas SET estado='completada'")));
+    assert.equal(sentencias.some(sql=>/DELETE\s+FROM/i.test(sql)),false);
+  } finally { pool.query = originalQuery; }
+});

@@ -13,6 +13,7 @@ const {
   AGENTE_TELEFONO,
   AGENTE_INBOX,
   AGENTE_CHATWOOT_ID,
+  telefonoVendedor,
 } = require("../zoomAgentes");
 const {
   crearReunionZoom,
@@ -51,13 +52,19 @@ router.post('/api/ventas/aviso-directo', express.json(), async (req,res) => {
   if (![4,11,19].includes(agentId) || !mensaje || mensaje.length > 4000)
     return res.status(400).json({ok:false,error:'Destinatario o mensaje inválido'});
   const usuarioId = AGENTE_CHATWOOT_ID[agentId];
+  if (!telefonoVendedor(usuarioId)) {
+    const variable = {8:'VENTAS_TELEFONO_RAFAEL',12:'VENTAS_TELEFONO_GIULIANO',13:'VENTAS_TELEFONO_SANTIAGO'}[usuarioId];
+    console.warn('[VENTAS] AVISO_SIN_TELEFONO', { usuarioId, variable });
+    return res.status(503).json({ok:false,error:`Falta teléfono válido: ${variable}`});
+  }
   try {
     const ok = await enviarAvisoInterno(mensaje,usuarioId);
-    if (!ok) return res.status(503).json({ok:false,error:'No se pudo entregar al vendedor; revisar teléfono y canal individual'});
+    if (!ok) return res.status(503).json({ok:false,error:'El canal individual no confirmó el envío: verificar Evolution API o conversación existente en Chatwoot'});
     return res.json({ok:true});
   } catch(err) {
     console.error('[VENTAS] No se pudo enviar aviso directo al agente',agentId,err.message);
-    return res.status(502).json({ok:false,error:'Error del canal de notificaciones'});
+    const errorSeguro = /^EVOLUTION_[A-Z_]+/.exec(String(err.message || ''))?.[0];
+    return res.status(502).json({ok:false,error:errorSeguro || 'Error del canal individual de notificaciones'});
   }
 });
 
