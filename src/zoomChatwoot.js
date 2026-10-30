@@ -60,10 +60,49 @@ async function enviarAvisoInterno(mensaje, usuarioId) {
   const { telefonoVendedor } = require('./zoomAgentes');
   const telefono = telefonoVendedor(Number(usuarioId));
   if (!telefono) {
-    console.warn('[VENTAS] Aviso individual no enviado: teléfono del vendedor no configurado', usuarioId);
+    console.warn('[VENTAS] AVISO_SIN_TELEFONO', { usuarioId });
     return false;
   }
-  return Boolean(await enviarPorChatwoot(telefono,mensaje,Number(usuarioId)));
+
+  // Canal opcional y explícito para AVISOS INTERNOS. No depende de que el
+  // vendedor tenga una conversación previa en Chatwoot, ni crea una desde CRM.
+  const evolutionKeys = ['EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE'];
+  const configuradas = evolutionKeys.filter(key => Boolean(process.env[key]?.trim()));
+  if (configuradas.length > 0) {
+    if (configuradas.length !== evolutionKeys.length) {
+      throw new Error('EVOLUTION_CONFIG_INCOMPLETA: configurar URL, API_KEY e INSTANCE');
+    }
+    const base = process.env.EVOLUTION_API_URL.trim().replace(/\/+$/, '');
+    if (!/^https:\/\/[^/]+/i.test(base)) throw new Error('EVOLUTION_URL_INVALIDA: se requiere HTTPS');
+    const numero = telefono.replace(/\D/g, '');
+    if (!/^\d{10,15}$/.test(numero)) throw new Error('EVOLUTION_NUMERO_INVALIDO');
+    try {
+      // Evolution API v2: salida dirigida al teléfono del vendedor, nunca a grupos.
+      const resultado = await axios.post(
+        `${base}/message/sendText/${encodeURIComponent(process.env.EVOLUTION_INSTANCE.trim())}`,
+        { number: numero, text: mensaje },
+        { headers: { apikey: process.env.EVOLUTION_API_KEY, 'content-type': 'application/json' }, timeout: 15000 }
+      );
+      if (!resultado || resultado.status < 200 || resultado.status >= 300 || resultado.data?.error) {
+        throw new Error('EVOLUTION_RECHAZO_ENVIO');
+      }
+      console.info('[VENTAS] AVISO_EVOLUTION_ACEPTADO', { usuarioId, status: resultado.status });
+      return true;
+    } catch (error) {
+      console.error('[VENTAS] AVISO_EVOLUTION_FALLIDO', {
+        usuarioId,
+        status: error.response?.status || null,
+        detalle: error.response?.data?.message || error.code || error.message,
+      });
+      throw error; // Sin fallback para evitar un envío duplicado si hubo timeout.
+    }
+  }
+
+  // Compatibilidad: sin Evolution configurado, enviar al chat existente.
+  // No reabrir, reasignar, etiquetar ni crear conversaciones por estos avisos.
+  const ok = Boolean(await enviarPorChatwoot(telefono, mensaje, Number(usuarioId)));
+  if (!ok) console.warn('[VENTAS] AVISO_SIN_CHAT_PREVIO_O_CONTACTO', { usuarioId, inboxId: Number(process.env.BOT_INBOX_ID) || null });
+  return ok;
 }
 
 async function enviarMensajePorConversationId(conversationId, mensaje) {
