@@ -16,7 +16,11 @@ async function reclamarAviso(tipo, usuarioId) {
   const result = await pool.query(`
     INSERT INTO crm_avisos (fecha, tipo, usuario_id)
     VALUES ($1::date, $2, $3)
-    ON CONFLICT (fecha, tipo, usuario_id) DO NOTHING RETURNING id`, [fecha, tipo, usuarioId]);
+    ON CONFLICT (fecha, tipo, usuario_id) DO UPDATE SET
+      estado='procesando', creado_en=NOW(), enviado_en=NULL, error=NULL
+    WHERE crm_avisos.estado='error'
+      AND crm_avisos.creado_en <= NOW()-interval '15 minutes'
+    RETURNING id`, [fecha, tipo, usuarioId]);
   return result.rows[0]?.id || null;
 }
 
@@ -137,14 +141,19 @@ async function recordarSeguimientosProgramados() {
     WHERE t.estado='pendiente' AND t.origen <> 'chatwoot'
       AND t.recordatorio=TRUE AND t.vence_en <= NOW()
       AND NOT EXISTS (SELECT 1 FROM crm_recordatorios_tareas r
-        WHERE r.tarea_id=t.id AND r.vence_en=t.vence_en)
+        WHERE r.tarea_id=t.id AND r.vence_en=t.vence_en
+          AND (r.estado='enviado' OR r.creado_en > NOW()-interval '15 minutes'))
       AND u.activo=TRUE ORDER BY t.vence_en ASC LIMIT 100`);
   for (const t of tareas) {
     const tel = telefonoVendedor(t.responsable_id);
     if (!tel) continue;
     const registrado = await pool.query(`
       INSERT INTO crm_recordatorios_tareas (tarea_id,vence_en) VALUES($1,$2)
-      ON CONFLICT (tarea_id,vence_en) DO NOTHING RETURNING id`,[t.id,t.vence_en]);
+      ON CONFLICT (tarea_id,vence_en) DO UPDATE SET
+        estado='procesando', creado_en=NOW(), enviado_en=NULL, error=NULL
+      WHERE crm_recordatorios_tareas.estado IN ('error','procesando')
+        AND crm_recordatorios_tareas.creado_en <= NOW()-interval '15 minutes'
+      RETURNING id`,[t.id,t.vence_en]);
     const avisoId = registrado.rows[0]?.id;
     if (!avisoId) continue;
     const contacto = t.nombre_negocio || t.contacto || 'Prospecto comercial';
@@ -162,13 +171,13 @@ async function recordarSeguimientosProgramados() {
 }
 
 function iniciarAvisosCRM() {
-  // Un solo cron por proceso. El registro crm_avisos impide duplicar envíos entre réplicas.
+  // Un solo cron por proceso. La restricción UNIQUE y el reclamo condicional bloquean duplicados entre réplicas.
   cron.schedule('*/15 9-16 * * 1-5', () => recordarSeguimientosProgramados().catch(e => console.error('[CRM] Recordatorio seguimiento:',e)), {timezone:ZONE});
-  cron.schedule('0 9 * * 1-5', () => enviarResumenVendedor().catch(e => console.error('[CRM] Agenda:', e)), { timezone: ZONE });
-  cron.schedule('30 16 * * 1-5', () => enviarResumenSupervisor().catch(e => console.error('[CRM] Supervisión:', e)), { timezone: ZONE });
-  // Dos recordatorios máximos por jornada, sujetos a verificación de Chatwoot.
-  cron.schedule('0 11,15 * * 1-5', () => recordarMensajesSinResponder(new Intl.DateTimeFormat('en-GB',{timeZone:ZONE,hour:'2-digit',hourCycle:'h23'}).format(new Date())).catch(e=>console.error('[CRM] Recordatorio mensajes:',e)), {timezone:ZONE});
+  cron.schedule('0,15 9 * * 1-5', () => enviarResumenVendedor().catch(e => console.error('[CRM] Agenda:', e)), { timezone: ZONE });
+  cron.schedule('30,45 16 * * 1-5', () => enviarResumenSupervisor().catch(e => console.error('[CRM] Supervisión:', e)), { timezone: ZONE });
+  // Dos franjas diarias como máximo; la segunda ejecución por franja solo reintenta avisos fallidos.
+  cron.schedule('0,15 11,15 * * 1-5', () => recordarMensajesSinResponder(new Intl.DateTimeFormat('en-GB',{timeZone:ZONE,hour:'2-digit',hourCycle:'h23'}).format(new Date())).catch(e=>console.error('[CRM] Recordatorio mensajes:',e)), {timezone:ZONE});
   console.log(`[CRM] Cron de recordatorios configurado (${process.env.CRM_ALERTAS_WHATSAPP === 'true' ? 'envíos habilitados' : 'envíos deshabilitados'})`);
 }
 
-module.exports = { iniciarAvisosCRM, resumenParaVendedor };
+module.exports = { iniciarAvisosCRM, resumenParaVendedor, reclamarAviso, recordarSeguimientosProgramados };

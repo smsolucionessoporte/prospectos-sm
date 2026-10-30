@@ -167,6 +167,13 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
     const notice = sinSync
       ? `<div class="crm-notice crm-warning"><i class="ti ti-alert-triangle"></i> No hay verificación reciente de Chatwoot. La lista de mensajes podría estar incompleta. Usá «Actualizar Chatwoot».</div>`
       : `<div class="crm-notice"><i class="ti ti-refresh"></i> Última revisión de Chatwoot: ${fechaAR(ultimaRevision)}.${errSync?' Hay '+errSync+' conversación(es) que no pudieron verificarse.':''}</div>`;
+    const resultadoActualizacion = req.query.sync === 'ocupado'
+      ? `<div class="crm-notice crm-warning">Ya hay una sincronización ejecutándose. La actualización solicitada no se completó; intentá nuevamente.</div>`
+      : req.query.sync === 'errores'
+      ? `<div class="crm-notice crm-warning">La actualización tuvo conversaciones que no se pudieron verificar. Revisá los logs del CRM; no se considerarán atendidas automáticamente.</div>`
+      : req.query.sync === 'vacio'
+      ? `<div class="crm-notice crm-warning">No se encontraron conversaciones para revisar con el filtro de este vendedor. Comprobá la derivación en Control de Ventas.</div>`
+      : '';
     const descartado = req.query.descartado === '1'
       ? `<div class="crm-notice crm-success"><i class="ti ti-circle-check"></i> Conversación considerada atendida para esta agenda. Volverá a aparecer si el cliente envía un nuevo mensaje. No se modificó Chatwoot.</div>` : '';
     const html=`
@@ -174,7 +181,7 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
         <h1>Hola, ${esc(usuario.nombre.split(' ')[0])}</h1>
         <p>Primero atendé las conversaciones; después registrá gestiones y próximos pasos desde cada ficha.</p></div>
         <div class="crm-hero-actions"><form method="post" action="/crm/actualizar"><button class="btn btn-secondary" type="submit"><i class="ti ti-refresh"></i> Actualizar Chatwoot</button></form></div>
-      </header>${descartado}${notice}
+      </header>${resultadoActualizacion}${descartado}${notice}
       <div class="crm-pila">
         <section class="crm-panel" id="esperando-respuesta">
           <div class="crm-panel-title"><h2><i class="ti ti-message-circle-exclamation"></i> Conversaciones esperando respuesta</h2><span class="crm-count">${sinSync?'Sin verificar':mensajes.length}</span></div>
@@ -226,7 +233,10 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
 router.post('/crm/actualizar', requireAuth,requireRol('vendedor'),async(req,res)=>{
   try {
     const {sincronizarCRM}=require('./sync');
-    await sincronizarCRM({ usuarioId:supervisor(req.session.usuario)?null:Number(req.session.usuario.id),limite:40 });
+    const resultado = await sincronizarCRM({ usuarioId:supervisor(req.session.usuario)?null:Number(req.session.usuario.id),limite:100 });
+    if (resultado.enProceso) return res.redirect('/crm?sync=ocupado');
+    if (resultado.errores || resultado.motivo) return res.redirect('/crm?sync=errores');
+    if (!resultado.procesadas) return res.redirect('/crm?sync=vacio');
     return res.redirect('/crm');
   } catch(err) {
     console.error('[CRM] Error actualizando Chatwoot:',err);

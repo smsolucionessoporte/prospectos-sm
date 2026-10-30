@@ -227,120 +227,19 @@ function responsableCierre(p) {
   return p.creado_por_nombre || "Ventas";
 }
 
-router.post(
-  "/api/prospectos/responsable-chatwoot",
-  express.json(),
-  async (req, res) => {
-    const apiKey = req.headers["x-api-key"];
-
-    if (apiKey !== process.env.AUTOMATION_API_KEY) {
-      return res.status(401).json({ error: "No autorizado" });
-    }
-
-    const {
-      chatwoot_conversation_id,
-      chatwoot_agent_id,
-    } = req.body;
-
-    if (!chatwoot_conversation_id || !chatwoot_agent_id) {
-      return res.status(400).json({
-        error: "Faltan datos",
-      });
-    }
-
-    const usuarioId =
-      AGENTE_CHATWOOT_ID[chatwoot_agent_id];
-
-    if (!usuarioId) {
-      return res.status(400).json({
-        error: "Agente de Chatwoot no mapeado",
-      });
-    }
-
-    try {
-      // Prospectos
-      const { rows } = await pool.query(
-        `
-        SELECT id, demo_responsable
-        FROM prospectos
-        WHERE chatwoot_conversation_id = $1
-        LIMIT 1
-        `,
-        [chatwoot_conversation_id],
-      );
-
-      if (rows.length) {
-        const prospecto = rows[0];
-
-        if (prospecto.demo_responsable !== null) {
-          await pool.query(
-            `
-            UPDATE prospectos
-            SET demo_responsable = $2,
-                actualizado_en = NOW()
-            WHERE chatwoot_conversation_id = $1
-            `,
-            [chatwoot_conversation_id, usuarioId],
-          );
-        } else {
-          await pool.query(
-            `
-            UPDATE prospectos
-            SET creado_por = $2,
-                actualizado_en = NOW()
-            WHERE chatwoot_conversation_id = $1
-            `,
-            [chatwoot_conversation_id, usuarioId],
-          );
-        }
-      }
-
-      // Control / estadísticas
-      const controlActual = await pool.query(
-        `
-        SELECT vendedor_id
-        FROM control_ventas
-        WHERE chatwoot_conversation_id = $1
-        LIMIT 1
-        `,
-        [chatwoot_conversation_id],
-      );
-
-      const vendedorAnterior =
-        controlActual.rows[0]?.vendedor_id ?? null;
-
-if (vendedorAnterior !== usuarioId) {
-  await pool.query(
-    `
-    UPDATE control_ventas
-    SET vendedor_id = $2,
-        fecha_inicio_espera_vendedor = CASE
-          WHEN fecha_inicio_espera_vendedor IS NOT NULL THEN NOW()
-          ELSE NULL
-        END,
-        actualizado_en = NOW()
-    WHERE chatwoot_conversation_id = $1
-    `,
-    [chatwoot_conversation_id, usuarioId],
-  );
-}
-
-      return res.json({
-        ok: true,
-        usuario_id: usuarioId,
-      });
-    } catch (err) {
-      console.error(
-        "Error actualizando responsable desde Chatwoot:",
-        err,
-      );
-
-      return res.status(500).json({
-        error: "Error interno",
-      });
-    }
-  },
-);
+router.post('/api/prospectos/responsable-chatwoot', express.json(), async (req, res) => {
+  if (!process.env.AUTOMATION_API_KEY || req.headers['x-api-key'] !== process.env.AUTOMATION_API_KEY)
+    return res.status(401).json({ error: 'No autorizado' });
+  try {
+    const { sincronizarResponsableChatwoot } = require('../crm/responsables');
+    const resultado = await sincronizarResponsableChatwoot(
+      pool, req.body?.chatwoot_conversation_id, req.body?.chatwoot_agent_id);
+    return res.json({ ok: true, ...resultado });
+  } catch (error) {
+    console.error('[VENTAS] Error sincronizando responsable de Chatwoot:', error.message);
+    return res.status(error.status || 500).json({ error: error.message });
+  }
+});
 
 // ─── ALTA AUTOMÁTICA DESDE AUTOMATIZACIÓN EXTERNA (Chatwoot) ─────────────────
 router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {

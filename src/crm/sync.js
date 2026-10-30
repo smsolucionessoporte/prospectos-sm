@@ -67,9 +67,21 @@ async function grabarRevision(row, chat) {
   const id = Number(row.chatwoot_conversation_id);
   const meta = chat.meta || {};
   const contacto = limpiar(meta.sender?.name || chat.contact?.name || chat.contact?.available_name || row.contacto || row.nombre_negocio) || `Conversación #${id}`;
-  const chatwootResponsable = Number(meta.assignee?.id || chat.assignee_id || 0);
-  const responsableId = AGENTE_CHATWOOT_ID[chatwootResponsable] || Number(row.vendedor_id);
+  const chatwootResponsable = Number(meta.assignee?.id ?? chat.assignee_id ?? 0);
+  const tieneAsignacionActual = Object.prototype.hasOwnProperty.call(meta, 'assignee') ||
+    Object.prototype.hasOwnProperty.call(chat, 'assignee_id');
+  // Si Chatwoot confirma que está sin agente, NO rescatar el vendedor histórico
+  // de control_ventas: generaría alertas para un agente que ya no la tiene.
+  const responsableId = AGENTE_CHATWOOT_ID[chatwootResponsable] ||
+    (tieneAsignacionActual ? null : (Number(row.vendedor_id) || null));
   const resultado = evaluarConversacion(chat);
+  if (row.respondio_cliente === true && !resultado.ultimaEntrada) {
+    console.warn('[CRM] Chatwoot devolvió mensajes pero no una entrada del cliente', {
+      chatwoot_conversation_id: id,
+      mensajes: chat.messages?.length || 0,
+      tipos: [...new Set((chat.messages || []).map(m => String(m.message_type)))].slice(0, 8),
+    });
+  }
   const estado = limpiar(chat.status).toLowerCase();
   // No se registran como urgentes los clientes confirmados/perdidos ni los no asignados.
   // Conservar la decisión de 'descartar hasta el próximo mensaje' al sincronizar.
@@ -126,10 +138,12 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
   let procesadas = 0, errores = 0;
   try {
     const params = [VENTANA_DIAS, Math.max(1, Math.min(100, Number(limite) || MAX_POR_RONDA))];
-    const filtro = usuarioId ? ' AND cv.vendedor_id=$3' : '';
+    // Incluir el responsable actual cacheado: el histórico puede estar sin actualizar
+    // luego de una reasignación manual desde Chatwoot.
+    const filtro = usuarioId ? ' AND (cv.vendedor_id=$3 OR s.responsable_id=$3)' : '';
     if (usuarioId) params.push(usuarioId);
     const candidatos = await pool.query(`
-      SELECT cv.chatwoot_conversation_id, cv.vendedor_id,
+      SELECT cv.chatwoot_conversation_id, cv.vendedor_id, cv.respondio_cliente,
              p.id AS prospecto_id, p.contacto, p.nombre_negocio, p.estado AS estado_prospecto
       FROM control_ventas cv
       LEFT JOIN LATERAL (
@@ -140,7 +154,8 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
         ORDER BY p.id DESC LIMIT 1
       ) p ON TRUE
       LEFT JOIN crm_chatwoot_estado s ON s.chatwoot_conversation_id=cv.chatwoot_conversation_id
-      WHERE cv.derivado=TRUE AND cv.vendedor_id IS NOT NULL
+      WHERE (cv.derivado=TRUE OR (cv.vendedor_id IS NOT NULL AND cv.fecha_ingreso >= NOW()-interval '14 days'))
+        AND (cv.vendedor_id IS NOT NULL OR s.responsable_id IS NOT NULL)
         AND (COALESCE(cv.fecha_derivacion,cv.fecha_ingreso) >= NOW()-($1::int * interval '1 day')
              OR cv.actualizado_en >= NOW()-interval '14 days')
         AND COALESCE(p.estado,'prospecto') NOT IN ('confirmado','perdido')${filtro}
@@ -180,4 +195,4 @@ function iniciarSincronizacionCRM() {
     { timezone: 'America/Argentina/Buenos_Aires' });
 }
 
-module.exports = { extraerMensajes, sincronizarCRM, iniciarSincronizacionCRM, configuracion, esConversacionExcluida, estadoSincronizacion: () => ({ ...ultimoResultado }) };
+module.exports = { extraerMensajes, detalleChatwoot, grabarRevision, sincronizarCRM, iniciarSincronizacionCRM, configuracion, esConversacionExcluida, estadoSincronizacion: () => ({ ...ultimoResultado }) };
