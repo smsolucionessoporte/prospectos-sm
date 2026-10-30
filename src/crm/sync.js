@@ -28,10 +28,26 @@ function extraerMensajes(respuesta) {
   return [];
 }
 
+// Reintentar una sola vez ante cortes transitorios: las conversaciones válidas
+// nunca se consideran eliminadas por un timeout, 429 o HTTP 5xx.
+async function chatwootGet(url, cfg) {
+  for (let intento = 0; intento < 2; intento++) {
+    try {
+      return await axios.get(url, { headers: cfg.headers, timeout: 12000 });
+    } catch (error) {
+      const codigo = Number(error.response?.status || 0);
+      const temporal = ['ECONNABORTED','ETIMEDOUT','ECONNRESET'].includes(error.code) ||
+        codigo === 429 || (codigo >= 500 && codigo <= 599);
+      if (!temporal || intento === 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+  }
+}
+
 async function detalleChatwoot(cfg, id) {
   let data;
   try {
-    ({ data } = await axios.get(`${cfg.url}/conversations/${id}`, { headers: cfg.headers, timeout: 12000 }));
+    ({ data } = await chatwootGet(`${cfg.url}/conversations/${id}`, cfg));
   } catch (error) {
     // Un 404 del detalle acredita que Chatwoot ya no tiene la conversación.
     // Un 404 de /messages NO es lo mismo y no debe excluir ningún registro.
@@ -43,8 +59,7 @@ async function detalleChatwoot(cfg, id) {
   if (!data || Number(data.id) !== Number(id)) throw new Error('Respuesta de conversación inesperada');
   // El detalle de la conversación puede traer mensajes parciales/desactualizados.
   // Consultar SIEMPRE el endpoint de mensajes antes de decidir si hay respuesta pendiente.
-  const { data: mensajesData } = await axios.get(`${cfg.url}/conversations/${id}/messages`,
-    { headers: cfg.headers, timeout: 12000 });
+  const { data: mensajesData } = await chatwootGet(`${cfg.url}/conversations/${id}/messages`, cfg);
   const mensajes = extraerMensajes(mensajesData);
   if (!mensajes.length) throw new Error('Chatwoot no devolvió mensajes actuales para verificar');
   const unicos = new Map();
@@ -62,7 +77,7 @@ async function esConversacionExcluida(cfg, chat) {
   if (esContactoInterno(atributos)) return true;
   const id = Number(sender.id || chat.contact?.id || 0);
   if (tieneAtributoInterno(atributos) || !Number.isSafeInteger(id) || id <= 0) return false;
-  const respuesta = await axios.get(`${cfg.url}/contacts/${id}`, { headers: cfg.headers, timeout: 12000 });
+  const respuesta = await chatwootGet(`${cfg.url}/contacts/${id}`, cfg);
   const contacto = respuesta.data?.payload || respuesta.data || {};
   return esContactoInterno(contacto.custom_attributes);
 }
@@ -184,7 +199,8 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
         AND (COALESCE(cv.fecha_derivacion,cv.fecha_ingreso) >= NOW()-($1::int * interval '1 day')
              OR cv.actualizado_en >= NOW()-interval '14 days')
         AND COALESCE(p.estado,'prospecto') NOT IN ('confirmado','perdido')${filtro}
-      ORDER BY s.ultima_revision ASC NULLS FIRST, cv.fecha_ingreso DESC LIMIT $2`, params);
+      ORDER BY CASE WHEN cv.fecha_ingreso >= NOW()-interval '3 days' THEN 0 ELSE 1 END,
+               s.ultima_revision ASC NULLS FIRST, cv.fecha_ingreso DESC LIMIT $2`, params);
     // Máximo dos conversaciones simultáneas. Consultar detalle, mensajes
     // y contacto en paralelo con cuatro conversaciones causó timeouts HTTP.
     for (let i = 0; i < candidatos.rows.length; i += 2) {

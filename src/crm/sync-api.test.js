@@ -94,3 +94,22 @@ test('conversación eliminada registra exclusión única y cierra tarea, sin bor
     assert.equal(sentencias.some(sql=>/DELETE\s+FROM/i.test(sql)),false);
   } finally { pool.query = originalQuery; }
 });
+
+test('timeout transitorio en conversación válida se reintenta una vez sin marcarla eliminada',async()=>{
+  const anterior=axios.get;
+  let intentos=0;
+  axios.get=async(url)=>{
+    if(url.endsWith('/2860')) {
+      intentos++;
+      if(intentos===1) {const error=new Error('timeout of 12000ms exceeded');error.code='ECONNABORTED';throw error;}
+      return {data:{id:2860,inbox_id:6,status:'open',meta:{assignee:{id:19}},messages:[]}};
+    }
+    if(url.endsWith('/2860/messages')) return {data:{payload:[incoming]}};
+    throw new Error('URL inesperada');
+  };
+  try{
+    const chat=await detalleChatwoot({url:'https://cw.test/api/v1/accounts/1',headers:{}},2860);
+    assert.equal(intentos,2);
+    assert.equal(chat.id,2860);
+  } finally {axios.get=anterior;}
+});
