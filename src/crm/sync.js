@@ -31,7 +31,7 @@ function extraerMensajes(respuesta) {
 async function detalleChatwoot(cfg, id) {
   let data;
   try {
-    ({ data } = await axios.get(`${cfg.url}/conversations/${id}`, { headers: cfg.headers, timeout: 8000 }));
+    ({ data } = await axios.get(`${cfg.url}/conversations/${id}`, { headers: cfg.headers, timeout: 12000 }));
   } catch (error) {
     // Un 404 del detalle acredita que Chatwoot ya no tiene la conversación.
     // Un 404 de /messages NO es lo mismo y no debe excluir ningún registro.
@@ -44,7 +44,7 @@ async function detalleChatwoot(cfg, id) {
   // El detalle de la conversación puede traer mensajes parciales/desactualizados.
   // Consultar SIEMPRE el endpoint de mensajes antes de decidir si hay respuesta pendiente.
   const { data: mensajesData } = await axios.get(`${cfg.url}/conversations/${id}/messages`,
-    { headers: cfg.headers, timeout: 8000 });
+    { headers: cfg.headers, timeout: 12000 });
   const mensajes = extraerMensajes(mensajesData);
   if (!mensajes.length) throw new Error('Chatwoot no devolvió mensajes actuales para verificar');
   const unicos = new Map();
@@ -62,7 +62,7 @@ async function esConversacionExcluida(cfg, chat) {
   if (esContactoInterno(atributos)) return true;
   const id = Number(sender.id || chat.contact?.id || 0);
   if (tieneAtributoInterno(atributos) || !Number.isSafeInteger(id) || id <= 0) return false;
-  const respuesta = await axios.get(`${cfg.url}/contacts/${id}`, { headers: cfg.headers, timeout: 8000 });
+  const respuesta = await axios.get(`${cfg.url}/contacts/${id}`, { headers: cfg.headers, timeout: 12000 });
   const contacto = respuesta.data?.payload || respuesta.data || {};
   return esContactoInterno(contacto.custom_attributes);
 }
@@ -185,9 +185,10 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
              OR cv.actualizado_en >= NOW()-interval '14 days')
         AND COALESCE(p.estado,'prospecto') NOT IN ('confirmado','perdido')${filtro}
       ORDER BY s.ultima_revision ASC NULLS FIRST, cv.fecha_ingreso DESC LIMIT $2`, params);
-    // Concurrencia limitada para no saturar la API de Chatwoot.
-    for (let i = 0; i < candidatos.rows.length; i += 4) {
-      await Promise.all(candidatos.rows.slice(i, i + 4).map(async row => {
+    // Máximo dos conversaciones simultáneas. Consultar detalle, mensajes
+    // y contacto en paralelo con cuatro conversaciones causó timeouts HTTP.
+    for (let i = 0; i < candidatos.rows.length; i += 2) {
+      await Promise.all(candidatos.rows.slice(i, i + 2).map(async row => {
         try {
           const chat = await detalleChatwoot(cfg, row.chatwoot_conversation_id);
           if (await esConversacionExcluida(cfg, chat)) {
