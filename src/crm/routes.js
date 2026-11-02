@@ -185,7 +185,7 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
       <div class="crm-pila">
         <section class="crm-panel" id="esperando-respuesta">
           <div class="crm-panel-title"><h2><i class="ti ti-message-circle-exclamation"></i> Conversaciones esperando respuesta</h2><span class="crm-count">${sinSync?'Sin verificar':mensajes.length}</span></div>
-          <p class="crm-help">Solo se muestran conversaciones cuyo último mensaje público es del cliente y todavía no tienen una respuesta posterior.</p>
+          <p class="crm-help">Se muestran conversaciones con mensajes de clientes que todavía no recibieron respuesta humana, aunque el bot haya enviado la derivación.</p>
           ${mensajes.length?mensajes.map(c=>{
             const url=chatUrl(c.chatwoot_conversation_id,c.inbox_id);
             return `<article class="crm-mini-item"><div class="crm-item-main"><strong>${tituloContacto(c)}</strong>

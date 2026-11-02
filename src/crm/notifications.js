@@ -39,6 +39,13 @@ async function resumenParaVendedor(usuarioId) {
       (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot' AND vence_en < NOW()) AS vencidas,
       (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot'
          AND vence_en >= NOW() AND vence_en < NOW() + interval '1 day') AS proximas,
+      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente'
+         AND origen <> 'chatwoot' AND vence_en IS NULL) AS sin_fecha,
+      (SELECT COUNT(DISTINCT p.id)::int FROM prospectos p
+         LEFT JOIN control_ventas cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
+         WHERE COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)=$1
+           AND p.estado NOT IN ('confirmado','perdido','demo_coordinada')
+           AND p.actualizado_en >= NOW()-interval '45 days') AS oportunidades_abiertas,
       (SELECT COUNT(*)::int FROM crm_chatwoot_estado s
          WHERE s.responsable_id=$1 AND s.requiere_respuesta=TRUE
          AND s.ultima_revision >= NOW()-interval '30 minutes'
@@ -56,13 +63,18 @@ async function enviarResumenVendedor() {
     const tel = telefonoVendedor(u.id);
     if (!tel) { console.warn(`[CRM] Resumen omitido para usuario ${u.id}: falta teléfono de contacto`); continue; }
     const r = await resumenParaVendedor(u.id);
-    if (!r.vencidas && !r.proximas && !r.mensajes_por_responder && !r.por_cerrar) continue;
+    // La agenda muestra también oportunidades sin vencimiento: no omitir su
+    // resumen diario por no tener recordatorio individual configurado.
+    if (!r.vencidas && !r.proximas && !r.sin_fecha && !r.oportunidades_abiertas &&
+        !r.mensajes_por_responder && !r.por_cerrar) continue;
     const aviso = await reclamarAviso('agenda_manana', u.id);
     if (!aviso) continue;
     const mensaje = `📋 *SM Comercial — agenda del día*\n\n` +
       `👤 ${u.nombre}\n` +
       `🔴 Tareas vencidas: *${r.vencidas}*\n` +
       `📅 Próximas 24 h: *${r.proximas}*\n` +
+      `📌 Tareas sin fecha: *${r.sin_fecha || 0}*\n` +
+      `📂 Oportunidades abiertas: *${r.oportunidades_abiertas || 0}*\n` +
       `💬 Mensajes sin responder (verificados): *${r.mensajes_por_responder}*\n` +
       `🤝 Oportunidades por cerrar: *${r.por_cerrar}*\n\n` +
       `Ingresá y gestioná los casos:\n${appUrl()}/crm`;
