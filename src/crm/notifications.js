@@ -26,8 +26,11 @@ async function reclamarAviso(tipo, usuarioId) {
 }
 
 async function terminarAviso(id, enviado, error) {
-  await pool.query(`UPDATE crm_avisos SET estado=$2, enviado_en=CASE WHEN $2='enviado' THEN NOW() ELSE NULL END, error=$3 WHERE id=$1`,
-    [id, enviado ? 'enviado' : 'error', error || null]);
+  await pool.query(`UPDATE crm_avisos
+    SET estado=CASE WHEN $2::boolean THEN 'enviado' ELSE 'error' END,
+        enviado_en=CASE WHEN $2::boolean THEN NOW() ELSE NULL END,
+        error=$3
+    WHERE id=$1`, [id, Boolean(enviado), error || null]);
 }
 
 async function resumenParaVendedor(usuarioId) {
@@ -168,8 +171,11 @@ async function recordarSeguimientosProgramados() {
       const ok = await enviarPorChatwoot(tel,
         `⏰ *SM Comercial — recordatorio de seguimiento*\n\n*${contacto}*\n${t.descripcion}\n\nEl seguimiento ya alcanzó su vencimiento.\n${url ? `🔗 Conversación en Chatwoot: ${url}\n` : ""}${appUrl()}/crm#agenda-seguimientos`,
         t.responsable_id);
-      await pool.query(`UPDATE crm_recordatorios_tareas SET estado=$2,enviado_en=CASE WHEN $2='enviado' THEN NOW() ELSE NULL END,error=$3 WHERE id=$1`,
-        [avisoId,ok?'enviado':'error',ok?null:'No se confirmó el envío']);
+      await pool.query(`UPDATE crm_recordatorios_tareas
+        SET estado=CASE WHEN $2::boolean THEN 'enviado' ELSE 'error' END,
+            enviado_en=CASE WHEN $2::boolean THEN NOW() ELSE NULL END,
+            error=$3
+        WHERE id=$1`, [avisoId, Boolean(ok), ok ? null : 'No se confirmó el envío']);
     } catch(error) {
       console.warn(`[CRM] No se pudo recordar tarea ${t.id}:`,error.message);
       await pool.query(`UPDATE crm_recordatorios_tareas SET estado='error',error=$2 WHERE id=$1`,[avisoId,String(error.message).slice(0,250)]);
