@@ -25,6 +25,17 @@ function checkSlot(date, slot, now=new Date()) {
   if (when.utc.getTime() > now.getTime() + 30 * 86400000) throw new Error('Solo se permiten reservas dentro de los próximos 30 días');
   return { ...when, slot, ...def };
 }
+function calendarioCompartidoId() {
+  const id=String(process.env.GOOGLE_CALENDAR_ID||'').trim();
+  if(!id||id.toLowerCase()==='primary') {
+    throw new Error('Configurá GOOGLE_CALENDAR_ID con el ID real del calendario compartido SM SOLUCIONES (no primary)');
+  }
+  return id;
+}
+function correoValido(value){
+  const email=String(value||'').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?email:null;
+}
 function calendarConfigured() {
   return Boolean(process.env.GOOGLE_CALENDAR_CLIENT_ID && process.env.GOOGLE_CALENDAR_CLIENT_SECRET && process.env.GOOGLE_CALENDAR_REFRESH_TOKEN);
 }
@@ -41,11 +52,12 @@ async function googleAccessToken() {
   if (!data.access_token) throw new Error('Google Calendar no devolvió un token');
   return data.access_token;
 }
-async function crearReunionMeet({title, localStart, description='', idempotencyKey=null}) {
+async function crearReunionMeet({title, localStart, description='', idempotencyKey=null, vendedorEmail=null}) {
   const start = parseLocal(localStart);
   if (start.utc.getTime() <= Date.now()) throw new Error('La reunión debe ser futura');
+  const calendarId = encodeURIComponent(calendarioCompartidoId());
   const token = await googleAccessToken();
-  const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID || 'primary');
+  const email=correoValido(vendedorEmail);
   const stableId=idempotencyKey ? 'sm'+createHash('sha256').update(String(idempotencyKey)).digest('hex').slice(0,40) : null;
   const event = {
     ...(stableId?{id:stableId}:{}),
@@ -55,8 +67,9 @@ async function crearReunionMeet({title, localStart, description='', idempotencyK
     conferenceData:{createRequest:{requestId:require('crypto').randomUUID(),conferenceSolutionKey:{type:'hangoutsMeet'}}},
     reminders:{useDefault:false,overrides:[{method:'popup',minutes:15}]},
     guestsCanSeeOtherGuests:false,
+    ...(email?{attendees:[{email}]}:{}),
   };
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?conferenceDataVersion=1`;
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?conferenceDataVersion=1${email?'&sendUpdates=all':''}`;
   const existingUrl=stableId?`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${stableId}`:null;
   const obtenerEventoExistente=async()=>{
     if(!existingUrl)return null;
@@ -106,31 +119,75 @@ async function crearReunionMeet({title, localStart, description='', idempotencyK
     }
     throw new Error('Google Calendar creó el evento, pero no devolvió un enlace Meet');
   }
-  let recordingEnabled=false, recordingWarning=null;
+  // El rol COHOST no se concede invitando al vendedor: requiere spaces.members.create.
+  // Se intentan por separado para no confundir un fallo de grabación con un fallo de coanfitrión.
+  let recordingEnabled=false, recordingWarning=null, cohostEnabled=false, cohostWarning=null;
+  let spaceName=null;
   try {
     const code = new URL(joinUrl).pathname.split('/').filter(Boolean).at(-1);
-    if (!/^[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(code || '')) throw new Error('Código Meet inválido para configurar grabación');
-    const getSpace=await fetch(`https://meet.googleapis.com/v2/spaces/${code}`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
-    if (!getSpace.ok) throw new Error(`No se pudo consultar la configuración de Meet (HTTP ${getSpace.status})`);
-    const space=await getSpace.json();
-    if (!/^spaces\/[A-Za-z0-9_-]+$/.test(space.name || '')) throw new Error('Respuesta de Google Meet inválida');
-    const patch=await fetch(`https://meet.googleapis.com/v2/${space.name}?updateMask=config.artifactConfig.recordingConfig`,{
-      method:'PATCH',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},
-      body:JSON.stringify({config:{artifactConfig:{recordingConfig:{autoRecordingGeneration:'ON'}}}}),signal:AbortSignal.timeout(12000)});
-    if(!patch.ok) throw new Error(`No se pudo activar la grabación automática en Meet (HTTP ${patch.status})`);
-    recordingEnabled=true;
-  }catch(error){
-    recordingWarning=error.message;
-    console.warn('[MEET] Reunión creada con enlace, pero sin grabación automática confirmada:',data.id,recordingWarning);
+    if (!/^[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(code || ''))throw new Error('Código de Meet inválido');
+    const r=await fetch(`https://meet.googleapis.com/v2/spaces/${code}`,{
+      headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
+    if(!r.ok)throw new Error(`Meet no permitió consultar la sala (HTTP ${r.status})`);
+    const space=await r.json();
+    if(!/^spaces\/[A-Za-z0-9_-]+$/.test(space.name||''))throw new Error('ID de sala Meet inválido');
+    spaceName=space.name;
+  }catch(error){recordingWarning=`No se pudo consultar la sala para activar grabación: ${error.message}`;}
+
+  if(spaceName){
+    try{
+      const patch=await fetch(`https://meet.googleapis.com/v2/${spaceName}?updateMask=config.artifactConfig.recordingConfig`,{
+        method:'PATCH',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},
+        body:JSON.stringify({config:{artifactConfig:{recordingConfig:{autoRecordingGeneration:'ON'}}}}),signal:AbortSignal.timeout(12000)});
+      if(!patch.ok)throw new Error(`No se pudo activar la grabación automática en Meet (HTTP ${patch.status})`);
+      recordingEnabled=true;
+    }catch(error){recordingWarning=error.message;}
   }
-  return {joinUrl,eventId:data.id,calendarUrl:data.htmlLink,recordingEnabled,recordingWarning};
+
+  if(!email){
+    cohostWarning='No se encontró un correo válido del vendedor asignado; agregalo como coanfitrión manualmente.';
+  }else if(!spaceName){
+    cohostWarning='No se pudo configurar al vendedor como coanfitrión porque Google no devolvió la sala de Meet.';
+  }else{
+    try{
+      // Requiere OAuth https://www.googleapis.com/auth/meetings.space.created.
+      // No asumir éxito: Calendar puede crear el evento aunque Meet deniegue este rol.
+      const memberUrl=`https://meet.googleapis.com/v2/${spaceName}/members`;
+      const added=await fetch(memberUrl,{method:'POST',
+        headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},
+        body:JSON.stringify({email,role:'COHOST'}),signal:AbortSignal.timeout(12000)});
+      if(added.ok){
+        const member=await added.json();
+        if(member.role!=='COHOST')throw new Error('Meet no confirmó el rol COHOST');
+        cohostEnabled=true;
+      }else if(added.status===409){
+        // Idempotencia: un reintento puede encontrar al miembro ya creado.
+        const found=await fetch(memberUrl,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
+        if(!found.ok)throw new Error(`No se pudo comprobar el coanfitrión existente (HTTP ${found.status})`);
+        const result=await found.json();
+        cohostEnabled=Array.isArray(result.members)&&result.members.some(m=>
+          m.role==='COHOST'&&String(m.email||'').toLowerCase()===email);
+        if(!cohostEnabled)throw new Error('Meet informa que el miembro existe, pero no confirmó el rol COHOST');
+      }else throw new Error(`Meet rechazó configurar al coanfitrión (HTTP ${added.status})`);
+    }catch(error){cohostWarning=`No se pudo dar el rol de coanfitrión a ${email}: ${error.message}`;}
+  }
+  if(recordingWarning)console.warn('[MEET] Evento creado sin grabación automática confirmada',data.id,recordingWarning);
+  if(cohostWarning)console.warn('[MEET] Evento creado sin coanfitrión confirmado',data.id,cohostWarning);
+  return {joinUrl,eventId:data.id,calendarUrl:data.htmlLink,recordingEnabled,recordingWarning,
+    vendedorEmail:email,cohostEnabled,cohostWarning};
 }
 async function cancelarReunionMeet(eventId) {
   if(!eventId) return;
   const token=await googleAccessToken();
-  const calendarId=encodeURIComponent(process.env.GOOGLE_CALENDAR_ID||'primary');
-  const response=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`,{
-    method:'DELETE',headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
-  if(!response.ok && response.status!==404 && response.status!==410)throw new Error(`No se pudo cancelar evento Meet: HTTP ${response.status}`);
+  // Eventos antiguos pueden estar en Marisol; los nuevos siempre van al calendario compartido.
+  const primary=String(process.env.GOOGLE_CALENDAR_ID||'').trim();
+  const calendars=[...(primary&&primary!=='primary'?[primary]:[]),'primary'];
+  for(const id of calendars){
+    const response=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(id)}/events/${encodeURIComponent(eventId)}`,{
+      method:'DELETE',headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
+    if(response.ok || response.status===410)return;
+    if(response.status!==404)throw new Error(`No se pudo cancelar evento Meet: HTTP ${response.status}`);
+  }
+  console.warn('[MEET] No se encontró evento al cancelar (ningún calendario)',eventId);
 }
 module.exports={TZ,MEET_GRUPAL,parseLocal,checkSlot,calendarConfigured,crearReunionMeet,cancelarReunionMeet};

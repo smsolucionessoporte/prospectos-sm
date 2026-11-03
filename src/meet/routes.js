@@ -33,6 +33,11 @@ async function iniciarMeet(){
      UNIQUE(prospecto_id,clave,destino)
    )`);
 }
+async function correoVendedorAsignado(id){
+ if(!Number.isInteger(Number(id))||Number(id)<=0)return null;
+ const {rows}=await pool.query('SELECT email FROM usuarios WHERE id=$1 AND activo=TRUE LIMIT 1',[id]);
+ return rows[0]?.email||null;
+}
 async function guardarAvisos(client,p,clave,mensajeCliente,mensajeInterno){
  const seller=await vendedorAsignado(p);
  const id=Number(p.id), cid=p.chatwoot_conversation_id;
@@ -316,8 +321,11 @@ router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:fals
    meetError=new Error('El vendedor eligió continuar sin enlace después de fallar Google Meet');
   }else{
    try{
+    const vendedorId=await vendedorAsignado(p);
+    const vendedorEmail=await correoVendedorAsignado(vendedorId);
     meeting=await crearReunionMeet({title:'SM Soluciones | Demostración personalizada',localStart:fecha,
-      description:`Demo comercial SM. Prospecto interno #${p.id}`,idempotencyKey:`sm-prospectos:${p.id}:${fecha}`});
+      description:`Demo comercial SM. Prospecto interno #${p.id}`,idempotencyKey:`sm-prospectos:${p.id}:${fecha}`,
+      vendedorEmail});
    }catch(e){
     console.error('[MEET] No se pudo crear Meet; esperando decisión del vendedor',p.id,e.message);
     if(req.session)req.session.meetPendiente={prospectoId:Number(p.id),fecha,hasta:Date.now()+15*60000};
@@ -333,15 +341,15 @@ router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:fals
   await client.query(`UPDATE prospectos SET estado='demo_coordinada',demo_fecha=$2::timestamp,demo_tipo=$3,
     zoom_join_url=$4,google_event_id=$5,demo_responsable=COALESCE(demo_responsable,6),demo_solicitud=NULL,recordatorio_enviado=false,
     recordatorio_relevamiento_enviado=false,actualizado_en=NOW() WHERE id=$1`,[p.id,fecha,custom?'personalizada':`grupal_${slot.slot}`,url,meeting?.eventId||null]);
-  await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota) VALUES($1,$2,$3,$4,$5)',[p.id,actual.estado,'demo_coordinada',req.session.usuario.id,`Demostración ${custom?'personalizada':'grupal'} · ${fecha} · ${url||'Meet pendiente de creación manual'}${meetError?' · Falló creación automática: '+meetError.message:''}${meeting?.recordingWarning?' · Grabación automática no confirmada: '+meeting.recordingWarning:''}`]);
+  await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota) VALUES($1,$2,$3,$4,$5)',[p.id,actual.estado,'demo_coordinada',req.session.usuario.id,`Demostración ${custom?'personalizada':'grupal'} · ${fecha} · ${url||'Meet pendiente de creación manual'}${meetError?' · Falló creación automática: '+meetError.message:''}${meeting?.recordingWarning?' · Grabación automática no confirmada: '+meeting.recordingWarning:''}${meeting?.cohostWarning?' · Coanfitrión no confirmado: '+meeting.cohostWarning:''}`]);
   const seller=await vendedorAsignado(p),text=mensajeDemo(p,slot.utc,url,custom,custom?meeting?.recordingEnabled===true:true);
-  const intern=`${meetError?'⚠️ *REUNIÓN PENDIENTE DE CREACIÓN MANUAL*\nCreá la reunión de Google Meet y enviá el enlace al prospecto.\n\n':''}${meeting?.recordingWarning?'⚠️ *REUNIÓN CREADA SIN GRABACIÓN AUTOMÁTICA CONFIRMADA*\nEl enlace de Meet funciona; si corresponde, activá la grabación manualmente.\n\n':''}📅 *DEMO COORDINADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} Buenos Aires\n🎥 ${url||'PENDIENTE: crear y enviar enlace manualmente'}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
+  const intern=`${meetError?'⚠️ *REUNIÓN PENDIENTE DE CREACIÓN MANUAL*\nCreá la reunión de Google Meet y enviá el enlace al prospecto.\n\n':''}${meeting?.recordingWarning?'⚠️ *REUNIÓN CREADA SIN GRABACIÓN AUTOMÁTICA CONFIRMADA*\nEl enlace de Meet funciona; si corresponde, activá la grabación manualmente.\n\n':''}${meeting?.cohostWarning?'⚠️ *COANFITRIÓN NO CONFIRMADO*\n'+meeting.cohostWarning+'\nAsigná el rol manualmente antes de la demo.\n\n':''}📅 *DEMO COORDINADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} Buenos Aires\n🎥 ${url||'PENDIENTE: crear y enviar enlace manualmente'}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
   await guardarAvisos(client,p,`manual:${fecha}`,text,intern);
   await client.query('COMMIT');
   if(custom&&req.session)delete req.session.meetPendiente;
   setImmediate(()=>procesarAvisos().catch(console.error));
   if(meetError)return res.status(200).send(layout('Demostración registrada — acción pendiente',`<main style="max-width:740px;margin:40px auto;padding:28px;border:1px solid #f2c36b;border-radius:12px;background:#fff9e9;color:#553b12"><h2>⚠️ No se pudo crear la reunión automáticamente</h2><p>La demostración quedó registrada y se programó el mensaje al prospecto sin enlace.</p><p><strong>Por favor, creá la reunión de forma manual y enviá el enlace al prospecto.</strong></p><p>Los avisos por WhatsApp quedan en cola de envío; comprobá su entrega en Chatwoot.</p><a href="/prospectos/${p.id}">Volver a la ficha del prospecto</a></main>`,req));
-  if(meeting?.recordingWarning)return res.status(200).send(layout('Demostración coordinada — Meet creado',`<main style="max-width:740px;margin:40px auto;padding:28px;border:1px solid #f2c36b;border-radius:12px;background:#fff9e9;color:#553b12"><h2>✅ Reunión de Google Meet creada</h2><p>La demostración quedó registrada y el mensaje al prospecto con el enlace de Meet quedó en cola de envío.</p><p><strong>⚠️ No se pudo activar la grabación automática.</strong> Si necesitás grabar, activá la grabación manualmente desde Meet cuando corresponda y con el aviso a los participantes.</p><p><strong>Enlace:</strong> <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a></p><p>Comprobá la entrega del mensaje en Chatwoot.</p><a href="/prospectos/${p.id}">Volver a la ficha del prospecto</a></main>`,req));
+  if(meeting?.recordingWarning||meeting?.cohostWarning)return res.status(200).send(layout('Demostración coordinada — Meet creado',`<main style="max-width:740px;margin:40px auto;padding:28px;border:1px solid #f2c36b;border-radius:12px;background:#fff9e9;color:#553b12"><h2>✅ Reunión de Google Meet creada</h2><p>La demostración quedó registrada y el mensaje al prospecto con el enlace de Meet quedó en cola de envío.</p>${meeting?.recordingWarning?'<p><strong>⚠️ No se pudo activar la grabación automática.</strong> Si necesitás grabar, activá la grabación manualmente desde Meet cuando corresponda y con el aviso a los participantes.</p>':''}${meeting?.cohostWarning?`<p><strong>⚠️ No se pudo confirmar el coanfitrión:</strong> ${esc(meeting.cohostWarning)}. Asignalo manualmente antes de la demo.</p>`:'<p>✅ Coanfitrión del vendedor confirmado.</p>'}<p><strong>Enlace:</strong> <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a></p><p>Comprobá la entrega del mensaje en Chatwoot.</p><a href="/prospectos/${p.id}">Volver a la ficha del prospecto</a></main>`,req));
   return res.redirect(`/prospectos/${p.id}`);
  }catch(e){await client.query('ROLLBACK').catch(()=>{});
     // Evitamos borrar automáticamente un Meet compartido entre dos intentos concurrentes

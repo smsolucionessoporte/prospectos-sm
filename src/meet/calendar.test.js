@@ -1,8 +1,8 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const {crearReunionMeet}=require('./calendar');
-const ENV=['GOOGLE_CALENDAR_CLIENT_ID','GOOGLE_CALENDAR_CLIENT_SECRET','GOOGLE_CALENDAR_REFRESH_TOKEN'];
-function configured(){for(const [i,k] of ENV.entries())process.env[k]=['id','secret','refresh'][i];}
+const ENV=['GOOGLE_CALENDAR_CLIENT_ID','GOOGLE_CALENDAR_CLIENT_SECRET','GOOGLE_CALENDAR_REFRESH_TOKEN','GOOGLE_CALENDAR_ID'];
+function configured(){for(const [i,k] of ENV.entries())process.env[k]=['id','secret','refresh','shared@group.calendar.google.com'][i];}
 function restore(original){for(const [k,v] of Object.entries(original)){if(v===undefined)delete process.env[k];else process.env[k]=v;}}
 function futureDate(){const d=new Date(Date.now()+7*86400000);const local=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);return `${local}T11:00`;}
 test('Meet personalizado: crea evento y exige que la grabación quede habilitada',async()=>{
@@ -72,4 +72,52 @@ test('reintento de Calendar con mismo idempotencyKey recupera evento existente (
   assert.match(eventId,/^sm[0-9a-f]{40}$/);
   assert.equal(posts,1);assert.equal(gets,1);assert.equal(m.recordingEnabled,false);
  }finally{globalThis.fetch=original;restore(env);}
+});
+
+test('crea evento en calendario compartido, invita al vendedor y lo agrega como COHOST',async()=>{
+ const original=globalThis.fetch,env=Object.fromEntries(ENV.map(k=>[k,process.env[k]]));configured();
+ const calls=[];
+ globalThis.fetch=async(url,init={})=>{
+  const u=String(url);calls.push({url:u,method:init.method||'GET',body:init.body});
+  if(u.includes('oauth2.googleapis.com'))return new Response(JSON.stringify({access_token:'mock'}),{status:200});
+  if(u.includes('calendar/v3')&&init.method==='POST')return new Response(JSON.stringify({id:'evt456',hangoutLink:'https://meet.google.com/abc-defg-hij',htmlLink:'https://calendar.google.com/event'}),{status:200});
+  if(u.endsWith('/spaces/abc-defg-hij'))return new Response(JSON.stringify({name:'spaces/spaceQ'}),{status:200});
+  if(u.includes('/spaces/spaceQ?')&&init.method==='PATCH')return new Response('recording unsupported',{status:400});
+  if(u.endsWith('/spaces/spaceQ/members')&&init.method==='POST')return new Response(JSON.stringify({name:'spaces/spaceQ/members/123',email:'rafael@gmail.com',role:'COHOST'}),{status:200});
+  return new Response('unexpected',{status:500});
+ };
+ try{
+  const m=await crearReunionMeet({title:'Demo',localStart:futureDate(),vendedorEmail:'Rafael@gmail.com'});
+  assert.equal(m.cohostEnabled,true);assert.equal(m.cohostWarning,null);
+  assert.equal(m.recordingEnabled,false);assert.ok(m.recordingWarning);
+  const eventRequest=calls.find(c=>c.method==='POST'&&c.url.includes('calendar/v3'));
+  assert.match(eventRequest.url,/shared%40group\.calendar\.google\.com\/events\?conferenceDataVersion=1&sendUpdates=all/);
+  assert.deepEqual(JSON.parse(eventRequest.body).attendees,[{email:'rafael@gmail.com'}]);
+  const memberRequest=calls.find(c=>c.method==='POST'&&c.url.includes('/members'));
+  assert.deepEqual(JSON.parse(memberRequest.body),{email:'rafael@gmail.com',role:'COHOST'});
+ }finally{globalThis.fetch=original;restore(env);}
+});
+
+test('si Meet rechaza COHOST la demo mantiene el enlace, pero advierte que hay que asignarlo manualmente',async()=>{
+ const old=globalThis.fetch,env=Object.fromEntries(ENV.map(k=>[k,process.env[k]]));configured();
+ globalThis.fetch=async(url,init={})=>{
+  const u=String(url);
+  if(u.includes('oauth2.googleapis.com'))return new Response(JSON.stringify({access_token:'mock'}),{status:200});
+  if(u.includes('calendar/v3')&&init.method==='POST')return new Response(JSON.stringify({id:'evt456',hangoutLink:'https://meet.google.com/abc-defg-hij'}),{status:200});
+  if(u.endsWith('/spaces/abc-defg-hij'))return new Response(JSON.stringify({name:'spaces/spaceQ'}),{status:200});
+  if(u.includes('/spaces/spaceQ?')&&init.method==='PATCH')return new Response('{}',{status:200});
+  if(u.endsWith('/members')&&init.method==='POST')return new Response('insufficient scope',{status:403});
+  return new Response('unexpected',{status:500});
+ };
+ try{
+  const m=await crearReunionMeet({title:'Demo',localStart:futureDate(),vendedorEmail:'giuliano@gmail.com'});
+  assert.equal(m.cohostEnabled,false);assert.match(m.cohostWarning,/HTTP 403/);
+  assert.equal(m.joinUrl,'https://meet.google.com/abc-defg-hij');assert.equal(m.recordingEnabled,true);
+ }finally{globalThis.fetch=old;restore(env);}
+});
+
+test('no crea nuevas demos en Marisol si no se configuró un calendario compartido',async()=>{
+ const env=Object.fromEntries(ENV.map(k=>[k,process.env[k]]));configured();process.env.GOOGLE_CALENDAR_ID='primary';
+ try{await assert.rejects(crearReunionMeet({title:'Demo',localStart:futureDate()}),/calendario compartido/);}
+ finally{restore(env);}
 });

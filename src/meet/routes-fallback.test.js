@@ -13,6 +13,7 @@ function obtenerHandlers(crearReunionMeet){
  const sqlReply=async(sql,values=[])=>{
   queries.push({sql:String(sql),values});
   if(String(sql).startsWith('SELECT * FROM prospectos'))return {rows:[{...prospecto}]};
+  if(String(sql).includes('SELECT email FROM usuarios'))return {rows:[{email:'rafael@gmail.com'}]};
   return {rows:[],rowCount:1};
  };
  const fakePool={query:sqlReply,connect:async()=>({query:sqlReply,release:()=>{}})};
@@ -95,4 +96,13 @@ test('continuar sin haber intentado crear Meet queda bloqueado',async()=>{
  const r=await fixture.post('continuar');
  assert.equal(r.status,409);
  assert.equal(fixture.getCount(),0);
+});
+
+
+test('envía el correo del vendedor asignado al crear el Meet personalizado',async()=>{
+ let value=null;
+ const fixture=obtenerHandlers(async(args)=>{value=args;return {joinUrl:'https://meet.google.com/abc-defg-hij',eventId:'evt1',recordingEnabled:true,cohostEnabled:true};});
+ await fixture.post();
+ assert.equal(value.vendedorEmail,'rafael@gmail.com');
+ assert.match(value.idempotencyKey,/sm-prospectos:25:/);
 });

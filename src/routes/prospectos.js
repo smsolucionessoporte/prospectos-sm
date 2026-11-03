@@ -4573,8 +4573,12 @@ let cambioResponsable = null;
         } else {
           const when=parseLocal(fechaDemoNueva);
           if(when.utc.getTime()<=Date.now())return res.status(400).send('La fecha debe ser futura');
+          const {rows:responsablesMail}=await pool.query('SELECT email FROM usuarios WHERE id=$1 AND activo=TRUE LIMIT 1',[responsableDemoId]);
           const creada=await crearReunionMeet({title:'SM Soluciones | Demostración personalizada',
-            localStart:fechaDemoNueva,description:`Prospecto #${req.params.id}`});
+            localStart:fechaDemoNueva,description:`Prospecto #${req.params.id}`,
+            idempotencyKey:`sm-prospectos:reprogramada:${req.params.id}:${fechaDemoNueva}`,
+            vendedorEmail:responsablesMail[0]?.email||null});
+          if(creada.cohostWarning)console.warn('[MEET] Reprogramación: verificar coanfitrión manual',req.params.id,creada.cohostWarning);
           nuevoJoinUrl=creada.joinUrl;
           nuevoEventId=creada.eventId;
         }
