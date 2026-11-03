@@ -11,7 +11,8 @@ const {destinatariosDemo}=require('./destinatarios');
 const router=express.Router();
 const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const SITE=()=>String(process.env.PUBLIC_BASE_URL||'https://prospectos-sm-production.up.railway.app').replace(/\/$/,'');
-function mensajeDemo(p,fecha,link,custom){return `¡Tu demostración de SM Soluciones está coordinada! 🎥\n\n📅 ${new Intl.DateTimeFormat('es-AR',{timeZone:'America/Argentina/Buenos_Aires',weekday:'long',day:'2-digit',month:'long',hour:'2-digit',minute:'2-digit'}).format(new Date(fecha))} (hora de Buenos Aires)\n⏱️ Duración: 30 minutos\n🔗 Google Meet: ${link}\n\n${custom?'Demostración personalizada.':'Es una demostración grupal; podrán participar otros comercios.'}\nTe recomendamos ingresar desde una computadora y conectarte a horario. La reunión se grabará para uso interno.`;}
+function mensajeDemo(p,fecha,link,custom,grabacionConfirmada=true){return `¡Tu demostración de SM Soluciones está coordinada! 🎥\n\n📅 ${new Intl.DateTimeFormat('es-AR',{timeZone:'America/Argentina/Buenos_Aires',weekday:'long',day:'2-digit',month:'long',hour:'2-digit',minute:'2-digit'}).format(new Date(fecha))} (hora de Buenos Aires)\n⏱️ Duración: 30 minutos${link?`\n🔗 Google Meet: ${link}`:'\n📩 Te enviaremos el enlace de acceso por este medio antes de la demostración.'}\n\n${custom?'Demostración personalizada.':'Es una demostración grupal; podrán participar otros comercios.'}\nTe recomendamos conectarte desde una computadora y a horario.${link&&grabacionConfirmada?' La reunión se grabará para uso interno.':''}`;}
+
 async function iniciarMeet(){
  await pool.query(`ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS demo_tipo TEXT;
    ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS google_event_id TEXT;
@@ -269,6 +270,24 @@ function vistaCoordinarDemo(p){
  })();
  </script>`;
 }
+// Si falla la creación, todavía NO registramos la demo ni enviamos avisos.
+// El vendedor decide si reintenta o coordina sin enlace.
+function vistaFalloCreacionMeet(p,fecha,hora,causa){
+ const info=String(causa||'Google Meet no pudo crear el enlace').slice(0,350);
+ return `<main style="max-width:760px;margin:42px auto;padding:28px;background:#fff;border:1px solid #e4e8ee;border-radius:14px;color:#243247">
+  <h1 style="font-size:24px;color:#954b05">⚠️ No se pudo crear Google Meet</h1>
+  <p>La reunión del <strong>${esc(fecha)} a las ${esc(hora)} (Buenos Aires)</strong> todavía no se registró en SM Comercial y no se envió ningún mensaje al prospecto.</p>
+  <p style="padding:12px;border-radius:8px;background:#fff5e7"><strong>Motivo:</strong> ${esc(info)}</p>
+  <p>Podés volver a intentar crear el Meet o continuar sin enlace y enviarlo manualmente después.</p>
+  <form method="post" action="/prospectos/${Number(p.id)}/demo" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:20px">
+   <input type="hidden" name="tipo" value="personalizada"><input type="hidden" name="fecha" value="${esc(fecha)}"><input type="hidden" name="hora" value="${esc(hora)}">
+   <button type="submit" name="meet_accion" value="reintentar" style="border:0;border-radius:8px;padding:12px 18px;background:#2563eb;color:white;font-weight:bold;cursor:pointer">↻ Volver a intentar crear Meet</button>
+   <button type="submit" name="meet_accion" value="continuar" style="border:1px solid #d97706;border-radius:8px;padding:12px 18px;background:#fff7ed;color:#93400c;font-weight:bold;cursor:pointer">Continuar sin enlace</button>
+  </form>
+  <p style="font-size:13px;color:#5b6880;margin-top:18px">Si continuás sin enlace, se cambiará el estado a <strong>demo_coordinada</strong>, se enviará la confirmación por WhatsApp sin enlace y se notificará al equipo que debe crearlo y enviarlo manualmente. Comprobá los envíos en Chatwoot.</p>
+  <p><a href="/prospectos/${Number(p.id)}">Cancelar y volver a la ficha</a></p>
+ </main>`;
+}
 router.get('/prospectos/:id/demo',requireAuth,async(req,res)=>{
  const {rows}=await pool.query('SELECT * FROM prospectos WHERE id=$1',[req.params.id]);const p=rows[0];if(!p)return res.status(404).send('Prospecto no encontrado');
  if(!await puedeGestionar(p,req.session.usuario))return res.status(403).send('Sin permisos sobre este prospecto');
@@ -284,10 +303,29 @@ router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:fals
   if(custom){const time=String(req.body.hora||'');const dt=parseLocal(`${date}T${time}`);if(dt.utc<=new Date())throw new Error('Elegí una fecha futura');slot={...dt,url:null,slot:'personalizada'};}
   else slot=checkSlot(date,req.body.tipo);
  }catch(e){return res.status(400).send(`Fecha inválida: ${esc(e.message)}`);}
- let meeting=null;
- if(custom){try{meeting=await crearReunionMeet({title:`SM Soluciones | Demostración personalizada`,localStart:`${date}T${slot.time}`,description:`Demo comercial SM. Prospecto interno #${p.id}`});}
-   catch(e){return res.status(503).send(`No se creó la reunión: ${esc(e.message)}. No modificamos la ficha.`);}}
- const url=meeting?.joinUrl||slot.url,fecha=`${date}T${slot.time}`;
+ const fecha=`${date}T${slot.time}`;
+ const accion=String(req.body.meet_accion||'crear');
+ if(!['crear','reintentar','continuar'].includes(accion))return res.status(400).send('Acción de Meet inválida');
+ let meeting=null,meetError=null;
+ if(custom){
+  if(accion==='continuar'){
+   const pending=req.session?.meetPendiente;
+   if(!pending||pending.prospectoId!==Number(p.id)||pending.fecha!==fecha||pending.hasta<Date.now()){
+    return res.status(409).send(layout('Reintentar creación',`<p>No hay un fallo de Google Meet pendiente para esta demostración. <a href="/prospectos/${p.id}/demo">Volver a coordinar</a>.</p>`,req));
+   }
+   meetError=new Error('El vendedor eligió continuar sin enlace después de fallar Google Meet');
+  }else{
+   try{
+    meeting=await crearReunionMeet({title:'SM Soluciones | Demostración personalizada',localStart:fecha,
+      description:`Demo comercial SM. Prospecto interno #${p.id}`,idempotencyKey:`sm-prospectos:${p.id}:${fecha}`});
+   }catch(e){
+    console.error('[MEET] No se pudo crear Meet; esperando decisión del vendedor',p.id,e.message);
+    if(req.session)req.session.meetPendiente={prospectoId:Number(p.id),fecha,hasta:Date.now()+15*60000};
+    return res.status(200).send(layout('No se pudo crear Meet — Elegí cómo continuar',vistaFalloCreacionMeet(p,date,slot.time,e.message),req));
+   }
+  }
+ }
+ const url=meeting?.joinUrl||slot.url;
  const client=await pool.connect();
  try{
   await client.query('BEGIN');const {rows:actualRows}=await client.query('SELECT * FROM prospectos WHERE id=$1 FOR UPDATE',[p.id]);const actual=actualRows[0];
@@ -295,14 +333,20 @@ router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:fals
   await client.query(`UPDATE prospectos SET estado='demo_coordinada',demo_fecha=$2::timestamp,demo_tipo=$3,
     zoom_join_url=$4,google_event_id=$5,demo_responsable=COALESCE(demo_responsable,6),demo_solicitud=NULL,recordatorio_enviado=false,
     recordatorio_relevamiento_enviado=false,actualizado_en=NOW() WHERE id=$1`,[p.id,fecha,custom?'personalizada':`grupal_${slot.slot}`,url,meeting?.eventId||null]);
-  await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota) VALUES($1,$2,$3,$4,$5)',[p.id,actual.estado,'demo_coordinada',req.session.usuario.id,`Demostración ${custom?'personalizada':'grupal'} en Google Meet · ${fecha} · ${url}`]);
-  const seller=await vendedorAsignado(p),text=mensajeDemo(p,slot.utc,url,custom);
-  const intern=`📅 *DEMO COORDINADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} Buenos Aires\n🎥 ${url}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
+  await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota) VALUES($1,$2,$3,$4,$5)',[p.id,actual.estado,'demo_coordinada',req.session.usuario.id,`Demostración ${custom?'personalizada':'grupal'} · ${fecha} · ${url||'Meet pendiente de creación manual'}${meetError?' · Falló creación automática: '+meetError.message:''}${meeting?.recordingWarning?' · Grabación automática no confirmada: '+meeting.recordingWarning:''}`]);
+  const seller=await vendedorAsignado(p),text=mensajeDemo(p,slot.utc,url,custom,custom?meeting?.recordingEnabled===true:true);
+  const intern=`${meetError?'⚠️ *REUNIÓN PENDIENTE DE CREACIÓN MANUAL*\nCreá la reunión de Google Meet y enviá el enlace al prospecto.\n\n':''}${meeting?.recordingWarning?'⚠️ *REUNIÓN CREADA SIN GRABACIÓN AUTOMÁTICA CONFIRMADA*\nEl enlace de Meet funciona; si corresponde, activá la grabación manualmente.\n\n':''}📅 *DEMO COORDINADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} Buenos Aires\n🎥 ${url||'PENDIENTE: crear y enviar enlace manualmente'}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
   await guardarAvisos(client,p,`manual:${fecha}`,text,intern);
-  await client.query('COMMIT');setImmediate(()=>procesarAvisos().catch(console.error));
+  await client.query('COMMIT');
+  if(custom&&req.session)delete req.session.meetPendiente;
+  setImmediate(()=>procesarAvisos().catch(console.error));
+  if(meetError)return res.status(200).send(layout('Demostración registrada — acción pendiente',`<main style="max-width:740px;margin:40px auto;padding:28px;border:1px solid #f2c36b;border-radius:12px;background:#fff9e9;color:#553b12"><h2>⚠️ No se pudo crear la reunión automáticamente</h2><p>La demostración quedó registrada y se programó el mensaje al prospecto sin enlace.</p><p><strong>Por favor, creá la reunión de forma manual y enviá el enlace al prospecto.</strong></p><p>Los avisos por WhatsApp quedan en cola de envío; comprobá su entrega en Chatwoot.</p><a href="/prospectos/${p.id}">Volver a la ficha del prospecto</a></main>`,req));
+  if(meeting?.recordingWarning)return res.status(200).send(layout('Demostración coordinada — Meet creado',`<main style="max-width:740px;margin:40px auto;padding:28px;border:1px solid #f2c36b;border-radius:12px;background:#fff9e9;color:#553b12"><h2>✅ Reunión de Google Meet creada</h2><p>La demostración quedó registrada y el mensaje al prospecto con el enlace de Meet quedó en cola de envío.</p><p><strong>⚠️ No se pudo activar la grabación automática.</strong> Si necesitás grabar, activá la grabación manualmente desde Meet cuando corresponda y con el aviso a los participantes.</p><p><strong>Enlace:</strong> <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a></p><p>Comprobá la entrega del mensaje en Chatwoot.</p><a href="/prospectos/${p.id}">Volver a la ficha del prospecto</a></main>`,req));
   return res.redirect(`/prospectos/${p.id}`);
  }catch(e){await client.query('ROLLBACK').catch(()=>{});
-    if(meeting?.eventId)await cancelarReunionMeet(meeting.eventId).catch(err=>console.error('[MEET] No pudo revertirse el evento',meeting.eventId,err.message));
+    // Evitamos borrar automáticamente un Meet compartido entre dos intentos concurrentes
+    // que reutilizan el mismo ID de Calendar. Se requiere reconciliación manual si falló DB.
+    if(meeting?.eventId)console.error('[MEET] Verificar evento Calendar tras fallo al guardar demo (no se eliminó)',meeting.eventId);
     console.error('[MEET] No se pudo registrar reunión',e);return res.status(500).send('No se pudo completar la coordinación. Revisá la ficha y el evento de Google Calendar antes de reintentar.');}
  finally{client.release();}
 });

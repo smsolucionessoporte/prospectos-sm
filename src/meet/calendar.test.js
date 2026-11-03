@@ -15,10 +15,10 @@ test('Meet personalizado: crea evento y exige que la grabación quede habilitada
   if(u.includes('spaces/spaceQ')&&init?.method==='PATCH')return new Response(JSON.stringify({name:'spaces/spaceQ'}),{status:200});
   return new Response('unexpected',{status:500});
  });
- try{const result=await crearReunionMeet({title:'Demo',localStart:futureDate()});assert.equal(result.joinUrl,'https://meet.google.com/abc-defg-hij');assert.equal(calls.filter(x=>x.method==='PATCH').length,1);}
+ try{const result=await crearReunionMeet({title:'Demo',localStart:futureDate()});assert.equal(result.joinUrl,'https://meet.google.com/abc-defg-hij');assert.equal(calls.filter(x=>x.method==='PATCH').length,1);assert.equal(result.recordingEnabled,true);assert.equal(result.recordingWarning,null);}
  finally{globalThis.fetch=original;restore(env);}
 });
-test('si Google no permite grabación, intenta eliminar evento y no confirma',async()=>{
+test('si Google no permite grabación, mantiene evento y enlace sin prometer grabación',async()=>{
  const original=globalThis.fetch,env=Object.fromEntries(ENV.map(k=>[k,process.env[k]]));configured();let deleted=false;
  globalThis.fetch=(async(url,init)=>{
   const u=String(url);
@@ -29,7 +29,7 @@ test('si Google no permite grabación, intenta eliminar evento y no confirma',as
   if(init?.method==='DELETE'){deleted=true;return new Response(null,{status:204});}
   return new Response('unexpected',{status:500});
  });
- try{await assert.rejects(crearReunionMeet({title:'Demo',localStart:futureDate()}),/grabación automática/);assert.equal(deleted,true);}
+ try{const m=await crearReunionMeet({title:'Demo',localStart:futureDate()});assert.equal(m.joinUrl,'https://meet.google.com/abc-defg-hij');assert.equal(m.recordingEnabled,false);assert.match(m.recordingWarning,/grabación automática/);assert.equal(deleted,false);}
  finally{globalThis.fetch=original;restore(env);}
 });
 test('si Calendar demora en generar el enlace, consulta el evento antes de confirmar',async()=>{
@@ -45,4 +45,31 @@ test('si Calendar demora en generar el enlace, consulta el evento antes de confi
  };
  try{const m=await crearReunionMeet({title:'Demo',localStart:futureDate()});assert.equal(m.eventId,'evt456');assert.equal(polls,1);}
  finally{globalThis.fetch=old;restore(env);}
+});
+
+test('reintento de Calendar con mismo idempotencyKey recupera evento existente (409) sin duplicarlo',async()=>{
+ const original=globalThis.fetch,env=Object.fromEntries(ENV.map(k=>[k,process.env[k]]));configured();let eventId='',posts=0,gets=0;
+ globalThis.fetch=async(url,init)=>{
+  const u=String(url);
+  if(u.includes('oauth2.googleapis.com'))return new Response(JSON.stringify({access_token:'mock'}),{status:200});
+  if(u.includes('calendar/v3')&&init?.method==='POST'){
+   posts++;
+   eventId=JSON.parse(init.body).id;
+   return new Response('already exists',{status:409});
+  }
+  if(u.includes('calendar/v3')&&(!init?.method||init.method==='GET')){
+   gets++;
+   assert.ok(u.endsWith('/events/'+eventId));
+   return new Response(JSON.stringify({id:eventId,hangoutLink:'https://meet.google.com/abc-defg-hij'}),{status:200});
+  }
+  if(u.includes('spaces/abc-defg-hij'))return new Response(JSON.stringify({name:'spaces/spaceQ'}),{status:200});
+  if(init?.method==='PATCH')return new Response('recording not supported',{status:400});
+  return new Response('unexpected',{status:500});
+ };
+ try{
+  const m=await crearReunionMeet({title:'Demo',localStart:futureDate(),idempotencyKey:'prospecto25:demo'});
+  assert.equal(m.joinUrl,'https://meet.google.com/abc-defg-hij');
+  assert.match(eventId,/^sm[0-9a-f]{40}$/);
+  assert.equal(posts,1);assert.equal(gets,1);assert.equal(m.recordingEnabled,false);
+ }finally{globalThis.fetch=original;restore(env);}
 });
