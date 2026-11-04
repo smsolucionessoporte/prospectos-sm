@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { sincronizarResponsableChatwoot } = require('./responsables');
 
-test('reasigna Santiago en la transacción, sincronizando nombre y sin tocar creador o demo', async () => {
+test('corrige responsable en control_ventas sin avisos ni reiniciar SLA', async () => {
   const consultas = [];
   const pool = { async connect() { return {
     async query(sql, args) {
@@ -18,10 +18,11 @@ test('reasigna Santiago en la transacción, sincronizando nombre y sin tocar cre
   const upsert = consultas.find(([sql]) => sql.includes('INSERT INTO control_ventas'));
   assert.deepEqual(upsert[1], [2860, 13, 'Santiago Fontanet']);
   assert.match(upsert[0], /vendedor_nombre=EXCLUDED.vendedor_nombre/);
-  assert.match(upsert[0], /fecha_derivacion=COALESCE/);
-  assert.match(upsert[0], /derivado=TRUE/);
+  assert.doesNotMatch(upsert[0], /fecha_derivacion=COALESCE/);
+  assert.doesNotMatch(upsert[0], /fecha_inicio_espera_vendedor=CASE/);
   assert.equal(consultas.some(([sql]) => /UPDATE prospectos\b/.test(sql)), false);
-  assert.ok(consultas.some(([sql]) => sql.includes("origen='chatwoot'")));
+  assert.ok(!consultas.some(([sql]) => sql.includes("origen='chatwoot'")));
+  assert.ok(!consultas.some(([sql]) => /UPDATE crm_chatwoot_estado/.test(sql)));
   assert.equal(consultas.at(-1)[0], 'COMMIT');
 });
 

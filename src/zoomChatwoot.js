@@ -164,7 +164,10 @@ async function enviarCampaniaPorConversationId(conversationId, mensaje, campania
 
 const BOT_INBOX_ID = Number(process.env.BOT_INBOX_ID);
 
-async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
+async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null, opciones = {}) {
+  // Los envíos automáticos que solo notifican no pueden modificar la asignación,
+  // las etiquetas ni el estado de la conversación.
+  const soloMensaje = opciones?.soloMensaje === true;
 
       const inboxId = BOT_INBOX_ID;
 
@@ -244,7 +247,7 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
   const esAvisoInterno = [AGENTE_TELEFONO[Number(usuarioId)], telefonoVendedor(Number(usuarioId))]
     .some(v => Boolean(v) && digitos(v) === telefonoDestino);
 
-  if (!esAvisoInterno && conversation.status === 'resolved') {
+  if (!esAvisoInterno && !soloMensaje && conversation.status === 'resolved') {
     await axios.post(
       `${process.env.CHATWOOT_URL}/api/v1/accounts/${process.env.CHATWOOT_ACCOUNT_ID}/conversations/${conversation.id}/toggle_status`,
       { status: 'open' },
@@ -252,7 +255,7 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
     );
   }
 
-  if (!esAvisoInterno) {
+  if (!esAvisoInterno && !soloMensaje) {
     // La modificación de asignación y etiquetas solo corresponde a mensajes
     // comerciales al cliente, nunca a recordatorios enviados al personal SM.
     const chatwootAgentId = Number(
@@ -309,11 +312,25 @@ async function enviarPorChatwoot(telefono, mensaje, usuarioId, origen = null) {
 
 
 
+// Envío de recordatorios, invitaciones y confirmaciones al cliente.
+// Escribir en Chatwoot NO implica reasignar el vendedor ni reabrir la conversación.
+async function enviarMensajeSinReasignar(telefono, mensaje, conversationId = null) {
+  const id = Number(conversationId);
+  if (conversationId != null && conversationId !== '' && Number.isSafeInteger(id) && id > 0) {
+    await enviarMensajePorConversationId(id, mensaje);
+    return true;
+  }
+  if (!String(telefono || '').trim()) return false;
+  return enviarPorChatwoot(String(telefono), mensaje, null, null, { soloMensaje: true });
+}
+
+
 module.exports = {
   crearReunionZoom,
   enviarPorChatwoot,
   formatearFechaAR,
   enviarMensajePorConversationId,
+  enviarMensajeSinReasignar,
   normalizarTelefono,
   enviarAvisoInterno,
   obtenerEstadoConversacionChatwoot,

@@ -2,7 +2,7 @@
 const express = require('express');
 const {pool}=require('../db');
 const {requireAuth,layout}=require('../middleware/auth');
-const {enviarMensajePorConversationId,enviarPorChatwoot,enviarAvisoInterno}=require('../zoomChatwoot');
+const {enviarMensajeSinReasignar,enviarAvisoInterno}=require('../zoomChatwoot');
 const {AGENTE_TELEFONO}=require('../zoomAgentes');
 const {vendedorAsignado,puedeGestionar}=require('../crm/seguimientos');
 const {MEET_GRUPAL,checkSlot,parseLocal,crearReunionMeet,cancelarReunionMeet}=require('./calendar');
@@ -68,10 +68,9 @@ async function procesarAvisos(){
    try{
     let ok=false;
     if(n.destino==='cliente'){
-      if(n.conversacion){await enviarMensajePorConversationId(n.conversacion,n.mensaje);ok=true;}
-      else if(n.telefono)ok=await enviarPorChatwoot(n.telefono,n.mensaje,6);
+      ok=await enviarMensajeSinReasignar(n.telefono,n.mensaje,n.conversacion);
     }else if(n.destino==='vendedor')ok=await enviarAvisoInterno(n.mensaje,n.destinatario);
-    else if(n.telefono)ok=await enviarPorChatwoot(n.telefono,n.mensaje,n.destinatario);
+    else if(n.telefono)ok=await enviarMensajeSinReasignar(n.telefono,n.mensaje,n.conversacion);
     if(!ok)throw new Error('Chatwoot no confirmó el envío');
     await pool.query("UPDATE meet_avisos SET estado='enviado',actualizado_en=NOW() WHERE id=$1",[n.id]);
    }catch(e){

@@ -9,7 +9,7 @@ const panelRoutes = require('./routes/panel');
 const prospectosRoutes = require('./routes/prospectos');
 const campaniasRoutes = require('./routes/campanias');
 const { iniciarProcesadorCampanias } = require('./routes/campanias');
-const { enviarPorChatwoot, enviarAvisoInterno, formatearFechaAR } = require('./zoomChatwoot');
+const { enviarPorChatwoot, enviarAvisoInterno, enviarMensajeSinReasignar, formatearFechaAR } = require('./zoomChatwoot');
 const { responsableCierre } = require('./routes/prospectos');
 const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
 const { registrarRutasZoomGiuliano } = require('./zoomGiuliano');
@@ -128,10 +128,12 @@ function iniciarRecordatorios() {
 
 💻 Te recomendamos conectarte desde una computadora, con audio y micrófono habilitados.`;
 
-        const enviado = await enviarPorChatwoot(
+        // Recordatorio comercial: nunca reasignar la conversación al
+        // responsable de la demo ni modificar etiquetas/estado en Chatwoot.
+        const enviado = await enviarMensajeSinReasignar(
           p.telefono,
           mensaje,
-          p.demo_responsable
+          p.chatwoot_conversation_id
         );
 
         if (enviado) {

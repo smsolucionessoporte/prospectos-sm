@@ -176,6 +176,78 @@ async function crearReunionMeet({title, localStart, description='', idempotencyK
   return {joinUrl,eventId:data.id,calendarUrl:data.htmlLink,recordingEnabled,recordingWarning,
     vendedorEmail:email,cohostEnabled,cohostWarning};
 }
+// Cambia la invitación y el rol de coanfitrión de una reunión ya creada.
+// No cambia el organizador de Google Meet ni el responsable comercial de Chatwoot.
+async function actualizarResponsableReunionMeet({eventId,joinUrl,nuevoEmail,anteriorEmail=null}) {
+  const nuevo=correoValido(nuevoEmail);
+  if(!nuevo) throw new Error('El nuevo responsable no tiene un correo válido configurado en SM Comercial');
+  if(!eventId) return {invitado:false,cohost:false,avisos:['Esta demo no tiene un evento editable de Calendar. Invitá al nuevo responsable manualmente.']};
+  const token=await googleAccessToken();
+  const cid=String(process.env.GOOGLE_CALENDAR_ID||'').trim();
+  const calendarIds=[...new Set([...(cid&&cid!=='primary'?[cid]:[]),'primary'])];
+  let ev=null,calendarId=null;
+  for(const id of calendarIds){
+    const response=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(id)}/events/${encodeURIComponent(eventId)}`,{
+      headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
+    if(response.status===404)continue;
+    if(!response.ok)throw new Error(`No se pudo consultar el evento en Calendar (HTTP ${response.status})`);
+    ev=await response.json();calendarId=id;break;
+  }
+  if(!ev)throw new Error('No se encontró el evento en el calendario compartido ni en el calendario principal');
+  const anterior=correoValido(anteriorEmail);
+  const organizer=correoValido(ev.organizer?.email);
+  const current=Array.isArray(ev.attendees)?ev.attendees:[];
+  const attendees=current.filter(a=>!(anterior&&anterior!==nuevo&&anterior!==organizer&&correoValido(a.email)===anterior));
+  if(!attendees.some(a=>correoValido(a.email)===nuevo))attendees.push({email:nuevo});
+  const unchanged=JSON.stringify(current)===JSON.stringify(attendees);
+  if(!unchanged){
+    const patch=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all&conferenceDataVersion=1`,{
+      method:'PATCH',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json',...(ev.etag?{'If-Match':ev.etag}:{})},
+      body:JSON.stringify({attendees}),signal:AbortSignal.timeout(12000)});
+    if(!patch.ok)throw new Error(`No se pudo actualizar la invitación en Calendar (HTTP ${patch.status})`);
+  }
+  const avisos=[];
+  const match=String(joinUrl||ev.hangoutLink||'').match(/^https:\/\/meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#]|$)/i);
+  if(!match){avisos.push('No se pudo identificar la sala de Meet para asignar el coanfitrión.');return {invitado:true,cohost:false,avisos};}
+  try{
+    const spaceResult=await fetch(`https://meet.googleapis.com/v2/spaces/${match[1]}`,{
+      headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
+    if(!spaceResult.ok)throw new Error(`No se pudo consultar la sala (HTTP ${spaceResult.status})`);
+    const space=await spaceResult.json();
+    if(!/^spaces\/[A-Za-z0-9_-]+$/.test(space.name||''))throw new Error('Identificador de Meet inválido');
+    const base=`https://meet.googleapis.com/v2/${space.name}/members`;
+    const membersResult=await fetch(`${base}?pageSize=100`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
+    if(!membersResult.ok)throw new Error(`No se pudieron consultar coanfitriones (HTTP ${membersResult.status})`);
+    const members=await membersResult.json();
+    const found=(members.members||[]).find(m=>correoValido(m.email)===nuevo);
+    if(found?.role!=='COHOST'){
+      const change=found
+        ? await fetch(`https://meet.googleapis.com/v2/${found.name}?updateMask=role`,{
+            method:'PATCH',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},
+            body:JSON.stringify({role:'COHOST'}),signal:AbortSignal.timeout(12000)})
+        : await fetch(base,{method:'POST',headers:{Authorization:`Bearer ${token}`,'content-type':'application/json'},
+            body:JSON.stringify({email:nuevo,role:'COHOST'}),signal:AbortSignal.timeout(12000)});
+      if(!change.ok)throw new Error(`Google rechazó asignar COHOST (HTTP ${change.status})`);
+      const member=await change.json();
+      if(member.role!=='COHOST')throw new Error('Google no confirmó el rol COHOST');
+    }
+    if(anterior&&anterior!==nuevo){
+      const old=(members.members||[]).find(m=>correoValido(m.email)===anterior && m.role==='COHOST');
+      if(old?.name&&/^spaces\/[A-Za-z0-9_-]+\/members\/[A-Za-z0-9_-]+$/.test(old.name)){
+        try{
+          const removed=await fetch(`https://meet.googleapis.com/v2/${old.name}`,{
+            method:'DELETE',headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(12000)});
+          if(!removed.ok&&removed.status!==404)avisos.push(`No se pudo quitar al coanfitrión anterior (HTTP ${removed.status}). Revisá Meet.`);
+        }catch(error){avisos.push(`Revisá el coanfitrión anterior: ${error.message}`);}
+      }
+    }
+    return {invitado:true,cohost:true,avisos};
+  }catch(error){
+    avisos.push(`No se pudo confirmar COHOST para ${nuevo}: ${error.message}. Asignalo manualmente desde Meet.`);
+    return {invitado:true,cohost:false,avisos};
+  }
+}
+
 async function cancelarReunionMeet(eventId) {
   if(!eventId) return;
   const token=await googleAccessToken();
@@ -190,4 +262,4 @@ async function cancelarReunionMeet(eventId) {
   }
   console.warn('[MEET] No se encontró evento al cancelar (ningún calendario)',eventId);
 }
-module.exports={TZ,MEET_GRUPAL,parseLocal,checkSlot,calendarConfigured,crearReunionMeet,cancelarReunionMeet};
+module.exports={TZ,MEET_GRUPAL,parseLocal,checkSlot,calendarConfigured,crearReunionMeet,cancelarReunionMeet,actualizarResponsableReunionMeet};

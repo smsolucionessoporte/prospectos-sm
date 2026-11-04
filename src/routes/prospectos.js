@@ -18,6 +18,7 @@ const {
 const {
   crearReunionZoom,
   enviarPorChatwoot,
+  enviarMensajeSinReasignar,
   formatearFechaAR,
   normalizarTelefono,
   enviarAvisoInterno,
@@ -1401,6 +1402,12 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
       [p.id],
     );
 
+    // Para una demo coordinada, el administrador puede cambiar su responsable
+    // desde esta misma ficha, sin alterar la asignación comercial de Chatwoot.
+    const responsablesDemo = req.session.usuario.rol === 'admin' && p.estado === 'demo_coordinada'
+      ? (await pool.query(`SELECT id,nombre,email FROM usuarios
+          WHERE activo=TRUE AND rol IN ('admin','vendedor','soporte') ORDER BY nombre`)).rows
+      : [];
     const seguimientosHtml = await renderSeguimientosFicha(p, req.session.usuario, req.query.tarea);
     const gestionesCRM = await pool.query(`
       SELECT s.gestion_realizada,s.proxima_accion,s.vence_en,s.creado_en,s.recordatorio,
@@ -1681,6 +1688,18 @@ if (req.session.usuario.rol === "admin") {
               <div class="detail-item">
                 <span class="detail-label">Responsable</span>
                 <span class="detail-val">${esc(responsableActualNombre)}</span>
+                ${responsablesDemo.length ? `
+                  <form method="POST" action="/prospectos/${p.id}/responsable-demo"
+                    style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center"
+                    onsubmit="return confirm('¿Corregir el responsable registrado en SM Comercial? No se modificarán Chatwoot, Calendar ni Meet y no se enviarán mensajes.')">
+                    <select name="responsable_id" aria-label="Nuevo responsable de la demostración" required
+                      style="max-width:220px;min-width:155px;padding:8px;border:1px solid #cbd5e1;border-radius:7px">
+                      ${responsablesDemo.map(r=>`<option value="${Number(r.id)}" ${Number(r.id)===Number(p.demo_responsable||p.creado_por)?'selected':''}>${esc(r.nombre)}${r.email?'':' (sin correo)'}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-primary" type="submit"><i class="ti ti-user-edit"></i> Cambiar responsable</button>
+                  </form>
+                  <small style="display:block;margin-top:5px;color:#64748b">Solo corrige el registro de SM Comercial. No envía avisos ni modifica Chatwoot, Calendar o Meet.</small>
+                ` : ''}
               </div>
             </div>
             ${
@@ -1947,6 +1966,51 @@ async function reasignarConversacionVentas(req, res) {
   }
 }
 router.post("/ventas/reasignar", requireAuth, requireRol("admin"), reasignarConversacionVentas);
+
+// ─── RESPONSABLE DE LA DEMOSTRACIÓN DESDE LA FICHA (ADMIN) ──────────────────
+router.post('/prospectos/:id/responsable-demo',requireAuth,requireRol('admin'),async(req,res)=>{
+  const prospectoId=Number(req.params.id),responsableId=Number(req.body.responsable_id);
+  if(!Number.isSafeInteger(prospectoId)||prospectoId<=0||!Number.isSafeInteger(responsableId)||responsableId<=0)
+    return res.status(400).send('Prospecto o responsable no válido');
+  const client=await pool.connect();
+  let info;
+  try{
+    await client.query('BEGIN');
+    const {rows:prospectos}=await client.query(`SELECT p.id,p.estado,p.demo_fecha,p.demo_responsable,p.creado_por,
+      oa.nombre AS anterior_nombre
+      FROM prospectos p LEFT JOIN usuarios oa ON oa.id=COALESCE(p.demo_responsable,p.creado_por)
+      WHERE p.id=$1 FOR UPDATE OF p`,[prospectoId]);
+    const actual=prospectos[0];
+    if(!actual){await client.query('ROLLBACK');return res.status(404).send('Prospecto no encontrado');}
+    if(actual.estado!=='demo_coordinada'||!actual.demo_fecha){
+      await client.query('ROLLBACK');return res.status(409).send('El cambio de responsable de demo solo está disponible para una demostración coordinada');
+    }
+    const {rows:destinatarios}=await client.query(`SELECT id,nombre FROM usuarios WHERE id=$1
+      AND activo=TRUE AND rol IN ('admin','vendedor','soporte') LIMIT 1`,[responsableId]);
+    const nuevo=destinatarios[0];
+    if(!nuevo){await client.query('ROLLBACK');return res.status(400).send('Responsable inactivo o inexistente');}
+    if(Number(actual.demo_responsable||actual.creado_por)===responsableId){
+      await client.query('ROLLBACK');return res.redirect(`/prospectos/${prospectoId}`);
+    }
+    await client.query(`UPDATE prospectos SET demo_responsable=$2,actualizado_en=NOW() WHERE id=$1`,[prospectoId,responsableId]);
+    await client.query(`INSERT INTO historial_estados (prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota)
+      VALUES ($1,$2,$2,$3,$4)`,[prospectoId,actual.estado,req.session.usuario.id,
+       `Corrección manual de responsable de demo: ${actual.anterior_nombre||'Sin asignar'} → ${nuevo.nombre} (solo CRM; sin acciones externas)`]);
+    await client.query('COMMIT');
+    info={...actual,nuevo};
+  }catch(error){
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error('[CRM] No se pudo cambiar responsable de demo',prospectoId,error.message);
+    return res.status(500).send('No se pudo cambiar el responsable de la demostración');
+  }finally{client.release();}
+
+  // Corrección administrativa únicamente en PostgreSQL. No se invoca Google,
+  // Chatwoot ni ninguna cola de notificaciones al modificar esta ficha.
+  guardarResultadoAccion(req,'Corrección de responsable en CRM',[
+    {ok:true,texto:`Responsable de la demo corregido a ${info.nuevo.nombre} solo en SM Comercial. No se modificaron Chatwoot, Calendar, Meet ni se enviaron mensajes.`}
+  ]);
+  return res.redirect(`/prospectos/${prospectoId}`);
+});
 
 // ─── CAMBIAR RESPONSABLE (SOLO ADMIN) ────────────────────────────────────────
 
@@ -4602,8 +4666,8 @@ let cambioResponsable = null;
       const nuevaFecha=formatearFechaAR(fechaDemoNueva);
       if(b.reenviar_invitacion === '1'){
         try{
-          const ok=await enviarPorChatwoot(b.telefono||actual.telefono,
-            `¡Hola! 😊 Tu demostración de SM Soluciones fue reprogramada.\n📅 ${nuevaFecha} (Buenos Aires)\n🎥 Google Meet: ${nuevoJoinUrl}\nDuración: 30 minutos.`,responsableDemoId);
+          const ok=await enviarMensajeSinReasignar(b.telefono||actual.telefono,
+            `¡Hola! 😊 Tu demostración de SM Soluciones fue reprogramada.\n📅 ${nuevaFecha} (Buenos Aires)\n🎥 Google Meet: ${nuevoJoinUrl}\nDuración: 30 minutos.`,actual.chatwoot_conversation_id);
           if(!ok)await alertarResponsableError(responsableDemoId,'Reprogramación sin aviso al cliente',actual,
             'La fecha fue actualizada, pero no se pudo entregar el WhatsApp; contactalo manualmente.');
         }catch(error){console.error('[MEET] Falló reenvío de invitación',error.message);}
