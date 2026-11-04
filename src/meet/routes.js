@@ -129,7 +129,7 @@ router.post('/demo/reservar',express.urlencoded({extended:false}),async(req,res)
   }else{
    const fecha=`${slot.date}T${slot.time}`;
    const result=await client.query(`UPDATE prospectos SET estado='demo_coordinada',demo_fecha=$2::timestamp,
-     demo_tipo=$3,zoom_join_url=$4,demo_responsable=COALESCE(demo_responsable,6),demo_solicitud=NULL,
+     demo_tipo=$3,zoom_join_url=$4,demo_solicitud=NULL,
      recordatorio_enviado=false,recordatorio_relevamiento_enviado=false,actualizado_en=NOW() WHERE id=$1`,[p.id,fecha,`grupal_${slot.slot}`,slot.url]);
    await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,nota) VALUES($1,$2,$3,$4)',[p.id,p.estado,'demo_coordinada',`Inscripción web: demostración grupal ${slot.slot.toUpperCase()} ${fecha} · Meet ${slot.url}`]);
    const text=mensajeDemo(p,slot.utc,slot.url,false);
@@ -338,7 +338,7 @@ router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:fals
   await client.query('BEGIN');const {rows:actualRows}=await client.query('SELECT * FROM prospectos WHERE id=$1 FOR UPDATE',[p.id]);const actual=actualRows[0];
   if(!['prospecto','sin_respuesta'].includes(actual.estado))throw new Error('La etapa fue modificada por otra gestión');
   await client.query(`UPDATE prospectos SET estado='demo_coordinada',demo_fecha=$2::timestamp,demo_tipo=$3,
-    zoom_join_url=$4,google_event_id=$5,demo_responsable=COALESCE(demo_responsable,6),demo_solicitud=NULL,recordatorio_enviado=false,
+    zoom_join_url=$4,google_event_id=$5,demo_solicitud=NULL,recordatorio_enviado=false,
     recordatorio_relevamiento_enviado=false,actualizado_en=NOW() WHERE id=$1`,[p.id,fecha,custom?'personalizada':`grupal_${slot.slot}`,url,meeting?.eventId||null]);
   await client.query('INSERT INTO historial_estados(prospecto_id,estado_anterior,estado_nuevo,usuario_id,nota) VALUES($1,$2,$3,$4,$5)',[p.id,actual.estado,'demo_coordinada',req.session.usuario.id,`Demostración ${custom?'personalizada':'grupal'} · ${fecha} · ${url||'Meet pendiente de creación manual'}${meetError?' · Falló creación automática: '+meetError.message:''}${meeting?.recordingWarning?' · Grabación automática no confirmada: '+meeting.recordingWarning:''}${meeting?.cohostWarning?' · Coanfitrión no confirmado: '+meeting.cohostWarning:''}`]);
   const seller=await vendedorAsignado(p),text=mensajeDemo(p,slot.utc,url,custom,custom?meeting?.recordingEnabled===true:true);
