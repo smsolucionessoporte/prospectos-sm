@@ -3,7 +3,7 @@
 // Solo notificar al responsable de la oportunidad. Marisol y Román
 // reciben avisos únicamente cuando son dueños de un prospecto interno,
 // nunca por defecto al registrarse una demo de otro vendedor.
-const VENDEDORES = new Set([8, 12, 13]);
+const VENDEDORES = new Set([8, 13]);
 const SOPORTE_INTERNO = new Set([6, 10]);
 
 function destinatariosDemo(responsableId, mensaje, telefonos = {}) {

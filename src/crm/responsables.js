@@ -8,7 +8,7 @@ async function sincronizarResponsableChatwoot(dbPool, conversationId, chatwootAg
   const id = Number(conversationId);
   const chatwootId = Number(chatwootAgentId);
   const usuarioId = AGENTE_CHATWOOT_ID[chatwootId];
-  if (!Number.isSafeInteger(id) || id <= 0 || ![4, 11, 19].includes(chatwootId) || !usuarioId) {
+  if (!Number.isSafeInteger(id) || id <= 0 || ![4, 19].includes(chatwootId) || !usuarioId) {
     const error = new Error('Conversación o vendedor comercial inválido');
     error.status = 400;
     throw error;

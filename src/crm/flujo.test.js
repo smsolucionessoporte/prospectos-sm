@@ -62,7 +62,7 @@ test('Al registrar una gestión se conserva historial y se programa próxima acc
    : {rows:[{vendedor_id:4}]};
  pool.connect=async()=>({async query(sql,args){writes.push([sql,args]);return sql.includes('INSERT INTO crm_tareas')?{rows:[{id:802}],rowCount:1}:sql.includes('SELECT estado FROM prospectos')?{rows:[{estado:'demo_realizada'}],rowCount:1}:{rows:[],rowCount:1};},release(){}});
  const res=mockRes();await postSeguimiento({session:{usuario},params:{id:'186'},body:{
-   gestion_realizada:'Llamé al cliente, revisará el plan',proxima_accion:'Volver a llamar',vence_en:'2026-11-02T11:00',
+   gestion_realizada:'Llamé al cliente, revisará el plan',proxima_accion:'Volver a llamar',vence_en:'2027-01-02T11:00',
    prioridad:'alta'}},res);
  assert.equal(res.destino,'/prospectos/186?seguimiento=ok#seguimientos');
  assert.ok(writes.some(([s,a])=>s.includes('INSERT INTO crm_seguimientos')&&a[3].startsWith('Llamé')));

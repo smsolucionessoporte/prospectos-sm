@@ -2,14 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { telefonoVendedor, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
 
-test('los únicos destinatarios comerciales son los tres vendedores actuales', () => {
+test('los únicos destinatarios comerciales activos son Rafael y Santiago', () => {
   assert.equal(AGENTE_CHATWOOT_ID[4], 8);
-  assert.equal(AGENTE_CHATWOOT_ID[11], 12);
+  assert.equal(AGENTE_CHATWOOT_ID[11], undefined);
   assert.equal(AGENTE_CHATWOOT_ID[19], 13);
   assert.equal(telefonoVendedor(7), null); // Daniel ya no recibe derivaciones comerciales.
   assert.equal(telefonoVendedor(6), null); // Las alertas comerciales no se mandan a admins.
   assert.ok(telefonoVendedor(8));
-  assert.ok(telefonoVendedor(12));
+  assert.equal(telefonoVendedor(12), null);
 });
 
 test('Santiago requiere un teléfono configurado; sin teléfono no hay destinatario alternativo', () => {

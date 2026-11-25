@@ -53,7 +53,7 @@ router.post('/api/ventas/aviso-directo', express.json(), async (req,res) => {
   const agentId = Number(req.body?.chatwoot_agent_id);
   const original = String(req.body?.mensaje || '').trim();
   const chatId = req.body?.chatwoot_conversation_id == null ? null : Number(req.body.chatwoot_conversation_id);
-  if (![4,11,19].includes(agentId) || !original || original.length > 4000 ||
+  if (![4,19].includes(agentId) || !original || original.length > 4000 ||
       (chatId !== null && (!Number.isSafeInteger(chatId) || chatId <= 0)))
     return res.status(400).json({ok:false,error:'Destinatario, conversación o mensaje inválido'});
   let mensaje = original;
@@ -64,7 +64,7 @@ router.post('/api/ventas/aviso-directo', express.json(), async (req,res) => {
   if (mensaje.length > 4000) return res.status(400).json({ok:false,error:'Mensaje demasiado largo'});
   const usuarioId = AGENTE_CHATWOOT_ID[agentId];
   if (!telefonoVendedor(usuarioId)) {
-    const variable = {8:'VENTAS_TELEFONO_RAFAEL',12:'VENTAS_TELEFONO_GIULIANO',13:'VENTAS_TELEFONO_SANTIAGO'}[usuarioId];
+    const variable = {8:'VENTAS_TELEFONO_RAFAEL',13:'VENTAS_TELEFONO_SANTIAGO'}[usuarioId];
     console.warn('[VENTAS] AVISO_SIN_TELEFONO', { usuarioId, variable });
     return res.status(503).json({ok:false,error:`Falta teléfono válido: ${variable}`});
   }
@@ -301,11 +301,18 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
         ? rubro.trim()
         : null;
 
+    // No reabrir por webhook una conversación archivada o cliente activo.
+    if (chatwoot_conversation_id) {
+      const { rows: excluidas } = await pool.query(
+        'SELECT 1 FROM crm_chatwoot_exclusiones WHERE chatwoot_conversation_id=$1',
+        [chatwoot_conversation_id]);
+      if (excluidas.length) return res.json({ ok:true, excluido:true, motivo:'cliente_activo_o_descartado' });
+    }
     // 1. Buscar primero por conversación de Chatwoot.
     if (chatwoot_conversation_id) {
       const { rows: porConversacion } = await pool.query(
         `SELECT id
-         FROM prospectos
+         FROM crm_prospectos_comerciales
          WHERE chatwoot_conversation_id = $1
          LIMIT 1`,
         [chatwoot_conversation_id],
@@ -360,7 +367,7 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
 
     const { rows: porTelefono } = await pool.query(
       `SELECT id, chatwoot_conversation_id
-       FROM prospectos
+       FROM crm_prospectos_comerciales
        WHERE telefono = ANY($1)
        LIMIT 1`,
       [variantes],
@@ -444,7 +451,7 @@ router.post("/api/prospectos/auto-crear", express.json(), async (req, res) => {
         if (result.rows.length === 0) {
           const { rows: existente } = await pool.query(
             `SELECT id
-            FROM prospectos
+            FROM crm_prospectos_comerciales
             WHERE chatwoot_conversation_id = $1
             LIMIT 1`,
             [chatwoot_conversation_id],
@@ -590,7 +597,8 @@ router.post("/api/prospectos/reasignar", express.json(), async (req, res) => {
         ON uc.id = p.creado_por
       LEFT JOIN usuarios ud
         ON ud.id = p.demo_responsable
-      WHERE p.chatwoot_conversation_id = $1
+      WHERE p.chatwoot_conversation_id = $1 AND p.eliminado_en IS NULL
+        AND p.estado NOT IN ('perdido','confirmado')
       LIMIT 1
       FOR UPDATE OF p
       `,
@@ -813,8 +821,15 @@ router.get("/api/prospectos/etapa-chatwoot/:conversationId", async (req, res) =>
   }
   try {
     const result = await pool.query(
-      `SELECT estado FROM prospectos WHERE chatwoot_conversation_id = $1
-       ORDER BY actualizado_en DESC NULLS LAST, id DESC LIMIT 1`,
+      `SELECT CASE WHEN EXISTS (
+          SELECT 1 FROM crm_chatwoot_exclusiones x
+           WHERE x.chatwoot_conversation_id=$1
+             AND x.motivo='cliente_activo'
+        ) THEN 'cliente_activo'
+        ELSE (SELECT estado FROM crm_prospectos_comerciales
+          WHERE chatwoot_conversation_id=$1
+          ORDER BY actualizado_en DESC NULLS LAST, id DESC LIMIT 1)
+        END AS estado`,
       [conversationId],
     );
     return res.json({ estado: result.rows[0]?.estado ?? null });
@@ -846,6 +861,31 @@ router.post("/api/control-ventas/evento", express.json(), async (req, res) => {
       error: "Falta chatwoot_conversation_id",
     });
   }
+
+  // Marcar cliente activo es una exclusión lógica irreversible por webhooks:
+  // conservar auditoría, cerrar tareas, excluirlo de todas las estadísticas.
+  if (evento === 'cliente_activo') {
+    try {
+      const { excluirConversacion } = require('../crm/exclusiones');
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await excluirConversacion(chatwoot_conversation_id, 'cliente_activo', client);
+        await client.query('COMMIT');
+      } catch(error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      } finally {client.release();}
+      return res.json({ok:true,excluido:true});
+    } catch (err) {
+      console.error('[CRM] No se pudo excluir cliente activo:',err);
+      return res.status(500).json({error:'No se pudo excluir cliente activo'});
+    }
+  }
+  const { rows: registrosExcluidos } = await pool.query(
+    'SELECT 1 FROM crm_chatwoot_exclusiones WHERE chatwoot_conversation_id=$1',
+    [chatwoot_conversation_id]);
+  if (registrosExcluidos.length) return res.json({ ok:true, excluido:true });
 
   const eventosPermitidos = [
     "ingreso",
@@ -956,7 +996,7 @@ if (evento === "consulta_erronea") {
     // era errónea, eliminarlo del circuito comercial.
     await client.query(
       `
-      DELETE FROM prospectos
+      UPDATE prospectos SET eliminado_en=COALESCE(eliminado_en,NOW()),actualizado_en=NOW()
       WHERE chatwoot_conversation_id = $1
       `,
       [chatwoot_conversation_id],
@@ -1112,7 +1152,7 @@ router.post(
     try {
       const { rows } = await pool.query(
         `SELECT id, estado
-       FROM prospectos
+       FROM crm_prospectos_comerciales
        WHERE chatwoot_conversation_id = $1
        LIMIT 1`,
         [chatwoot_conversation_id],
@@ -1124,6 +1164,19 @@ router.post(
 
       const prospecto = rows[0];
 
+      // Nunca reabrir pérdidas, clientes confirmados o fichas archivadas
+      // por eventos automáticos de Chatwoot. Exigen una nueva decisión humana.
+      if (['perdido','confirmado'].includes(prospecto.estado)) {
+        return res.status(409).json({
+          error:'Oportunidad cerrada: sólo se puede reabrir manualmente',
+          estado:prospecto.estado,
+        });
+      }
+      if (prospecto.estado !== estado &&
+          !((prospecto.estado==='prospecto' && estado==='sin_respuesta') ||
+            (prospecto.estado==='sin_respuesta' && estado==='prospecto'))) {
+        return res.status(409).json({ error:'Transición comercial no autorizada' });
+      }
       if (prospecto.estado === estado) {
         return res.json({
           ok: true,
@@ -1137,8 +1190,8 @@ router.post(
         `UPDATE prospectos
        SET estado = $2,
            actualizado_en = NOW()
-       WHERE id = $1`,
-        [prospecto.id, estado],
+       WHERE id = $1 AND estado=$3 AND eliminado_en IS NULL`,
+        [prospecto.id, estado, prospecto.estado],
       );
 
       await pool.query(
@@ -1362,13 +1415,25 @@ router.post("/prospectos/:id/eliminar", requireAuth, async (req, res) => {
   if (req.session.usuario.rol !== "admin") {
     return res.status(403).send("No autorizado");
   }
+  const db = await pool.connect();
   try {
-    await pool.query("DELETE FROM prospectos WHERE id=$1", [req.params.id]);
-    res.redirect("/panel");
+    await db.query('BEGIN');
+    const {rows: chats} = await db.query(`
+      SELECT chatwoot_conversation_id AS id FROM prospectos
+      WHERE id=$1 AND chatwoot_conversation_id IS NOT NULL
+      UNION SELECT chatwoot_conversation_id AS id
+      FROM prospectos_chatwoot_conversaciones WHERE prospecto_id=$1`, [req.params.id]);
+    const { excluirConversacion } = require('../crm/exclusiones');
+    for (const chat of chats) await excluirConversacion(chat.id, 'ficha_eliminada', db);
+    await db.query(`UPDATE prospectos SET eliminado_en=NOW(),eliminado_por=$2,actualizado_en=NOW()
+      WHERE id=$1 AND eliminado_en IS NULL`,[req.params.id,req.session.usuario.id]);
+    await db.query('COMMIT');
+    return res.redirect('/panel');
   } catch (err) {
-    console.error("Error eliminando prospecto:", err);
-    res.status(500).send("Error al eliminar");
-  }
+    await db.query('ROLLBACK').catch(()=>{});
+    console.error('Error eliminando prospecto:', err);
+    return res.status(500).send('Error al eliminar');
+  } finally { db.release(); }
 });
 
 // ─── DETALLE DE PROSPECTO ──────────────────────────────────────────────────────
@@ -1384,7 +1449,7 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
       LEFT JOIN usuarios uc ON p.creado_por = uc.id
       LEFT JOIN usuarios ud ON p.demo_responsable = ud.id
       LEFT JOIN usuarios ur ON p.relevamiento_completado_por = ur.id
-      WHERE p.id = $1
+      WHERE p.id = $1 AND p.eliminado_en IS NULL
     `,
       [req.params.id],
     );
@@ -1406,7 +1471,7 @@ router.get("/prospectos/:id", requireAuth, async (req, res) => {
     // desde esta misma ficha, sin alterar la asignación comercial de Chatwoot.
     const responsablesDemo = req.session.usuario.rol === 'admin' && p.estado === 'demo_coordinada'
       ? (await pool.query(`SELECT id,nombre,email FROM usuarios
-          WHERE activo=TRUE AND rol IN ('admin','vendedor','soporte') ORDER BY nombre`)).rows
+          WHERE activo=TRUE AND id <> 12 AND rol IN ('admin','vendedor','soporte') ORDER BY nombre`)).rows
       : [];
     const seguimientosHtml = await renderSeguimientosFicha(p, req.session.usuario, req.query.tarea);
     const gestionesCRM = await pool.query(`
@@ -2383,7 +2448,7 @@ router.post("/prospectos/:id/demo", requireAuth, async (req, res) => {
     }
 
     const { rows: responsableRows } = await pool.query(
-      "SELECT id, nombre FROM usuarios WHERE id=$1 AND activo=true",
+      "SELECT id, nombre FROM usuarios WHERE id=$1 AND activo=true AND id <> 12",
       [responsableId],
     );
 
@@ -3334,13 +3399,26 @@ router.post("/prospectos/:id/relevamiento", requireAuth, async (req, res) => {
           ],
         );
 
-        // Las gestiones pendientes salen de la agenda cuando cambia la etapa comercial.
+        // Cierre comercial: retirar de la agenda todas las tareas, incluso las
+        // pendientes por respuesta Chatwoot, sin borrar historial ni tocar Chatwoot.
         if (estadoAnterior && estadoAnterior !== estado) {
           try {
+            const cierreComercial = estado === 'perdido' || estado === 'confirmado';
             await pool.query(`UPDATE crm_tareas SET estado='cancelada',actualizada_en=NOW()
-              WHERE prospecto_id=$1 AND estado='pendiente' AND origen <> 'chatwoot'`, [req.params.id]);
+              WHERE prospecto_id=$1 AND estado='pendiente'
+                AND ($2::boolean OR origen <> 'chatwoot')`, [req.params.id,cierreComercial]);
+            if (cierreComercial) {
+              const chatsAsociados = `SELECT p.chatwoot_conversation_id FROM prospectos p
+                  WHERE p.id=$1 AND p.chatwoot_conversation_id IS NOT NULL
+                UNION SELECT v.chatwoot_conversation_id FROM prospectos_chatwoot_conversaciones v
+                  WHERE v.prospecto_id=$1`;
+              await pool.query(`UPDATE crm_tareas SET estado='cancelada',actualizada_en=NOW()
+                WHERE estado='pendiente' AND chatwoot_conversation_id IN (${chatsAsociados})`,[req.params.id]);
+              await pool.query(`UPDATE crm_chatwoot_estado SET requiere_respuesta=FALSE
+                WHERE chatwoot_conversation_id IN (${chatsAsociados})`,[req.params.id]);
+            }
           } catch (errorCRM) {
-            // Un error de agenda no debe impedir el cierre comercial ni los avisos al cliente.
+            // La agenda vuelve a depurar pendientes cerrados al cargar /crm.
             console.error('[CRM] No se pudieron retirar tareas de la etapa anterior:', errorCRM);
           }
         }
@@ -3627,7 +3705,7 @@ router.get("/prospectos/:id/editar", requireAuth, async (req, res) => {
       LEFT JOIN usuarios uc ON p.creado_por = uc.id
       LEFT JOIN usuarios ud ON p.demo_responsable = ud.id
       LEFT JOIN usuarios ur ON p.relevamiento_completado_por = ur.id
-      WHERE p.id = $1
+      WHERE p.id = $1 AND p.eliminado_en IS NULL
     `,
       [req.params.id],
     );

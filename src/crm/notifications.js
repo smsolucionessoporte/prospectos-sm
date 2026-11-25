@@ -3,6 +3,7 @@ const { pool } = require('../db');
 const { AGENTE_TELEFONO, telefonoVendedor } = require('../zoomAgentes');
 const { enviarPorChatwoot } = require('../zoomChatwoot');
 const { linkChatwoot } = require('./chatwoot-link');
+const { tareaDeProspectoAbierto, chatDeProspectoAbierto } = require('./cerrados');
 
 const ZONE = 'America/Argentina/Buenos_Aires';
 const appUrl = () => String(process.env.APP_URL || '').replace(/\/$/, '');
@@ -36,21 +37,22 @@ async function terminarAviso(id, enviado, error) {
 async function resumenParaVendedor(usuarioId) {
   const { rows: [r] } = await pool.query(`
     SELECT
-      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot' AND vence_en < NOW()) AS vencidas,
-      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot'
-         AND vence_en >= NOW() AND vence_en < NOW() + interval '1 day') AS proximas,
-      (SELECT COUNT(*)::int FROM crm_tareas WHERE responsable_id=$1 AND estado='pendiente'
-         AND origen <> 'chatwoot' AND vence_en IS NULL) AS sin_fecha,
-      (SELECT COUNT(DISTINCT p.id)::int FROM prospectos p
-         LEFT JOIN control_ventas cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
+      (SELECT COUNT(*)::int FROM crm_tareas t WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot' AND vence_en < NOW() AND ${tareaDeProspectoAbierto('t')}) AS vencidas,
+      (SELECT COUNT(*)::int FROM crm_tareas t WHERE responsable_id=$1 AND estado='pendiente' AND origen <> 'chatwoot'
+         AND vence_en >= NOW() AND vence_en < NOW() + interval '1 day' AND ${tareaDeProspectoAbierto('t')}) AS proximas,
+      (SELECT COUNT(*)::int FROM crm_tareas t WHERE responsable_id=$1 AND estado='pendiente'
+         AND origen <> 'chatwoot' AND vence_en IS NULL AND ${tareaDeProspectoAbierto('t')}) AS sin_fecha,
+      (SELECT COUNT(DISTINCT p.id)::int FROM crm_prospectos_comerciales p
+         LEFT JOIN crm_control_ventas_comercial cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
          WHERE COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)=$1
            AND p.estado NOT IN ('confirmado','perdido','demo_coordinada')
            AND p.actualizado_en >= NOW()-interval '45 days') AS oportunidades_abiertas,
       (SELECT COUNT(*)::int FROM crm_chatwoot_estado s
          WHERE s.responsable_id=$1 AND s.requiere_respuesta=TRUE
          AND s.ultima_revision >= NOW()-interval '30 minutes'
-         AND s.ultima_entrada >= NOW()-interval '14 days') AS mensajes_por_responder,
-      (SELECT COUNT(*)::int FROM prospectos p LEFT JOIN control_ventas cv
+         AND s.ultima_entrada >= NOW()-interval '14 days'
+         AND ${chatDeProspectoAbierto('s')}) AS mensajes_por_responder,
+      (SELECT COUNT(*)::int FROM crm_prospectos_comerciales p LEFT JOIN crm_control_ventas_comercial cv
          ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
          WHERE p.estado='demo_realizada' AND COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por)=$1) AS por_cerrar`, [usuarioId]);
   return r;
@@ -58,7 +60,8 @@ async function resumenParaVendedor(usuarioId) {
 
 async function enviarResumenVendedor() {
   if (process.env.CRM_ALERTAS_WHATSAPP !== 'true') return;
-  const { rows: usuarios } = await pool.query("SELECT id, nombre FROM usuarios WHERE activo=TRUE AND rol='vendedor' ORDER BY id");
+  await depurarPendientesCerrados();
+  const { rows: usuarios } = await pool.query("SELECT id, nombre FROM usuarios WHERE activo=TRUE AND rol='vendedor' AND id IN (8,13) ORDER BY id");
   for (const u of usuarios) {
     const tel = telefonoVendedor(u.id);
     if (!tel) { console.warn(`[CRM] Resumen omitido para usuario ${u.id}: falta teléfono de contacto`); continue; }
@@ -98,8 +101,8 @@ async function enviarResumenSupervisor() {
   const { rows: casos } = await pool.query(`
     SELECT u.nombre, COUNT(t.id)::int AS vencidas
     FROM usuarios u LEFT JOIN crm_tareas t ON t.responsable_id=u.id
-       AND t.estado='pendiente' AND t.vence_en < NOW()
-    WHERE u.activo=TRUE AND u.rol='vendedor'
+       AND t.estado='pendiente' AND t.vence_en < NOW() AND ${tareaDeProspectoAbierto('t')}
+    WHERE u.activo=TRUE AND u.rol='vendedor' AND u.id IN (8,13)
     GROUP BY u.id,u.nombre HAVING COUNT(t.id) > 0 ORDER BY vencidas DESC`);
   if (!casos.length) return;
   const aviso = await reclamarAviso('supervisor_tarde', id);
@@ -125,10 +128,11 @@ async function recordarMensajesSinResponder(hora) {
            (ARRAY_AGG(s.chatwoot_conversation_id ORDER BY s.ultima_entrada ASC))[1:12] AS conversaciones
     FROM crm_chatwoot_estado s
     JOIN usuarios u ON u.id=s.responsable_id
-    WHERE u.activo=TRUE AND u.rol='vendedor'
+    WHERE u.activo=TRUE AND u.rol='vendedor' AND u.id IN (8,13)
       AND s.requiere_respuesta=TRUE
       AND s.ultima_revision >= NOW()-interval '30 minutes'
       AND s.ultima_entrada >= NOW()-interval '14 days'
+      AND ${chatDeProspectoAbierto('s')}
     GROUP BY s.responsable_id,u.nombre`);
   for (const r of rows) {
     // Al menos una hora de trabajo real; nunca alertar por un chat viejo no verificado.
@@ -156,14 +160,15 @@ async function recordarSeguimientosProgramados() {
   if (process.env.CRM_ALERTAS_WHATSAPP !== 'true') return;
   const {rows: tareas} = await pool.query(`
     SELECT t.id,t.vence_en,t.descripcion,t.responsable_id,t.chatwoot_conversation_id,p.nombre_negocio,p.contacto
-    FROM crm_tareas t LEFT JOIN prospectos p ON p.id=t.prospecto_id
+    FROM crm_tareas t LEFT JOIN crm_prospectos_comerciales p ON p.id=t.prospecto_id
     JOIN usuarios u ON u.id=t.responsable_id
     WHERE t.estado='pendiente' AND t.origen <> 'chatwoot'
       AND t.recordatorio=TRUE AND t.vence_en <= NOW()
+      AND ${tareaDeProspectoAbierto('t')}
       AND NOT EXISTS (SELECT 1 FROM crm_recordatorios_tareas r
         WHERE r.tarea_id=t.id AND r.vence_en=t.vence_en
           AND (r.estado='enviado' OR r.creado_en > NOW()-interval '15 minutes'))
-      AND u.activo=TRUE ORDER BY t.vence_en ASC LIMIT 100`);
+      AND u.activo=TRUE AND u.id IN (8,13) ORDER BY t.vence_en ASC LIMIT 100`);
   for (const t of tareas) {
     const tel = telefonoVendedor(t.responsable_id);
     if (!tel) continue;
@@ -195,7 +200,15 @@ async function recordarSeguimientosProgramados() {
   }
 }
 
+async function depurarPendientesCerrados() {
+  await pool.query(`UPDATE crm_tareas t SET estado='cancelada',actualizada_en=NOW()
+    WHERE t.estado='pendiente' AND NOT (${tareaDeProspectoAbierto('t')})`);
+  await pool.query(`UPDATE crm_chatwoot_estado s SET requiere_respuesta=FALSE,ultima_revision=NOW()
+    WHERE s.requiere_respuesta=TRUE AND NOT (${chatDeProspectoAbierto('s')})`);
+}
+
 function iniciarAvisosCRM() {
+  cron.schedule('*/5 * * * *', () => depurarPendientesCerrados().catch(e=>console.error('[CRM] Depuración de pendientes:',e.message)), {timezone:ZONE});
   // Un solo cron por proceso. La restricción UNIQUE y el reclamo condicional bloquean duplicados entre réplicas.
   cron.schedule('*/15 9-16 * * 1-5', () => recordarSeguimientosProgramados().catch(e => console.error('[CRM] Recordatorio seguimiento:',e)), {timezone:ZONE});
   cron.schedule('0,15 9 * * 1-5', () => enviarResumenVendedor().catch(e => console.error('[CRM] Agenda:', e)), { timezone: ZONE });

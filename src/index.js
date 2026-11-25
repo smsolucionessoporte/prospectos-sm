@@ -11,8 +11,7 @@ const campaniasRoutes = require('./routes/campanias');
 const { iniciarProcesadorCampanias } = require('./routes/campanias');
 const { enviarPorChatwoot, enviarAvisoInterno, enviarMensajeSinReasignar, formatearFechaAR } = require('./zoomChatwoot');
 const { responsableCierre } = require('./routes/prospectos');
-const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID } = require('./zoomAgentes');
-const { registrarRutasZoomGiuliano } = require('./zoomGiuliano');
+const { AGENTE_ZOOM, AGENTE_TELEFONO, AGENTE_INBOX, AGENTE_CHATWOOT_ID, telefonoVendedor } = require('./zoomAgentes');
 const crmRoutes = require('./crm/routes');
 const { iniciarCRM } = require('./crm/schema');
 const { iniciarPruebaSchema, iniciarAvisosPrueba } = require('./crm/prueba');
@@ -28,8 +27,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('public'));
 
-// Callback OAuth de la cuenta Zoom independiente de Giuliano
-registrarRutasZoomGiuliano(app);
 
 app.use(session({
   store: new pgSession({ pool, tableName: 'session' }),
@@ -72,7 +69,7 @@ async function start() {
     iniciarAvisosMeet();
     iniciarSincronizacionCRM();
     await iniciarProcesadorCampanias();
-    //iniciarRecordatoriosRelevamiento();
+    iniciarRecordatoriosRelevamiento();
     //iniciarResumenDiario();
   } catch (err) {
     console.error('Error al iniciar:', err);
@@ -103,9 +100,10 @@ function iniciarRecordatorios() {
       const { rows } = await pool.query(`
         SELECT p.*, to_char(p.demo_fecha,'YYYY-MM-DD"T"HH24:MI') AS demo_fecha_local,
                u.nombre as demo_resp_nombre
-        FROM prospectos p
+        FROM crm_prospectos_comerciales p
         LEFT JOIN usuarios u ON p.demo_responsable = u.id
-        WHERE COALESCE(p.recordatorio_enviado, false) = false
+        WHERE p.estado = 'demo_coordinada'
+          AND COALESCE(p.recordatorio_enviado, false) = false
           AND p.demo_fecha IS NOT NULL
           AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') > now()
           AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') <= now() + interval '2 hours'
@@ -168,29 +166,38 @@ function iniciarRecordatorios() {
 // Revisa cada 5 minutos las demos que terminaron hace al menos 1 hora.
 // Si todavía no se cargó el relevamiento, avisa una sola vez al responsable.
 function iniciarRecordatoriosRelevamiento() {
+  let ejecutando = false;
   setInterval(async () => {
+    if(ejecutando) return;
+    const horario = new Date(Date.now() - 3*3600000);
+    if ([0,6].includes(horario.getUTCDay()) || horario.getUTCHours()<9 || horario.getUTCHours()>=17) return;
+    ejecutando = true;
     try {
       const { rows } = await pool.query(`
         SELECT
           p.*,
+          TO_CHAR(p.demo_fecha, 'DD/MM/YYYY HH24:MI') AS fecha_demo_argentina,
           u.nombre AS responsable_nombre
-        FROM prospectos p
+        FROM crm_prospectos_comerciales p
         LEFT JOIN usuarios u
           ON u.id = COALESCE(p.demo_responsable, p.creado_por)
         WHERE p.estado = 'demo_coordinada'
           AND p.demo_fecha IS NOT NULL
           AND p.relevamiento_fecha IS NULL
           AND COALESCE(p.recordatorio_relevamiento_enviado, false) = false
+          AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') >= now() - interval '7 days'
           AND (p.demo_fecha AT TIME ZONE 'America/Argentina/Buenos_Aires')
               <= now() - interval '1 hour'
       `);
 
       for (const p of rows) {
-        const responsableId =
-          p.demo_responsable || p.creado_por;
+        const {rows: owners} = await pool.query(`SELECT vendedor_id FROM crm_control_ventas_comercial
+          WHERE chatwoot_conversation_id=$1`,[p.chatwoot_conversation_id]);
+        const responsableId = Number(owners[0]?.vendedor_id || p.demo_responsable || p.creado_por);
 
-        const telefonoResponsable =
-          AGENTE_TELEFONO[responsableId];
+        const telefonoResponsable = [8,13].includes(Number(responsableId))
+          ? telefonoVendedor(responsableId)
+          : ([6,10].includes(Number(responsableId)) ? AGENTE_TELEFONO[responsableId] : null);
 
         if (!telefonoResponsable) {
           console.error(
@@ -207,16 +214,7 @@ function iniciarRecordatoriosRelevamiento() {
           p.contacto ||
           `Prospecto #${p.id}`;
 
-        const fechaDemo = new Date(p.demo_fecha).toLocaleString(
-          'es-AR',
-          {
-            day: '2-digit',
-            month: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'America/Argentina/Buenos_Aires',
-          }
-        );
+        const fechaDemo = p.fecha_demo_argentina;
 
         const mensaje = `📋 *Recordatorio de relevamiento*
 
@@ -266,7 +264,7 @@ Acordate de cargar el resultado de la demo en Prospectos.`;
         'Error buscando demos pendientes de relevamiento:',
         err.response?.data || err.message || err
       );
-    }
+    } finally { ejecutando = false; }
   }, 5 * 60 * 1000);
 }
 
@@ -288,7 +286,7 @@ async function enviarResumenDiario() {
       SELECT
         p.*,
         u.nombre AS responsable_nombre
-      FROM prospectos p
+      FROM crm_prospectos_comerciales p
       LEFT JOIN usuarios u
         ON u.id = COALESCE(p.demo_responsable, p.creado_por)
       WHERE p.estado IN (

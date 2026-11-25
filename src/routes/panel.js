@@ -144,7 +144,7 @@ const ORIGEN_LABEL = {
     // y después agrupo por estado en JS respetando el orden de ESTADOS.
     const totalResult = await pool.query(
       `SELECT COUNT(*) AS total
-      FROM prospectos p
+      FROM crm_prospectos_comerciales p
       ${whereClause}`,
       params,
     );
@@ -180,7 +180,7 @@ const ORIGEN_LABEL = {
           uc.nombre as creado_por_nombre,
           uc.rol as creado_por_rol,
           ud.nombre as demo_responsable_nombre
-        FROM prospectos p
+        FROM crm_prospectos_comerciales p
         LEFT JOIN usuarios uc ON p.creado_por = uc.id
         LEFT JOIN usuarios ud ON p.demo_responsable = ud.id
         ${whereClause}
@@ -1231,7 +1231,7 @@ const filtroUsuarioControl = esAdminControl
           cv.*,
           EXISTS (
             SELECT 1
-            FROM prospectos p
+            FROM crm_prospectos_comerciales p
             WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
               AND (
                 p.demo_fecha IS NOT NULL
@@ -1246,7 +1246,7 @@ const filtroUsuarioControl = esAdminControl
           ) AS llego_demo,
           EXISTS (
             SELECT 1
-            FROM prospectos p
+            FROM crm_prospectos_comerciales p
             WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
               AND (
                 p.estado = 'confirmado'
@@ -1258,7 +1258,7 @@ const filtroUsuarioControl = esAdminControl
                 )
               )
           ) AS confirmado
-        FROM control_ventas cv
+        FROM crm_control_ventas_comercial cv
         WHERE ${filtro}
       ),
       base AS (
@@ -1406,10 +1406,10 @@ const filtroUsuarioControl = esAdminControl
         COUNT(*) FILTER (WHERE cv.origen = 'google')::int AS google,
         COUNT(*) FILTER (WHERE cv.origen = 'web')::int AS web,
         COUNT(*) FILTER (WHERE cv.origen IS NULL OR cv.origen NOT IN ('meta', 'google', 'web'))::int AS otro
-      FROM control_ventas cv
+      FROM crm_control_ventas_comercial cv
       JOIN LATERAL (
         SELECT p.id, p.estado, p.motivo_perdida, p.demo_fecha
-        FROM prospectos p
+        FROM crm_prospectos_comerciales p
         WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
         ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC
         LIMIT 1
@@ -1460,10 +1460,10 @@ const gestionQuery = await pool.query(`
           AND h.estado_nuevo IN ('demo_coordinada','demo_realizada','prueba','confirmado')
         )
       ) AS efectivamente_derivado
-    FROM control_ventas cv
+    FROM crm_control_ventas_comercial cv
     LEFT JOIN LATERAL (
       SELECT p.id, p.estado, p.demo_fecha
-      FROM prospectos p
+      FROM crm_prospectos_comerciales p
       WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
       ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC
       LIMIT 1
@@ -1500,7 +1500,7 @@ const filtroVendedorEmbudo = esVendedorControl
 const embudoVendedores = await pool.query(`
   WITH vendedores AS (
     SELECT id, nombre FROM usuarios
-    WHERE activo = TRUE AND rol IN ('vendedor','admin')
+    WHERE activo = TRUE AND id <> 12 AND rol IN ('vendedor','admin')
   ), datos AS (
     SELECT v.id AS vendedor_id, v.nombre AS vendedor, cv.id,
       (
@@ -1527,9 +1527,9 @@ const embudoVendedores = await pool.query(`
       ) AS paso_demo_realizada,
       p.estado = 'confirmado' AS confirmado_actual,
       p.estado = 'perdido' AS perdido_actual
-    FROM control_ventas cv
+    FROM crm_control_ventas_comercial cv
     LEFT JOIN LATERAL (
-      SELECT p.* FROM prospectos p
+      SELECT p.* FROM crm_prospectos_comerciales p
       WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
       ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC LIMIT 1
     ) p ON TRUE
@@ -1554,7 +1554,7 @@ const filtroUsuarioResumen = esAdminControl
 const rendimiento = await pool.query(`
   WITH vendedores AS (
     SELECT u.id, u.nombre FROM usuarios u
-    WHERE u.activo = TRUE AND u.rol = 'vendedor'
+    WHERE u.activo = TRUE AND u.rol = 'vendedor' AND u.id <> 12
   )
   SELECT v.nombre AS vendedor,
     COUNT(cv.id) FILTER (
@@ -1575,7 +1575,7 @@ const rendimiento = await pool.query(`
         AND cv.fecha_primera_respuesta_vendedor >= cv.fecha_derivacion
     ))::int AS promedio_minutos
   FROM vendedores v
-  LEFT JOIN control_ventas cv ON cv.vendedor_id = v.id AND ${filtro}
+  LEFT JOIN crm_control_ventas_comercial cv ON cv.vendedor_id = v.id AND ${filtro}
   WHERE ${filtroUsuarioResumen}
   GROUP BY v.id, v.nombre ORDER BY v.nombre
 `, paramsResumenVendedores);
@@ -1587,11 +1587,11 @@ const alertasCandidatas = await pool.query(`
     v.nombre AS vendedor, cv.fecha_derivacion,
     cv.fecha_inicio_espera_vendedor, cv.fecha_primera_respuesta_vendedor,
     p.contacto, p.telefono
-  FROM control_ventas cv
+  FROM crm_control_ventas_comercial cv
   JOIN usuarios v ON v.id = cv.vendedor_id
-    AND v.activo = TRUE AND v.rol = 'vendedor'
+    AND v.activo = TRUE AND v.rol = 'vendedor' AND v.id <> 12
   LEFT JOIN LATERAL (
-    SELECT p.contacto, p.telefono, p.estado FROM prospectos p
+    SELECT p.contacto, p.telefono, p.estado FROM crm_prospectos_comerciales p
     WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
     ORDER BY p.actualizado_en DESC NULLS LAST, p.id DESC LIMIT 1
   ) p ON TRUE
@@ -1599,7 +1599,7 @@ const alertasCandidatas = await pool.query(`
     AND cv.derivado = TRUE
     AND cv.fecha_inicio_espera_vendedor IS NOT NULL
     AND cv.fecha_primera_respuesta_vendedor IS NULL
-    AND COALESCE(p.estado, 'prospecto') NOT IN ('confirmado', 'perdido')
+    AND COALESCE(p.estado, 'prospecto') NOT IN ('confirmado', 'perdido', 'demo_coordinada', 'demo_realizada')
   ORDER BY cv.fecha_inicio_espera_vendedor ASC
   LIMIT 100
 `, paramsResumenVendedores);

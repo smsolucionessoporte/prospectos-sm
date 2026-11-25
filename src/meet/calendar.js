@@ -47,7 +47,15 @@ async function googleAccessToken() {
     refresh_token:process.env.GOOGLE_CALENDAR_REFRESH_TOKEN,
   });
   const reply = await fetch('https://oauth2.googleapis.com/token',{method:'POST',body:params,signal:AbortSignal.timeout(12000)});
-  if (!reply.ok) throw new Error(`No se pudo autorizar Google Calendar (HTTP ${reply.status})`);
+  if (!reply.ok) {
+    let code='desconocido';
+    try {const body=await reply.json();
+      if (['invalid_grant','invalid_client','unauthorized_client','invalid_request','access_denied'].includes(body?.error))
+        code=body.error;
+    } catch {}
+    console.error('[MEET] OAuth Calendar rechazado', {status:reply.status,codigo:code});
+    throw new Error(`No se pudo autorizar Google Calendar (HTTP ${reply.status}, ${code}). Revisar credenciales OAuth / refresh token en Railway`);
+  }
   const data=await reply.json();
   if (!data.access_token) throw new Error('Google Calendar no devolvió un token');
   return data.access_token;

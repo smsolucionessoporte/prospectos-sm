@@ -1,6 +1,8 @@
 'use strict';
 // Vendedores Chatwoot habilitados: evitar que un mensaje enviado con el token técnico
 // de un administrador se tome por una respuesta comercial humana.
+// Incluye vendedores HISTÓRICOS para reconocer respuestas humanas anteriores.
+// No habilita asignaciones ni avisos a quienes ya no trabajan en la empresa.
 const IDS_VENDEDORES_CHATWOOT = new Set([4, 8, 11, 19]);
 const { businessMinutesBetween } = require('../salesBusinessTime');
 const ARG_OFFSET = 3 * 60 * 60 * 1000;

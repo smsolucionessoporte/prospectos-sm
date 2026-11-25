@@ -4,7 +4,6 @@ const AGENTE_ZOOM = {
   7: "danielgonzalezf98@gmail.com",         // Daniel
   8: "rafaelaltadonna@gmail.com",           // Rafael
   10: "romanfontanetcasas@gmail.com",        // Román
-  12: "giuliano69carabajal@gmail.com",       // Giuliano
 };
 
 const AGENTE_TELEFONO = {
@@ -12,7 +11,6 @@ const AGENTE_TELEFONO = {
   8: "+54 9 11 5564-4899", // Rafael
   10: "+54 9 11 6927-3611", // Román
   11: "+54 9 11 5403-7905", // Tomás
-  12: "+54 9 11 3274-6298", // Giuliano
   7: "+54 9 11 2478-5622", // Daniel (solo compatibilidad histórica)
   13: process.env.VENTAS_TELEFONO_SANTIAGO || undefined, // Obligatorio para avisos a Santiago
 
@@ -25,7 +23,6 @@ const AGENTE_CHATWOOT_ID = {
   4: 8,   // Rafael
   5: 10,  // Román
   13: 11, // Tomás
-  11: 12, // Giuliano
   19: 13, // Santiago
 
 };
@@ -41,11 +38,10 @@ const AGENTE_INBOX = {
 function telefonoVendedor(usuarioId) {
   const variables = {
     8: process.env.VENTAS_TELEFONO_RAFAEL,
-    12: process.env.VENTAS_TELEFONO_GIULIANO,
     13: process.env.VENTAS_TELEFONO_SANTIAGO,
   };
   // Solo vendedores actualmente habilitados: no reutilizar teléfono histórico de Daniel.
-  if (![8,12,13].includes(Number(usuarioId))) return null;
+  if (![8,13].includes(Number(usuarioId))) return null;
   const telefono = String(variables[usuarioId] || AGENTE_TELEFONO[usuarioId] || '').trim();
   return /^\+?[0-9 ()-]{10,25}$/.test(telefono) ? telefono : null;
 }

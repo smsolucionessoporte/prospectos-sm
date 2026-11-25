@@ -16,9 +16,9 @@ test('la respuesta humana posterior cancela la espera',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-10-28T14:00:00Z'),asesor(2,'2026-10-28T15:00:00Z')]},{ahora});
  assert.equal(r.requiereRespuesta,false);
 });
-test('si el último mensaje público lo envió el bot, no figura como esperando respuesta',()=>{
+test('si solo respondió el bot, sigue pendiente de respuesta humana comercial',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-10-28T14:00:00Z'),bot(2,'2026-10-28T15:00:00Z')]},{ahora});
- assert.equal(r.requiereRespuesta,false);
+ assert.equal(r.requiereRespuesta,true);
 });
 test('mensaje viejo queda fuera de las urgencias',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-09-05T12:00:00Z')]},{ahora});
@@ -37,9 +37,9 @@ test('la hora laboral no se consume durante el fin de semana',()=>{
  assert.equal(d.toISOString(),'2026-11-02T12:30:00.000Z');
 });
 
-test('el último mensaje saliente, aunque provenga de un token técnico, no es un mensaje del cliente',()=>{
+test('una salida con token técnico de un agente ajeno a ventas no acredita atención comercial',()=>{
  const r=evaluarConversacion({messages:[cliente(1,'2026-10-28T14:00:00Z'),{id:2,message_type:1,created_at:ts('2026-10-28T15:00:00Z'),sender:{type:'user',id:2}}]},{ahora});
- assert.equal(r.requiereRespuesta,false);
+ assert.equal(r.requiereRespuesta,true);
 });
 
 test('descartar ignora solo el último mensaje del cliente',()=>{

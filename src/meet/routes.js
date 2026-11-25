@@ -38,6 +38,25 @@ async function correoVendedorAsignado(id){
  const {rows}=await pool.query('SELECT email FROM usuarios WHERE id=$1 AND activo=TRUE LIMIT 1',[id]);
  return rows[0]?.email||null;
 }
+// Crear seguimiento visible en agenda al día siguiente de la demo (sin enviar otro mensaje al cliente).
+// Un único seguimiento por prospecto y fecha: se conserva si reinicia Railway.
+async function programarSeguimientoPostDemo(client,p,fecha,responsableId){
+ const vendedor=Number(responsableId);
+ if (![8,13].includes(vendedor)) {
+   console.warn('[MEET] Sin responsable comercial activo para seguimiento de demo',p.id,vendedor);
+   return;
+ }
+ await client.query(`INSERT INTO crm_tareas
+   (prospecto_id,chatwoot_conversation_id,responsable_id,tipo,descripcion,vence_en,
+    prioridad,estado,recordatorio,clave_automatica,origen,etapa_origen)
+   VALUES($1,$2,$3,'seguimiento',
+     'Registrar resultado de la demostración, contactar al prospecto y acordar próximo paso',
+     ($4::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires') + interval '1 hour',
+     'alta','pendiente',TRUE,$5,'sistema','demo_coordinada')
+   ON CONFLICT (clave_automatica) WHERE clave_automatica IS NOT NULL DO NOTHING`,
+   [p.id,p.chatwoot_conversation_id||null,vendedor,fecha,`postdemo:${p.id}:${fecha}`]);
+}
+
 async function guardarAvisos(client,p,clave,mensajeCliente,mensajeInterno){
  const seller=await vendedorAsignado(p);
  const id=Number(p.id), cid=p.chatwoot_conversation_id;
@@ -69,7 +88,10 @@ async function procesarAvisos(){
     let ok=false;
     if(n.destino==='cliente'){
       ok=await enviarMensajeSinReasignar(n.telefono,n.mensaje,n.conversacion);
-    }else if(n.destino==='vendedor')ok=await enviarAvisoInterno(n.mensaje,n.destinatario);
+    }else if(n.destino==='vendedor'){
+      if(![8,13].includes(Number(n.destinatario))) throw new Error('Responsable comercial inactivo: reasignar aviso antes del envío');
+      ok=await enviarAvisoInterno(n.mensaje,n.destinatario);
+    }
     else if(n.telefono)ok=await enviarMensajeSinReasignar(n.telefono,n.mensaje,n.conversacion);
     if(!ok)throw new Error('Chatwoot no confirmó el envío');
     await pool.query("UPDATE meet_avisos SET estado='enviado',actualizado_en=NOW() WHERE id=$1",[n.id]);
@@ -135,6 +157,9 @@ router.post('/demo/reservar',express.urlencoded({extended:false}),async(req,res)
    const text=mensajeDemo(p,slot.utc,slot.url,false);
    const m=`📅 *NUEVA INSCRIPCIÓN A DEMO GRUPAL*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} (Buenos Aires)\n🎥 ${slot.url}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
    await guardarAvisos(client,p,`inscripcion:${fecha}`,text,m);
+   await programarSeguimientoPostDemo(client,p,fecha,seller);
+   console.info('[MEET] Reserva grupal registrada; avisos al cliente y vendedor en cola',
+     { prospectoId:p.id, conversationId:cid, vendedorId:seller, turno:fecha });
   }
   await client.query('COMMIT');success=true;
  }catch(e){await client.query('ROLLBACK').catch(()=>{});console.error('[MEET] Error al reservar',e);return res.status(500).send(htmlReserva('',`<p class="error">No pudimos confirmar la solicitud. Probá de nuevo o escribile a tu asesor.</p>`));}
@@ -344,6 +369,7 @@ router.post('/prospectos/:id/demo',requireAuth,express.urlencoded({extended:fals
   const seller=await vendedorAsignado(p),text=mensajeDemo(p,slot.utc,url,custom,custom?meeting?.recordingEnabled===true:true);
   const intern=`${meetError?'⚠️ *REUNIÓN PENDIENTE DE CREACIÓN MANUAL*\nCreá la reunión de Google Meet y enviá el enlace al prospecto.\n\n':''}${meeting?.recordingWarning?'⚠️ *REUNIÓN CREADA SIN GRABACIÓN AUTOMÁTICA CONFIRMADA*\nEl enlace de Meet funciona; si corresponde, activá la grabación manualmente.\n\n':''}${meeting?.cohostWarning?'⚠️ *COANFITRIÓN NO CONFIRMADO*\n'+meeting.cohostWarning+'\nAsigná el rol manualmente antes de la demo.\n\n':''}📅 *DEMO COORDINADA*\n👤 ${p.contacto||p.nombre_negocio||'Prospecto'}\n📞 ${p.telefono||'—'}\n🗓️ ${fecha.replace('T',' ')} Buenos Aires\n🎥 ${url||'PENDIENTE: crear y enviar enlace manualmente'}\n👨‍💼 Vendedor: ${seller||'Sin identificar'}\n🔗 ${SITE()}/prospectos/${p.id}\n\n📣 Coordiná con quien realizará la demostración.`;
   await guardarAvisos(client,p,`manual:${fecha}`,text,intern);
+  await programarSeguimientoPostDemo(client,p,fecha,seller);
   await client.query('COMMIT');
   if(custom&&req.session)delete req.session.meetPendiente;
   setImmediate(()=>procesarAvisos().catch(console.error));

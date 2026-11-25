@@ -8,12 +8,11 @@ test('Rafael recibe un solo aviso individual', () => {
     { destino: 'vendedor', destinatario: 8, telefono: null, conversacion: null, mensaje: 'Demo' }
   ]);
 });
-test('Giuliano y Santiago reciben únicamente sus propios avisos', () => {
-  for (const id of [12, 13]) {
-    const avisos = destinatariosDemo(id, 'Demo');
-    assert.equal(avisos.length, 1);
-    assert.equal(avisos[0].destinatario, id);
-  }
+test('Santiago recibe avisos y Giuliano queda excluido', () => {
+  assert.deepEqual(destinatariosDemo(12, 'Demo'), []);
+  const avisos = destinatariosDemo(13, 'Demo');
+  assert.equal(avisos.length, 1);
+  assert.equal(avisos[0].destinatario, 13);
 });
 test('Marisol y Román solo reciben aviso cuando son responsables de prospecto interno', () => {
   assert.deepEqual(destinatariosDemo(6, 'Demo', { 6: '+54911666', 10: '+54910777' }).map(x => x.destinatario), [6]);
