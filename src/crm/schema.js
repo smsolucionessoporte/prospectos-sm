@@ -53,6 +53,37 @@ async function iniciarCRM() {
       requiere_respuesta BOOLEAN NOT NULL DEFAULT FALSE,
       ultima_revision TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    -- Las fichas eliminadas quedan archivadas y fuera de las métricas, sin destruir historial.
+    ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS eliminado_en TIMESTAMPTZ;
+    ALTER TABLE prospectos ADD COLUMN IF NOT EXISTS eliminado_por INTEGER REFERENCES usuarios(id);
+    -- Exclusión lógica persistente: cliente existente o ficha descartada no son leads nuevos.
+    -- No se borran datos históricos de auditoría ni se altera Chatwoot.
+    CREATE TABLE IF NOT EXISTS crm_chatwoot_exclusiones (
+      chatwoot_conversation_id BIGINT PRIMARY KEY,
+      motivo VARCHAR(40) NOT NULL,
+      excluido_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_prospectos_no_eliminados ON prospectos(id) WHERE eliminado_en IS NULL;
+    CREATE OR REPLACE VIEW crm_control_ventas_comercial AS
+      SELECT cv.* FROM control_ventas cv WHERE NOT EXISTS (
+        SELECT 1 FROM crm_chatwoot_exclusiones x
+        WHERE x.chatwoot_conversation_id=cv.chatwoot_conversation_id
+           OR EXISTS (SELECT 1 FROM prospectos_chatwoot_conversaciones v
+             WHERE v.chatwoot_conversation_id=cv.chatwoot_conversation_id
+               AND v.prospecto_id IN (SELECT p.id FROM prospectos p
+                 WHERE p.chatwoot_conversation_id=x.chatwoot_conversation_id))
+      ) AND NOT EXISTS (SELECT 1 FROM prospectos p
+        WHERE p.eliminado_en IS NOT NULL AND
+        (p.chatwoot_conversation_id=cv.chatwoot_conversation_id OR
+          EXISTS (SELECT 1 FROM prospectos_chatwoot_conversaciones v
+            WHERE v.prospecto_id=p.id AND v.chatwoot_conversation_id=cv.chatwoot_conversation_id)));
+    CREATE OR REPLACE VIEW crm_prospectos_comerciales AS
+      SELECT p.* FROM prospectos p WHERE p.eliminado_en IS NULL AND NOT EXISTS (
+        SELECT 1 FROM crm_chatwoot_exclusiones x
+        WHERE x.chatwoot_conversation_id=p.chatwoot_conversation_id
+           OR EXISTS (SELECT 1 FROM prospectos_chatwoot_conversaciones v
+               WHERE v.prospecto_id=p.id AND v.chatwoot_conversation_id=x.chatwoot_conversation_id)
+      );
     -- Tombstones de conversaciones realmente eliminadas en Chatwoot.
     -- Nunca borrar control_ventas ni prospectos: preservamos auditoría histórica.
     CREATE TABLE IF NOT EXISTS crm_chatwoot_inexistentes (

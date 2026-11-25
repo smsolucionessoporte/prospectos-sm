@@ -1,0 +1,32 @@
+SM Comercial — 04/11/2026
+FIX CLIENTE ACTIVO, PROSPECTOS CERRADOS Y TAREAS HUERFANAS
+
+BASE: ultima copia local disponible de SM Prospectos, incorporando los fixes previos de Meet y correccion silenciosa de responsables. Este ZIP SOLO trae archivos modificados; no reemplaces el proyecto completo.
+
+Cambios:
+1) Cliente activo: al recibir evento de Chatwoot, crear exclusion persistente por conversation ID y archivar ficha asociada, sin borrarla fisicamente.
+2) Al eliminar ficha por interfaz: baja logica, se conserva historial, se cierran pendientes y se impide recreacion de la misma conversacion.
+3) Perdido y confirmado: tareas y requerimientos de respuesta quedan fuera de agenda; depuracion cada 5 minutos.
+4) Estadisticas: vista crm_control_ventas_comercial y crm_prospectos_comerciales excluyen clientes activos/archivados. Historial bruto intacto.
+5) Campanias: revalidar exclusion y cierre antes de enviar.
+6) Recordatorios: no enviar demos de fichas archivadas / sin estado demo_coordinada.
+7) API estado-chatwoot: no reabrir perdido o confirmado por automatizacion.
+
+NO hay cambios en src/meet/* ni en src/zoomChatwoot.js ni en las reglas de notificaciones de responsables.
+
+Despliegue desde la raiz del proyecto CRM tras revisar el diff:
+  node --check src/routes/prospectos.js
+  node --test src/crm/exclusiones.test.js src/crm/cerrados.test.js src/crm/agenda.test.js src/crm/resumen-agenda.test.js src/crm/notifications-sql.test.js
+  git add src
+  git commit -m "fix: excluir clientes activos y evitar pendientes de cerrados"
+  git push
+
+Las nuevas columnas/tablas/vistas se crean durante el inicio del CRM desde iniciarCRM().
+NO ejecutar SQL en la base de Chatwoot ni en la del bot: es para PostgreSQL de prospectos-sm.
+Asegurar backup y verificar que Railway Deployments muestre la revision NUEVA Active.
+Luego ejecutar 01_diagnostico_previo.sql y 02_corregir_celihaus_y_andrea.sql (si Celihaus ya esta perdido).
+Finalizar con 03_auditoria_post_deploy.sql.
+
+Pruebas: 28 pruebas focalizadas aprobadas y sintaxis Node valida. No hubo pruebas de integracion contra Railway / DB real.
+
+LIMITACIONES: conteos historicos ya enviados a reportes externos o cache no se recalculan por este parche; los reportes que sigan consultando control_ventas directamente fuera de estos modulos podrian requerir actualizarse a las vistas. Si aparecen nuevos chats con nuevo conversation_id sin etiqueta cliente-activo, se necesita deteccion adicional por maestro de clientes.

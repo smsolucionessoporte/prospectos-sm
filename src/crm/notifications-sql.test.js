@@ -15,7 +15,7 @@ const fakePool = {
       rows: [{ vencidas: 1, proximas: 0, mensajes_por_responder: 0, por_cerrar: 0 }]
     };
     if (sql.includes('INSERT INTO crm_avisos')) return { rows: [{ id: 90 }] };
-    if (sql.includes('FROM crm_tareas t LEFT JOIN prospectos')) return { rows: [{
+    if (sql.includes('FROM crm_tareas t LEFT JOIN crm_prospectos_comerciales')) return { rows: [{
       id: 501, vence_en: new Date('2026-10-30T16:00:00-03:00'),
       descripcion: 'Coordinar demo', responsable_id: 12,
       chatwoot_conversation_id: 3150, nombre_negocio: 'Prueba', contacto: null

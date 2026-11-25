@@ -36,7 +36,7 @@ function buildEligibility({ origen, desde, hasta }, startIndex = 1) {
     'cv.derivado = FALSE',
     `NOT EXISTS (
       SELECT 1
-      FROM prospectos p
+      FROM crm_prospectos_comerciales p
       WHERE p.chatwoot_conversation_id = cv.chatwoot_conversation_id
         AND p.estado IN ('confirmado', 'perdido')
     )`,
@@ -68,7 +68,7 @@ async function countEligible(filters) {
   const { where, params } = buildEligibility(filters, 1);
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS total
-       FROM control_ventas cv
+       FROM crm_control_ventas_comercial cv
       WHERE ${where}`,
     params,
   );
@@ -287,7 +287,7 @@ router.post(
            campania_id, chatwoot_conversation_id, estado
          )
          SELECT $1, cv.chatwoot_conversation_id, 'pendiente'
-         FROM control_ventas cv
+         FROM crm_control_ventas_comercial cv
          WHERE ${where}
          ON CONFLICT (campania_id, chatwoot_conversation_id) DO NOTHING`,
         [campaniaId, ...params],
@@ -394,14 +394,22 @@ async function procesarCampaniasPendientes() {
       try {
         const { rows: control } = await pool.query(
           `SELECT respondio_cliente, clasificacion, derivado
-             FROM control_ventas
+             FROM crm_control_ventas_comercial
             WHERE chatwoot_conversation_id = $1
             LIMIT 1`,
           [d.chatwoot_conversation_id],
         );
         const actual = control[0];
+        const {rows: exclusiones} = await pool.query(`
+          SELECT 1 FROM crm_chatwoot_exclusiones WHERE chatwoot_conversation_id=$1
+          UNION ALL
+          SELECT 1 FROM prospectos p WHERE (p.chatwoot_conversation_id=$1
+            OR EXISTS (SELECT 1 FROM prospectos_chatwoot_conversaciones v
+              WHERE v.prospecto_id=p.id AND v.chatwoot_conversation_id=$1))
+            AND (p.estado IN ('perdido','confirmado') OR p.eliminado_en IS NOT NULL)
+          LIMIT 1`, [d.chatwoot_conversation_id]);
         if (
-          !actual ||
+          !actual || exclusiones.length > 0 ||
           actual.respondio_cliente === true ||
           actual.clasificacion === 'consulta_erronea' ||
           actual.derivado === true

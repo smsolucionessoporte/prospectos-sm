@@ -5,6 +5,7 @@ const { requireAuth, requireRol, layout } = require('../middleware/auth');
 const { router: seguimientosRouter } = require('./seguimientos');
 const { seleccionarAgendaHoy } = require('./agenda');
 const { pasoPorEstado } = require('./pasos');
+const { tareaDeProspectoAbierto, chatDeProspectoAbierto } = require('./cerrados');
 const router = express.Router();
 router.use(seguimientosRouter);
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
@@ -78,16 +79,19 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
       FROM crm_chatwoot_estado s
       LEFT JOIN usuarios u ON u.id=s.responsable_id
       LEFT JOIN LATERAL (
-        SELECT p.id,p.contacto,p.nombre_negocio,p.estado,p.demo_fecha FROM prospectos p
+        SELECT p.id,p.contacto,p.nombre_negocio,p.estado,p.demo_fecha FROM crm_prospectos_comerciales p
         WHERE p.chatwoot_conversation_id=s.chatwoot_conversation_id OR EXISTS
           (SELECT 1 FROM prospectos_chatwoot_conversaciones v
            WHERE v.prospecto_id=p.id AND v.chatwoot_conversation_id=s.chatwoot_conversation_id)
         ORDER BY p.id DESC LIMIT 1
       ) p ON TRUE
       WHERE ${owner} AND s.requiere_respuesta=TRUE
+        AND NOT EXISTS (SELECT 1 FROM crm_chatwoot_exclusiones x
+          WHERE x.chatwoot_conversation_id=s.chatwoot_conversation_id)
         AND s.ultima_revision >= NOW()-interval '30 minutes'
         AND s.ultima_entrada >= NOW()-interval '14 days'
         AND COALESCE(p.estado,'prospecto') NOT IN ('confirmado','perdido')
+        AND ${chatDeProspectoAbierto('s')}
       ORDER BY s.ultima_entrada ASC LIMIT 100`,params);
     const ver = supervisor(usuario)
       ? await pool.query('SELECT MAX(ultima_revision) AS revisado FROM crm_chatwoot_estado')
@@ -97,11 +101,16 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
     const sinSync = !configuracion() || !ultimaRevision || Date.now()-new Date(ultimaRevision).getTime() >= 30*60000;
     const errSync = estadoSincronizacion().errores || 0;
 
-    // Retirar de la agenda los compromisos de etapas ya cambiadas, incluidos cambios desde otras integraciones.
+    // Limpiar tareas heredadas de prospectos cerrados, incluso tareas Chatwoot
+    // creadas antes del cierre o sin prospecto_id. No se modifica Chatwoot.
     await pool.query(`UPDATE crm_tareas t SET estado='cancelada',actualizada_en=NOW()
-      FROM prospectos p WHERE t.prospecto_id=p.id AND t.estado='pendiente' AND t.origen <> 'chatwoot'
-        AND (p.estado IN ('confirmado','perdido') OR
-             (t.etapa_origen IS NOT NULL AND t.etapa_origen IS DISTINCT FROM p.estado))`);
+      WHERE t.estado='pendiente' AND (
+        NOT (${tareaDeProspectoAbierto('t')}) OR
+        (t.origen <> 'chatwoot' AND EXISTS (SELECT 1 FROM crm_prospectos_comerciales p
+          WHERE p.id=t.prospecto_id AND t.etapa_origen IS NOT NULL
+            AND t.etapa_origen IS DISTINCT FROM p.estado)))`);
+    await pool.query(`UPDATE crm_chatwoot_estado s SET requiere_respuesta=FALSE
+      WHERE s.requiere_respuesta=TRUE AND NOT (${chatDeProspectoAbierto('s')})`);
 
     // Demo realizada: seguimiento inicial automático, prioridad alta y plazo de 24 h corridas desde el cambio de etapa.
     await pool.query(`
@@ -111,7 +120,7 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
              'cierre','Contactar después de la demostración y definir próximo paso',
              (p.actualizado_en AT TIME ZONE 'America/Argentina/Buenos_Aires') + interval '1 day',
              'alta','demo','cierre:'||p.id,'demo_realizada'
-      FROM prospectos p LEFT JOIN control_ventas cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
+      FROM crm_prospectos_comerciales p LEFT JOIN crm_control_ventas_comercial cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
       WHERE p.estado='demo_realizada' AND p.actualizado_en >= NOW()-interval '30 days'
         AND COALESCE(cv.vendedor_id,p.demo_responsable,p.creado_por) IS NOT NULL
       ON CONFLICT (clave_automatica) WHERE clave_automatica IS NOT NULL DO NOTHING`);
@@ -123,10 +132,11 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
         to_char(p.demo_fecha, 'YYYY-MM-DD"T"HH24:MI:SS') AS demo_fecha_local,
         u.nombre AS responsable_nombre,s.inbox_id
       FROM crm_tareas t
-      LEFT JOIN prospectos p ON p.id=t.prospecto_id
+      LEFT JOIN crm_prospectos_comerciales p ON p.id=t.prospecto_id
       LEFT JOIN usuarios u ON u.id=t.responsable_id
       LEFT JOIN crm_chatwoot_estado s ON s.chatwoot_conversation_id=t.chatwoot_conversation_id
       WHERE t.estado='pendiente' AND ${condT}
+        AND ${tareaDeProspectoAbierto('t')}
         AND (t.origen <> 'chatwoot' OR (s.requiere_respuesta=TRUE AND s.ultima_revision>=NOW()-interval '30 minutes'))
       ORDER BY t.vence_en ASC LIMIT 2000`,pt);
 
@@ -137,10 +147,10 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
       SELECT p.id AS prospecto_id,COALESCE(cv.chatwoot_conversation_id,p.chatwoot_conversation_id) AS chatwoot_conversation_id,p.nombre_negocio,p.contacto,
         p.estado,p.prueba_vence,to_char(p.demo_fecha, 'YYYY-MM-DD"T"HH24:MI:SS') AS demo_fecha_local,
         u.nombre AS responsable_nombre,s.nombre_contacto,s.inbox_id,s.ultima_entrada
-      FROM prospectos p
+      FROM crm_prospectos_comerciales p
       LEFT JOIN LATERAL (
         SELECT cv.vendedor_id,cv.chatwoot_conversation_id
-        FROM control_ventas cv
+        FROM crm_control_ventas_comercial cv
         WHERE cv.chatwoot_conversation_id=p.chatwoot_conversation_id
            OR EXISTS (SELECT 1 FROM prospectos_chatwoot_conversaciones v
                       WHERE v.prospecto_id=p.id AND v.chatwoot_conversation_id=cv.chatwoot_conversation_id)
@@ -160,7 +170,7 @@ router.get('/crm', requireAuth, requireRol('vendedor'), async (req,res) => {
     const {rows:demos}=await pool.query(`
       SELECT p.id,p.contacto,p.nombre_negocio,p.demo_fecha,p.chatwoot_conversation_id,
         to_char(p.demo_fecha, 'YYYY-MM-DD"T"HH24:MI:SS') AS demo_fecha_local
-      FROM prospectos p LEFT JOIN control_ventas cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
+      FROM crm_prospectos_comerciales p LEFT JOIN crm_control_ventas_comercial cv ON cv.chatwoot_conversation_id=p.chatwoot_conversation_id
       WHERE p.estado='demo_coordinada' AND p.demo_fecha IS NOT NULL AND ${condD}
       ORDER BY p.demo_fecha ASC LIMIT 50`,pd);
 

@@ -4,6 +4,7 @@ const axios = require('axios');
 const { pool } = require('../db');
 const { AGENTE_CHATWOOT_ID } = require('../zoomAgentes');
 const { esContactoInterno, tieneAtributoInterno, esGrupoWhatsapp } = require('./internal-contact');
+const { tieneEtiquetaClienteActivo, excluirConversacion } = require('./exclusiones');
 
 const VENTANA_DIAS = 45;
 const MAX_POR_RONDA = 40;
@@ -101,6 +102,9 @@ async function registrarConversacionInexistente(chatId) {
 }
 
 async function grabarRevision(row, chat) {
+  const {rows: excluida} = await pool.query(`SELECT 1 FROM crm_chatwoot_exclusiones
+    WHERE chatwoot_conversation_id=$1`, [row.chatwoot_conversation_id]);
+  if (excluida.length) return false;
   const id = Number(row.chatwoot_conversation_id);
   const meta = chat.meta || {};
   const contacto = limpiar(meta.sender?.name || chat.contact?.name || chat.contact?.available_name || row.contacto || row.nombre_negocio) || `Conversación #${id}`;
@@ -192,6 +196,9 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
       ) p ON TRUE
       LEFT JOIN crm_chatwoot_estado s ON s.chatwoot_conversation_id=cv.chatwoot_conversation_id
       WHERE NOT EXISTS (
+        SELECT 1 FROM crm_chatwoot_exclusiones x
+        WHERE x.chatwoot_conversation_id=cv.chatwoot_conversation_id
+      ) AND NOT EXISTS (
         SELECT 1 FROM crm_chatwoot_inexistentes ci
         WHERE ci.chatwoot_conversation_id=cv.chatwoot_conversation_id
       ) AND (cv.derivado=TRUE OR (cv.vendedor_id IS NOT NULL AND cv.fecha_ingreso >= NOW()-interval '14 days'))
@@ -207,7 +214,10 @@ async function sincronizarCRM({ usuarioId = null, limite = MAX_POR_RONDA } = {})
       await Promise.all(candidatos.rows.slice(i, i + 2).map(async row => {
         try {
           const chat = await detalleChatwoot(cfg, row.chatwoot_conversation_id);
-          if (await esConversacionExcluida(cfg, chat)) {
+          if (tieneEtiquetaClienteActivo(chat)) {
+            await excluirConversacion(row.chatwoot_conversation_id, 'cliente_activo');
+            console.info(`[CRM] Cliente activo #${row.chatwoot_conversation_id}: excluido de agendas y estadísticas`);
+          } else if (await esConversacionExcluida(cfg, chat)) {
             await excluirDeAgenda(row.chatwoot_conversation_id);
           } else {
             await grabarRevision(row, chat);
